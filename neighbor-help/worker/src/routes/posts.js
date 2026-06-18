@@ -1,7 +1,7 @@
 // /api 路由:菜单、个人资料、帖子与评论。Hono 子应用。
 // 公开接口直接挂;需登录接口加 authRequired 中间件,handler 用 c.get('userId') 取当前用户。
 import { Hono } from 'hono'
-import { hashPassword, verifyPassword, signJWT, genId, bumpTokenVersion } from '../auth.js'
+import { hashPassword, verifyPassword, signJWT, genId, bumpTokenVersion, verifyAuth } from '../auth.js'
 import { success, fail, CODE } from '../response.js'
 import { LIMITS, requireText, optionalText, escapeLike } from '../validate.js'
 import { authRequired } from '../middleware.js'
@@ -53,7 +53,8 @@ api.post('/posts/list', async (c) => {
   }
   const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : ''
 
-  const listSql = `SELECT p.*, u.nickname, u.building, u.unit, (SELECT COUNT(*) FROM comments WHERE post_id=p.id) AS comment_count FROM posts p JOIN users u ON p.user_id=u.id ${whereSql} ORDER BY p.created_at DESC LIMIT ? OFFSET ?`
+  // last_reply_at:该帖最近一条评论时间,无评论时为 NULL,前端据此显示"最近回复/发布"时间
+  const listSql = `SELECT p.*, u.nickname, u.building, u.unit, (SELECT COUNT(*) FROM comments WHERE post_id=p.id) AS comment_count, (SELECT MAX(created_at) FROM comments WHERE post_id=p.id) AS last_reply_at FROM posts p JOIN users u ON p.user_id=u.id ${whereSql} ORDER BY p.created_at DESC LIMIT ? OFFSET ?`
   const countSql = `SELECT COUNT(*) AS n FROM posts p ${whereSql}`
 
   const [{ results: list }, countRow] = await Promise.all([
@@ -75,7 +76,19 @@ api.post('/posts/detail', async (c) => {
   const { results: comments } = await c.env.DB.prepare(
     'SELECT c.*, u.nickname, u.building FROM comments c JOIN users u ON c.user_id=u.id WHERE c.post_id=? ORDER BY c.created_at ASC'
   ).bind(id).all()
-  return success({ ...post, comments })
+  // 已采纳的帮助者(完成帖会有)
+  const { results: helpers } = await c.env.DB.prepare(
+    'SELECT h.helper_id, h.thanked, u.nickname, u.building FROM post_helpers h JOIN users u ON u.id=h.helper_id WHERE h.post_id=? ORDER BY h.created_at ASC'
+  ).bind(id).all()
+  // 响应者(公开展示)+ 当前用户是否已响应
+  const { results: responses } = await c.env.DB.prepare(
+    'SELECT r.user_id, u.nickname, u.building FROM post_responses r JOIN users u ON u.id=r.user_id WHERE r.post_id=? ORDER BY r.created_at ASC'
+  ).bind(id).all()
+  // 可选鉴权:解析当前用户(未登录则为 null),用于标记 myResponded
+  const auth = await verifyAuth(c.req.raw, c.env)
+  const myId = auth?.userId || null
+  const myResponded = myId ? (responses || []).some(r => r.user_id === myId) : false
+  return success({ ...post, comments, helpers, responses, myResponded })
 })
 
 // ===== 需登录接口(authRequired 中间件)=====
@@ -136,8 +149,7 @@ api.post('/me/logout', authRequired, async (c) => {
   return success({ success: true })
 })
 
-// POST /api/me/posts —— 我发布的帖子,参数 { page, status } 走 body,返回 { list, total, page, hasMore }
-// status 取 'open'/'closed',其余值(含空)表示全部
+// POST /api/me/posts —— 我发布的帖子,参数 { page, status } 走 body,返回 { list, total, page, hasMore }// status 取 'open'/'closed',其余值(含空)表示全部
 api.post('/me/posts', authRequired, async (c) => {
   const userId = c.get('userId')
   const { page: rawPage, status } = await bodyOf(c)
@@ -164,13 +176,27 @@ api.post('/me/posts', authRequired, async (c) => {
   return success({ list, total, page, hasMore: offset + list.length < total })
 })
 
+// POST /api/me/stats —— 个人页数据统计(基于采纳记录 post_helpers)
+//   helped:   我被别人采纳为帮助者的次数(我真的帮了邻居,且被点名)
+//   received: 我的帖子里采纳帮助者的条数(我得到的有效帮助)
+api.post('/me/stats', authRequired, async (c) => {
+  const userId = c.get('userId')
+  const [helped, received] = await Promise.all([
+    c.env.DB.prepare('SELECT COUNT(*) AS n FROM post_helpers WHERE helper_id = ?').bind(userId).first(),
+    c.env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM post_helpers h JOIN posts p ON p.id = h.post_id WHERE p.user_id = ?`
+    ).bind(userId).first(),
+  ])
+  return success({ helped: helped?.n ?? 0, received: received?.n ?? 0 })
+})
+
 // POST /api/posts/create —— 发布帖子
 api.post('/posts/create', authRequired, async (c) => {
   const userId = c.get('userId')
   // 限流:防刷帖
   const rl = await rateLimit(c.env, `post:${userId}`, POST_RL_LIMIT, POST_RL_WINDOW_MS)
   if (rl.limited) return fail(CODE.TOO_MANY_REQUESTS, `发布过于频繁,请${rl.retryAfter}秒后再试`)
-  const { type, title, content, images } = await bodyOf(c)
+  const { type, title, content, images, contact, location } = await bodyOf(c)
   // type 必须是已知菜单值
   if (!type || !MENUS.some(m => m.value === type)) {
     return fail(CODE.POST_MISSING_FIELD, '请选择有效的服务类型')
@@ -179,17 +205,27 @@ api.post('/posts/create', authRequired, async (c) => {
   if (!t.ok) return fail(CODE.POST_MISSING_FIELD, t.message)
   const ct = optionalText(content, LIMITS.content, '内容')
   if (!ct.ok) return fail(CODE.INVALID_INPUT, ct.message)
+  const cont = optionalText(contact, LIMITS.contact, '联系方式')
+  if (!cont.ok) return fail(CODE.INVALID_INPUT, cont.message)
+  const loc = optionalText(location, LIMITS.location, '位置')
+  if (!loc.ok) return fail(CODE.INVALID_INPUT, loc.message)
+  // 位置默认带入发帖人资料的楼栋单元(用户未填时)
+  let locValue = loc.value
+  if (!locValue) {
+    const me = await c.env.DB.prepare('SELECT building, unit FROM users WHERE id=?').bind(userId).first()
+    locValue = [me?.building, me?.unit].filter(Boolean).join(' ')
+  }
   const id = genId()
   await c.env.DB.prepare(
-    'INSERT INTO posts (id, user_id, type, title, content, images, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).bind(id, userId, type, t.value, ct.value, JSON.stringify(images || []), Date.now()).run()
+    'INSERT INTO posts (id, user_id, type, title, content, images, contact, location, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(id, userId, type, t.value, ct.value, JSON.stringify(images || []), cont.value, locValue, Date.now()).run()
   return success({ id })
 })
 
 // POST /api/posts/update —— 编辑帖子(仅作者、仅 open 状态),参数 { id, type, title, content, images }
 api.post('/posts/update', authRequired, async (c) => {
   const userId = c.get('userId')
-  const { id, type, title, content, images } = await bodyOf(c)
+  const { id, type, title, content, images, contact, location } = await bodyOf(c)
   // 先取帖子,校验归属与状态
   const post = await c.env.DB.prepare('SELECT user_id, status FROM posts WHERE id = ?').bind(id).first()
   if (!post || post.user_id !== userId) return fail(CODE.POST_NOT_FOUND, '帖子不存在或无权操作')
@@ -202,8 +238,12 @@ api.post('/posts/update', authRequired, async (c) => {
   if (!t.ok) return fail(CODE.POST_MISSING_FIELD, t.message)
   const ct = optionalText(content, LIMITS.content, '内容')
   if (!ct.ok) return fail(CODE.INVALID_INPUT, ct.message)
-  await c.env.DB.prepare('UPDATE posts SET type=?, title=?, content=?, images=? WHERE id=? AND user_id=?')
-    .bind(type, t.value, ct.value, JSON.stringify(images || []), id, userId).run()
+  const cont = optionalText(contact, LIMITS.contact, '联系方式')
+  if (!cont.ok) return fail(CODE.INVALID_INPUT, cont.message)
+  const loc = optionalText(location, LIMITS.location, '位置')
+  if (!loc.ok) return fail(CODE.INVALID_INPUT, loc.message)
+  await c.env.DB.prepare('UPDATE posts SET type=?, title=?, content=?, images=?, contact=?, location=? WHERE id=? AND user_id=?')
+    .bind(type, t.value, ct.value, JSON.stringify(images || []), cont.value, loc.value, id, userId).run()
   return success({ id })
 })
 
@@ -231,15 +271,104 @@ api.post('/posts/comment', authRequired, async (c) => {
   return success({ success: true })
 })
 
-// POST /api/posts/close —— 标记帖子完成,参数 { id } 走 body
-api.post('/posts/close', authRequired, async (c) => {
+// POST /api/posts/helpers/candidates —— 采纳候选人。
+// 候选人 = 本帖「响应者」(点过我要帮忙/我想要/这是我的)∪「评论者」(回复过帖子的人),按最早交互时间排序、去重、排除帖主。
+// 仅帖主可查。参数 { id }。返回 [{ id, nickname, building }]
+api.post('/posts/helpers/candidates', authRequired, async (c) => {
   const userId = c.get('userId')
   const { id } = await bodyOf(c)
-  const { meta } = await c.env.DB.prepare('UPDATE posts SET status="closed" WHERE id=? AND user_id=?')
-    .bind(id, userId).run()
-  // 影响 0 行:帖子不存在或非本人,据实告知而非静默成功
-  if (!meta.changes) return fail(CODE.POST_NOT_FOUND, '帖子不存在或无权操作')
+  const post = await c.env.DB.prepare('SELECT user_id FROM posts WHERE id = ?').bind(id).first()
+  if (!post || post.user_id !== userId) return fail(CODE.POST_NOT_FOUND, '帖子不存在或无权操作')
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT u.id AS uid, u.nickname, u.building, MIN(x.ts) AS first_ts
+     FROM (
+       SELECT user_id AS uid, created_at AS ts FROM post_responses WHERE post_id = ?1
+       UNION ALL
+       SELECT user_id AS uid, created_at AS ts FROM comments WHERE post_id = ?1
+     ) x
+     JOIN users u ON u.id = x.uid
+     WHERE x.uid != ?2
+     GROUP BY u.id
+     ORDER BY first_ts ASC`
+  ).bind(id, userId).all()
+  const candidates = (results || []).map(r => ({ id: r.uid, nickname: r.nickname || '邻居', building: r.building || '' }))
+  return success({ candidates })
+})
+
+// POST /api/posts/respond —— 响应帖子(我要帮忙/我想要/这是我的),参数 { id }
+// 仅 求助/闲置/失物 可响应;排除帖主;同一用户对同一帖只记一次(UNIQUE 冲突即视为已响应)。
+api.post('/posts/respond', authRequired, async (c) => {
+  const userId = c.get('userId')
+  const { id } = await bodyOf(c)
+  const post = await c.env.DB.prepare('SELECT user_id, type, status FROM posts WHERE id = ?').bind(id).first()
+  if (!post) return fail(CODE.POST_NOT_FOUND, '帖子不存在')
+  if (post.user_id === userId) return fail(CODE.POST_MISSING_FIELD, '不能响应自己的帖子')
+  if (!['help', 'idle', 'lost'].includes(post.type)) return fail(CODE.POST_MISSING_FIELD, '该类型帖子不支持响应')
+  if (post.status !== 'open') return fail(CODE.POST_MISSING_FIELD, '该帖已完成')
+  // INSERT OR IGNORE:已响应过则静默成功(幂等)
+  await c.env.DB.prepare(
+    'INSERT OR IGNORE INTO post_responses (id, post_id, user_id, created_at) VALUES (?, ?, ?, ?)'
+  ).bind(genId(), id, userId, Date.now()).run()
   return success({ success: true })
+})
+
+// POST /api/posts/unrespond —— 取消响应,参数 { id }。幂等:未响应过也返回成功。
+api.post('/posts/unrespond', authRequired, async (c) => {
+  const userId = c.get('userId')
+  const { id } = await bodyOf(c)
+  await c.env.DB.prepare('DELETE FROM post_responses WHERE post_id = ? AND user_id = ?')
+    .bind(id, userId).run()
+  return success({ success: true })
+})
+
+// POST /api/posts/close —— 标记帖子完成,参数 { id, helpers? }
+// helpers: [{ helperId, thanked }] 采纳的帮助者(可空=纯关帖)。thanked=1 额外发感谢通知。
+api.post('/posts/close', authRequired, async (c) => {
+  const userId = c.get('userId')
+  const { id, helpers } = await bodyOf(c)
+
+  // 校验帖子归属与状态(必须是自己的、且未完成)
+  const post = await c.env.DB.prepare('SELECT user_id, title, status FROM posts WHERE id = ?').bind(id).first()
+  if (!post || post.user_id !== userId) return fail(CODE.POST_NOT_FOUND, '帖子不存在或无权操作')
+
+  // 采纳者校验:必须是本帖响应者或评论者,排除自己;去重
+  const picked = Array.isArray(helpers) ? helpers : []
+  let validHelpers = []
+  if (picked.length) {
+    const { results: cand } = await c.env.DB.prepare(
+      `SELECT DISTINCT uid FROM (
+         SELECT user_id AS uid FROM post_responses WHERE post_id = ?1
+         UNION SELECT user_id AS uid FROM comments WHERE post_id = ?1
+       ) WHERE uid != ?2`
+    ).bind(id, userId).all()
+    const allow = new Set((cand || []).map(r => r.uid))
+    const seen = new Set()
+    for (const h of picked) {
+      const hid = h?.helperId
+      if (hid && hid !== userId && allow.has(hid) && !seen.has(hid)) {
+        seen.add(hid)
+        validHelpers.push({ helperId: hid, thanked: h.thanked ? 1 : 0 })
+      }
+    }
+  }
+
+  // 关帖(仅在 open→closed 时计为有效变更)
+  const { meta } = await c.env.DB.prepare('UPDATE posts SET status="closed" WHERE id=? AND user_id=? AND status="open"')
+    .bind(id, userId).run()
+  if (!meta.changes) return fail(CODE.POST_NOT_FOUND, '帖子不存在、已完成或无权操作')
+
+  // 写采纳记录 + 通知。被采纳本身即发通知(adopt);额外感谢则用 thank(措辞更重)。
+  const now = Date.now()
+  for (const h of validHelpers) {
+    await c.env.DB.prepare(
+      'INSERT INTO post_helpers (id, post_id, helper_id, thanked, created_at) VALUES (?, ?, ?, ?, ?)'
+    ).bind(genId(), id, h.helperId, h.thanked, now).run()
+    await c.env.DB.prepare(
+      'INSERT INTO notifications (id, user_id, type, post_id, actor_id, content, read, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)'
+    ).bind(genId(), h.helperId, h.thanked ? 'thank' : 'adopt', id, userId, post.title || '', now).run()
+  }
+  return success({ success: true, adopted: validHelpers.length })
 })
 
 // POST /api/posts/delete —— 删除帖子(仅本人),参数 { id } 走 body

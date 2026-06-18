@@ -125,6 +125,7 @@ messages.post('/messages/inbox', async (c) => {
     })),
     ...(notis || []).map(r => ({
       kind: 'comment',
+      notiType: r.type,                  // 'comment' 评论回复 / 'thank' 采纳感谢
       notificationId: r.id,
       postId: r.post_id,
       postTitle: r.post_title || '(帖子已删除)',

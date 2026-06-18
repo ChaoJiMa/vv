@@ -12,6 +12,8 @@ export const LIMITS = {
   username: 30,
   password: 100,
   message: 1000,
+  contact: 50,
+  location: 50,
 }
 
 // 校验必填字符串:trim 后非空且不超过 max。

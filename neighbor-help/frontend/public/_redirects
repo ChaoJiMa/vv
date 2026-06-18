@@ -1,0 +1,4 @@
+# SPA 回退:所有未命中静态资源/Functions 的路径都返回 index.html(200),
+# 交给前端 React Router 处理(含刷新深链接、被守卫重定向的路径)。
+# 注:Pages 中 Functions(/api/*、/auth/*)优先级高于本规则,不会被拦截。
+/*    /index.html   200

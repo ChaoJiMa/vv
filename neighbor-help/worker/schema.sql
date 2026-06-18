@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS posts (
   content TEXT,
   images TEXT,
   status TEXT DEFAULT 'open',
+  contact TEXT,                  -- 联系方式(可空),发布页填写
+  location TEXT,                 -- 帖子位置(可空),默认带入发帖人楼栋单元,可改
   created_at INTEGER,           -- 毫秒时间戳
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
@@ -47,3 +49,68 @@ CREATE TABLE IF NOT EXISTS rate_limits (
   window_start INTEGER,         -- 窗口起点毫秒时间戳
   count INTEGER DEFAULT 0
 );
+
+-- 私信:两用户之间的点对点消息。post_id 记录从哪条帖子发起的私信(可空)。
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY,           -- UUID
+  sender_id TEXT NOT NULL,
+  receiver_id TEXT NOT NULL,
+  post_id TEXT,                  -- 来源帖子(从「私信 TA」进来时记录),可空
+  content TEXT NOT NULL,
+  read INTEGER DEFAULT 0,        -- 0 未读 / 1 已读(接收方拉取会话时置 1)
+  created_at INTEGER,            -- 毫秒时间戳
+  FOREIGN KEY (sender_id) REFERENCES users(id),
+  FOREIGN KEY (receiver_id) REFERENCES users(id)
+);
+
+-- 通知:type 取 'comment'(评论回复)/ 'adopt'(被采纳)/ 'thank'(被采纳并感谢)。
+-- actor_id 为触发者(评论人/帖主),user_id 为接收者。content 冗余:评论为评论内容,采纳/感谢为帖子标题。
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,           -- UUID
+  user_id TEXT NOT NULL,         -- 接收通知的用户(帖子作者)
+  type TEXT NOT NULL,            -- 通知类型,如 'comment'
+  post_id TEXT,                  -- 关联帖子
+  actor_id TEXT,                 -- 触发者(评论人)
+  content TEXT,                  -- 冗余存评论内容,列表直接展示
+  read INTEGER DEFAULT 0,
+  created_at INTEGER,            -- 毫秒时间戳
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- 会话拉取:两人之间按时间取消息
+CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(sender_id, receiver_id, created_at);
+-- 未读私信计数(首页角标)
+CREATE INDEX IF NOT EXISTS idx_messages_receiver_read ON messages(receiver_id, read);
+-- 消息列表 / 未读通知计数
+CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, read);
+
+-- 采纳记录:帖子完成时,发帖人采纳哪些"帮助者"(可多人)。
+-- thanked=1 表示额外感谢(会给被采纳者发通知);0 仅采纳(计入统计但不通知)。
+-- 个人页统计据此计算:helper_id 出现次数=他"帮助了"几次;某人帖子里的采纳条数=他"获得帮助"几次。
+CREATE TABLE IF NOT EXISTS post_helpers (
+  id TEXT PRIMARY KEY,           -- UUID
+  post_id TEXT NOT NULL,
+  helper_id TEXT NOT NULL,       -- 被采纳的帮助者
+  thanked INTEGER DEFAULT 0,     -- 0 仅采纳 / 1 采纳并感谢
+  created_at INTEGER,            -- 毫秒时间戳
+  FOREIGN KEY (post_id) REFERENCES posts(id),
+  FOREIGN KEY (helper_id) REFERENCES users(id)
+);
+-- 「帮助了」统计:某用户被采纳的总次数
+CREATE INDEX IF NOT EXISTS idx_post_helpers_helper ON post_helpers(helper_id);
+-- 某帖已采纳的帮助者(详情页展示 / 防重复采纳)
+CREATE INDEX IF NOT EXISTS idx_post_helpers_post ON post_helpers(post_id);
+
+-- 帖子响应(报名):用户对 求助/闲置/失物 帖点「我要帮忙 / 我想要 / 这是我的」记一条。
+-- 同一用户对同一帖只记一次。完成时发帖人从响应者里采纳(post_helpers)。
+CREATE TABLE IF NOT EXISTS post_responses (
+  id TEXT PRIMARY KEY,
+  post_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  created_at INTEGER,
+  UNIQUE (post_id, user_id),
+  FOREIGN KEY (post_id) REFERENCES posts(id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+-- 列某帖的响应者 / 判断我是否已响应
+CREATE INDEX IF NOT EXISTS idx_post_responses_post ON post_responses(post_id);
