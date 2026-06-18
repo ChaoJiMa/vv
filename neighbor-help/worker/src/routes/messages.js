@@ -7,6 +7,7 @@ import { success, fail, CODE } from '../response.js'
 import { LIMITS, requireText } from '../validate.js'
 import { authRequired } from '../middleware.js'
 import { rateLimit } from '../ratelimit.js'
+import { findSensitive } from '../sensitive.js'
 
 const bodyOf = async (c) => { try { return await c.req.json() } catch { return {} } }
 
@@ -28,6 +29,8 @@ messages.post('/messages/send', async (c) => {
   const { receiverId, postId, content } = await bodyOf(c)
   const ct = requireText(content, LIMITS.message, '消息内容')
   if (!ct.ok) return fail(CODE.MESSAGE_EMPTY, ct.message)
+  const bad = findSensitive(ct.value)
+  if (bad) return fail(CODE.CONTENT_BLOCKED, `消息含违规词「${bad}」,请修改后再发`)
   // 不能发给自己;对端必须存在
   if (!receiverId || receiverId === userId) return fail(CODE.MESSAGE_BAD_TARGET, '私信对象无效')
   const peer = await c.env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(receiverId).first()
@@ -60,15 +63,18 @@ messages.post('/messages/thread', async (c) => {
     'UPDATE messages SET read = 1 WHERE receiver_id = ? AND sender_id = ? AND read = 0'
   ).bind(userId, peerId).run()
 
-  // 两人之间双向消息,取最近 limit 条(倒序取再正序返回)
+  // 两人之间双向消息,取最近 limit 条(倒序取再正序返回)。
+  // 多取一条用于判断是否还有更早消息,避免总数恰为 limit 整数倍时多请求一次空页。
   const { results } = await c.env.DB.prepare(
     `SELECT id, sender_id, receiver_id, content, created_at FROM messages
      WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
      ORDER BY created_at DESC LIMIT ? OFFSET ?`
-  ).bind(userId, peerId, peerId, userId, limit, offset).all()
-  const list = (results || []).reverse()
+  ).bind(userId, peerId, peerId, userId, limit + 1, offset).all()
+  const rows = results || []
+  const hasMore = rows.length > limit
+  const list = rows.slice(0, limit).reverse()
 
-  return success({ peer, list, page, hasMore: results.length === limit })
+  return success({ peer, list, page, hasMore })
 })
 
 // POST /api/messages/conversations —— 私信会话列表(分页)。

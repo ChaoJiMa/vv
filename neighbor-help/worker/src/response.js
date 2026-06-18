@@ -31,10 +31,16 @@ export const CODE = {
   POST_MISSING_FIELD: 2002,    // 发帖缺少必要字段
   COMMENT_EMPTY: 2003,         // 评论内容为空
   COMMENT_NOT_FOUND: 2004,     // 评论不存在或无权操作
+  CONTENT_BLOCKED: 2005,       // 内容含敏感词,被拦截
+  IMAGE_INVALID: 2006,         // 图片类型/大小不合法
 
   // 私信 / 通知 30xx
   MESSAGE_EMPTY: 3001,         // 私信内容为空
   MESSAGE_BAD_TARGET: 3002,    // 私信对象不存在或为自己
+
+  // 举报 40xx(注意与通用 4xx HTTP 码区分:这里是四位业务码)
+  REPORT_BAD_TARGET: 4001,     // 举报对象无效
+  REPORT_DUPLICATE: 4002,      // 已举报过,请勿重复
 }
 
 // 每个业务码对应的 HTTP 状态码(默认按分段推断)
@@ -55,8 +61,12 @@ const HTTP_STATUS = {
   [CODE.POST_MISSING_FIELD]: 400,
   [CODE.COMMENT_EMPTY]: 400,
   [CODE.COMMENT_NOT_FOUND]: 404,
+  [CODE.CONTENT_BLOCKED]: 400,
+  [CODE.IMAGE_INVALID]: 400,
   [CODE.MESSAGE_EMPTY]: 400,
   [CODE.MESSAGE_BAD_TARGET]: 404,
+  [CODE.REPORT_BAD_TARGET]: 404,
+  [CODE.REPORT_DUPLICATE]: 409,
 }
 
 // headers 可选:Hono 下由 cors 中间件统一补 CORS 头,这里只需保证 Content-Type。

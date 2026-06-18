@@ -14,6 +14,7 @@ export const LIMITS = {
   message: 1000,
   contact: 50,
   location: 50,
+  reportReason: 200,
 }
 
 // 校验必填字符串:trim 后非空且不超过 max。

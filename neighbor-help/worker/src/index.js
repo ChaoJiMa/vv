@@ -6,6 +6,8 @@ import { fail, CODE } from './response.js'
 import authRoutes from './routes/auth.js'
 import apiRoutes from './routes/posts.js'
 import messageRoutes from './routes/messages.js'
+import reportRoutes from './routes/reports.js'
+import imageRoutes from './routes/images.js'
 
 // 允许的来源:本地开发 + Pages 域名(含每次部署的预览子域名)
 function resolveCorsOrigin(origin) {
@@ -30,9 +32,14 @@ app.use('*', cors({
 app.use('*', logging)
 
 // 业务路由
+// 注意挂载顺序:messages/reports 内部用 `use('*', authRequired)` 注册了 /api/* 级中间件。
+// Hono 按注册顺序组合匹配的中间件,故含「公开路由」的子应用(posts 的列表/详情、images 的
+// GET /api/img)必须挂在这两个鉴权子应用「之前」,否则其公开路由会被 authRequired 拦成 401。
 app.route('/auth', authRoutes)
 app.route('/api', apiRoutes)
+app.route('/api', imageRoutes)
 app.route('/api', messageRoutes)
+app.route('/api', reportRoutes)
 
 // 未命中路由
 app.notFound(() => fail(CODE.NOT_FOUND, '接口不存在'))

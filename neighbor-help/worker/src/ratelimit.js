@@ -1,12 +1,16 @@
 // 简单限流:基于 D1 记录 (key, 窗口起点, 计数)。用于登录/注册防暴力破解。
 // key 通常取 `login:<ip>` 或 `login:<username>`。固定窗口算法,够用且无额外依赖。
 
+// 表内混有不同窗口长度的 key(登录 10 分钟、发帖/私信 1 分钟等)。
+// 顺手清理只能用一个不小于所有业务窗口的固定上限,否则短窗口调用会误删长窗口
+// 仍在有效期内的记录(例如发帖请求把 1~10 分钟前的登录限流计数清空,防爆破失效)。
+const STALE_MS = 60 * 60 * 1000 // 1 小时,安全覆盖所有业务窗口
+
 // 检查并累加一次计数。超过 limit 返回 { limited: true, retryAfter }(秒);否则 { limited: false }。
 export async function rateLimit(env, key, limit, windowMs) {
   const now = Date.now()
-  // 顺手清理已过期窗口的记录,防止表无限膨胀(失败/未清零的记录会一直残留)。
-  // 删除条件用本 key 的窗口长度即可:任何 window_start 早于 now-windowMs 的记录都已失效。
-  await env.DB.prepare('DELETE FROM rate_limits WHERE window_start < ?').bind(now - windowMs).run()
+  // 清理远超任何业务窗口的陈旧记录,防止表无限膨胀(失败/未清零的记录会一直残留)。
+  await env.DB.prepare('DELETE FROM rate_limits WHERE window_start < ?').bind(now - STALE_MS).run()
 
   const row = await env.DB.prepare('SELECT window_start, count FROM rate_limits WHERE key = ?').bind(key).first()
 

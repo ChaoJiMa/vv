@@ -116,18 +116,19 @@ auth.post('/wechat', async (c) => {
 
   const { openid, access_token } = wxData
 
-  // 获取用户信息
+  // 获取用户信息。拉取失败不阻断登录(openid 已拿到),仅退化为默认昵称/头像。
   const infoRes = await fetch(
     `https://api.weixin.qq.com/sns/userinfo?access_token=${access_token}&openid=${openid}&lang=zh_CN`
   )
   const info = await infoRes.json()
+  const profile = info && !info.errcode ? info : {}
 
   // 查或建用户
   let user = await env.DB.prepare('SELECT * FROM users WHERE openid = ?').bind(openid).first()
   if (!user) {
     await env.DB.prepare(
       'INSERT INTO users (id, openid, nickname, avatar, created_at) VALUES (?, ?, ?, ?, ?)'
-    ).bind(genId(), openid, info.nickname || '邻居', info.headimgurl || '', Date.now()).run()
+    ).bind(genId(), openid, profile.nickname || '邻居', profile.headimgurl || '', Date.now()).run()
     user = await env.DB.prepare('SELECT * FROM users WHERE openid = ?').bind(openid).first()
   }
 

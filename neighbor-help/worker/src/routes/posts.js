@@ -6,6 +6,8 @@ import { success, fail, CODE } from '../response.js'
 import { LIMITS, requireText, optionalText, escapeLike } from '../validate.js'
 import { authRequired } from '../middleware.js'
 import { rateLimit } from '../ratelimit.js'
+import { findSensitive } from '../sensitive.js'
+import { sanitizeImages } from '../images.js'
 
 // 服务类型菜单:前端 Home 的 Tab 与 CreatePost 的类型卡片都从这里取,
 // 保证菜单由后端统一维护(增删服务类型无需改前端)。
@@ -15,6 +17,25 @@ const MENUS = [
   { value: 'lost',  label: '失物招领', icon: '🔍', desc: '丢东西或捡到东西', color: 'error' },
   { value: 'group', label: '拼单拼团', icon: '🛒', desc: '一起拼外卖或团购', color: 'success' },
 ]
+
+// 小区结构:期数 -> 楼栋 -> 单元。注册/发帖的位置选择从这里取,
+// 由后端统一维护,改小区无需改前端。后续可改为读 D1 配置表或环境变量。
+const COMMUNITY = {
+  '一期': {
+    '1号楼': ['1单元', '2单元', '3单元'],
+    '2号楼': ['1单元', '2单元'],
+    '3号楼': ['1单元', '2单元', '3单元', '4单元'],
+  },
+  '二期': {
+    '4号楼': ['1单元', '2单元'],
+    '5号楼': ['1单元', '2单元', '3单元'],
+    '6号楼': ['1单元'],
+  },
+  '三期': {
+    '7号楼': ['1单元', '2单元'],
+    '8号楼': ['1单元', '2单元', '3单元'],
+  },
+}
 
 const bodyOf = async (c) => { try { return await c.req.json() } catch { return {} } }
 
@@ -28,6 +49,9 @@ const api = new Hono()
 
 // POST /api/menus/list —— 服务类型菜单
 api.post('/menus/list', () => success(MENUS))
+
+// POST /api/community/structure —— 小区结构(期数/楼栋/单元),注册与发帖位置选择用
+api.post('/community/structure', () => success(COMMUNITY))
 
 // POST /api/posts/list —— 帖子列表,参数 { type, page, keyword } 走 body
 // 返回 { list, total, page, hasMore }:前端据此翻页/触底加载,无需再靠"返回条数==页大小"猜测。
@@ -62,8 +86,10 @@ api.post('/posts/list', async (c) => {
     c.env.DB.prepare(countSql).bind(...args).first(),
   ])
 
+  // contact(联系方式)属隐私,列表为公开接口,统一剔除——只在帖子详情(且登录后)才返回。
+  const safeList = (list || []).map(({ contact, ...rest }) => rest)
   const total = countRow?.n ?? 0
-  return success({ list, total, page, hasMore: offset + list.length < total })
+  return success({ list: safeList, total, page, hasMore: offset + safeList.length < total })
 })
 
 // POST /api/posts/detail —— 帖子详情,参数 { id } 走 body
@@ -86,7 +112,9 @@ api.post('/posts/detail', async (c) => {
   const auth = await verifyAuth(c.req.raw, c.env)
   const myId = auth?.userId || null
   const myResponded = myId ? (responses || []).some(r => r.user_id === myId) : false
-  return success({ ...post, helpers, responses, myResponded })
+  // contact(联系方式)属隐私:仅登录用户可见,游客剔除,防止不带 token 直接抓接口采集。
+  const safePost = myId ? post : (() => { const { contact, ...rest } = post; return rest })()
+  return success({ ...safePost, helpers, responses, myResponded })
 })
 
 // POST /api/posts/comments —— 帖子评论列表(分页),参数 { id, page }。按时间正序(最早在上)。
@@ -138,8 +166,8 @@ api.post('/me/password', authRequired, async (c) => {
   if (!oldPassword || !newPassword) {
     return fail(CODE.INVALID_INPUT, '请填写旧密码和新密码')
   }
-  if (newPassword.length < 6) {
-    return fail(CODE.INVALID_INPUT, '新密码至少6位')
+  if (newPassword.length < 8) {
+    return fail(CODE.INVALID_INPUT, '新密码至少8位')
   }
   const user = await env.DB.prepare('SELECT id, password FROM users WHERE id = ?').bind(userId).first()
   if (!user || !user.password) {
@@ -224,6 +252,9 @@ api.post('/posts/create', authRequired, async (c) => {
   if (!cont.ok) return fail(CODE.INVALID_INPUT, cont.message)
   const loc = optionalText(location, LIMITS.location, '位置')
   if (!loc.ok) return fail(CODE.INVALID_INPUT, loc.message)
+  // 敏感词:标题 + 内容一并检查,命中即拦截
+  const bad = findSensitive(`${t.value} ${ct.value}`)
+  if (bad) return fail(CODE.CONTENT_BLOCKED, `内容含违规词「${bad}」,请修改后再发布`)
   // 位置默认带入发帖人资料的楼栋单元(用户未填时)
   let locValue = loc.value
   if (!locValue) {
@@ -233,7 +264,7 @@ api.post('/posts/create', authRequired, async (c) => {
   const id = genId()
   await c.env.DB.prepare(
     'INSERT INTO posts (id, user_id, type, title, content, images, contact, location, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).bind(id, userId, type, t.value, ct.value, JSON.stringify(images || []), cont.value, locValue, Date.now()).run()
+  ).bind(id, userId, type, t.value, ct.value, JSON.stringify(sanitizeImages(images)), cont.value, locValue, Date.now()).run()
   return success({ id })
 })
 
@@ -257,8 +288,10 @@ api.post('/posts/update', authRequired, async (c) => {
   if (!cont.ok) return fail(CODE.INVALID_INPUT, cont.message)
   const loc = optionalText(location, LIMITS.location, '位置')
   if (!loc.ok) return fail(CODE.INVALID_INPUT, loc.message)
+  const bad = findSensitive(`${t.value} ${ct.value}`)
+  if (bad) return fail(CODE.CONTENT_BLOCKED, `内容含违规词「${bad}」,请修改后再保存`)
   await c.env.DB.prepare('UPDATE posts SET type=?, title=?, content=?, images=?, contact=?, location=? WHERE id=? AND user_id=?')
-    .bind(type, t.value, ct.value, JSON.stringify(images || []), cont.value, loc.value, id, userId).run()
+    .bind(type, t.value, ct.value, JSON.stringify(sanitizeImages(images)), cont.value, loc.value, id, userId).run()
   return success({ id })
 })
 
@@ -271,18 +304,26 @@ api.post('/posts/comment', authRequired, async (c) => {
   const { id, content } = await bodyOf(c)
   const ct = requireText(content, LIMITS.comment, '评论内容')
   if (!ct.ok) return fail(CODE.COMMENT_EMPTY, ct.message)
+  const bad = findSensitive(ct.value)
+  if (bad) return fail(CODE.CONTENT_BLOCKED, `评论含违规词「${bad}」,请修改后再发`)
   // 校验帖子存在,避免对不存在的 id 插入孤儿评论;同时取作者以便写通知
   const post = await c.env.DB.prepare('SELECT id, user_id FROM posts WHERE id = ?').bind(id).first()
   if (!post) return fail(CODE.POST_NOT_FOUND, '帖子不存在')
   const now = Date.now()
-  await c.env.DB.prepare('INSERT INTO comments (id, post_id, user_id, content, created_at) VALUES (?, ?, ?, ?, ?)')
-    .bind(genId(), id, userId, ct.value, now).run()
+  // 评论与通知一次性原子写入:避免评论写成功但通知失败留下不一致状态。
+  const stmts = [
+    c.env.DB.prepare('INSERT INTO comments (id, post_id, user_id, content, created_at) VALUES (?, ?, ?, ?, ?)')
+      .bind(genId(), id, userId, ct.value, now),
+  ]
   // 评论非自己帖子时,给作者写一条通知(自己评自己的帖不通知)
   if (post.user_id !== userId) {
-    await c.env.DB.prepare(
-      'INSERT INTO notifications (id, user_id, type, post_id, actor_id, content, read, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)'
-    ).bind(genId(), post.user_id, 'comment', id, userId, ct.value, now).run()
+    stmts.push(
+      c.env.DB.prepare(
+        'INSERT INTO notifications (id, user_id, type, post_id, actor_id, content, read, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)'
+      ).bind(genId(), post.user_id, 'comment', id, userId, ct.value, now)
+    )
   }
+  await c.env.DB.batch(stmts)
   return success({ success: true })
 })
 
@@ -321,7 +362,9 @@ api.post('/posts/respond', authRequired, async (c) => {
   if (post.user_id === userId) return fail(CODE.POST_MISSING_FIELD, '不能响应自己的帖子')
   if (!['help', 'idle', 'lost'].includes(post.type)) return fail(CODE.POST_MISSING_FIELD, '该类型帖子不支持响应')
   if (post.status !== 'open') return fail(CODE.POST_MISSING_FIELD, '该帖已完成')
-  // INSERT OR IGNORE:已响应过则静默成功(幂等)
+  // INSERT OR IGNORE 用 UNIQUE(post_id,user_id) 保证幂等;以真正插入(meta.changes)为准发通知。
+  // 不可改成"先 SELECT 再 batch":并发下两请求都查不到记录会各发一条通知(response 被 UNIQUE 挡住、
+  // 但 notifications 无约束会双写)。此处宁可放弃原子性——最坏只是漏发一条通知,远好于重复打扰。
   const now = Date.now()
   const { meta } = await c.env.DB.prepare(
     'INSERT OR IGNORE INTO post_responses (id, post_id, user_id, created_at) VALUES (?, ?, ?, ?)'
@@ -353,6 +396,7 @@ api.post('/posts/close', authRequired, async (c) => {
   // 校验帖子归属与状态(必须是自己的、且未完成)
   const post = await c.env.DB.prepare('SELECT user_id, title, status FROM posts WHERE id = ?').bind(id).first()
   if (!post || post.user_id !== userId) return fail(CODE.POST_NOT_FOUND, '帖子不存在或无权操作')
+  if (post.status !== 'open') return fail(CODE.POST_NOT_FOUND, '帖子已完成或无权操作')
 
   // 采纳者校验:必须是本帖响应者或评论者,排除自己;去重
   const picked = Array.isArray(helpers) ? helpers : []
@@ -375,33 +419,57 @@ api.post('/posts/close', authRequired, async (c) => {
     }
   }
 
-  // 关帖(仅在 open→closed 时计为有效变更)
-  const { meta } = await c.env.DB.prepare('UPDATE posts SET status="closed" WHERE id=? AND user_id=? AND status="open"')
-    .bind(id, userId).run()
-  if (!meta.changes) return fail(CODE.POST_NOT_FOUND, '帖子不存在、已完成或无权操作')
-
-  // 写采纳记录 + 通知。被采纳本身即发通知(adopt);额外感谢则用 thank(措辞更重)。
+  // 关帖 + 写采纳记录 + 通知,一次性原子写入。
+  // UPDATE 带 status="open" 条件:并发下只有一次能成功置为 closed;
+  // batch 保证要么全部生效、要么全部回滚,不会留下半采纳/孤儿通知。
   const now = Date.now()
+  const stmts = [
+    c.env.DB.prepare('UPDATE posts SET status="closed" WHERE id=? AND user_id=? AND status="open"')
+      .bind(id, userId),
+  ]
+  // 被采纳本身即发通知(adopt);额外感谢则用 thank(措辞更重)。
   for (const h of validHelpers) {
-    await c.env.DB.prepare(
-      'INSERT INTO post_helpers (id, post_id, helper_id, thanked, created_at) VALUES (?, ?, ?, ?, ?)'
-    ).bind(genId(), id, h.helperId, h.thanked, now).run()
-    await c.env.DB.prepare(
-      'INSERT INTO notifications (id, user_id, type, post_id, actor_id, content, read, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)'
-    ).bind(genId(), h.helperId, h.thanked ? 'thank' : 'adopt', id, userId, post.title || '', now).run()
+    stmts.push(
+      c.env.DB.prepare('INSERT INTO post_helpers (id, post_id, helper_id, thanked, created_at) VALUES (?, ?, ?, ?, ?)')
+        .bind(genId(), id, h.helperId, h.thanked, now),
+      c.env.DB.prepare(
+        'INSERT INTO notifications (id, user_id, type, post_id, actor_id, content, read, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)'
+      ).bind(genId(), h.helperId, h.thanked ? 'thank' : 'adopt', id, userId, post.title || '', now)
+    )
   }
+  const batchRes = await c.env.DB.batch(stmts)
+  // 第一条是 UPDATE:并发下若已被他人关帖,changes 为 0,视为无效操作
+  if (!batchRes[0]?.meta?.changes) return fail(CODE.POST_NOT_FOUND, '帖子不存在、已完成或无权操作')
   return success({ success: true, adopted: validHelpers.length })
 })
 
 // POST /api/posts/delete —— 删除帖子(仅本人),参数 { id } 走 body
-// D1 外键不保证级联,这里应用层先删评论再删帖子,避免遗留孤儿评论。
+// D1 外键不保证级联,这里应用层原子删除帖子及其所有关联数据(评论、响应、采纳、通知、来源私信),
+// 避免遗留孤儿记录持续累积。
 api.post('/posts/delete', authRequired, async (c) => {
   const userId = c.get('userId')
   const { id } = await bodyOf(c)
-  const { meta } = await c.env.DB.prepare('DELETE FROM posts WHERE id=? AND user_id=?')
-    .bind(id, userId).run()
-  if (!meta.changes) return fail(CODE.POST_NOT_FOUND, '帖子不存在或无权操作')
-  await c.env.DB.prepare('DELETE FROM comments WHERE post_id=?').bind(id).run()
+  // 先校验归属,避免对他人帖子做关联删除;同时取 images 以便删帖后清理 R2 对象
+  const post = await c.env.DB.prepare('SELECT user_id, images FROM posts WHERE id = ?').bind(id).first()
+  if (!post || post.user_id !== userId) return fail(CODE.POST_NOT_FOUND, '帖子不存在或无权操作')
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM comments WHERE post_id=?').bind(id),
+    c.env.DB.prepare('DELETE FROM post_responses WHERE post_id=?').bind(id),
+    c.env.DB.prepare('DELETE FROM post_helpers WHERE post_id=?').bind(id),
+    c.env.DB.prepare('DELETE FROM notifications WHERE post_id=?').bind(id),
+    // 私信只解除来源帖关联(post_id 仅标记"从哪条帖发起"),不删消息本身,
+    // 否则会在双向会话里挖空开头几条、与后续 post_id=null 的消息错乱。
+    c.env.DB.prepare('UPDATE messages SET post_id=NULL WHERE post_id=?').bind(id),
+    c.env.DB.prepare('DELETE FROM posts WHERE id=? AND user_id=?').bind(id, userId),
+  ])
+  // 帖子已删,best-effort 清理其图片对象(失败不影响删帖结果)。
+  // 注:编辑帖子替换图片产生的旧图不在此清理范围,会留少量孤儿对象(已知限制)。
+  try {
+    const keys = JSON.parse(post.images || '[]')
+    if (Array.isArray(keys) && keys.length && c.env.IMAGES) {
+      await c.env.IMAGES.delete(keys)
+    }
+  } catch { /* 解析失败或 R2 异常都忽略,不阻断删帖 */ }
   return success({ success: true })
 })
 

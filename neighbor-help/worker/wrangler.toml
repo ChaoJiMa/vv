@@ -7,3 +7,8 @@ binding = "DB"
 database_name = "neighbor-help-db"
 database_id = "65295c63-27af-4806-bbf9-5aebb63386fa"
 migrations_dir = "migrations"
+
+# 图片对象存储:发帖图片存这里,通过 GET /api/img/:key 公开代理读取
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "neighbor-help-images"

@@ -1,3 +1,7 @@
+-- ⚠️ 本文件是完整表结构的「参考快照」,仅供查阅与全新环境一次性建库。
+--    生产/开发的真实建表与变更以 migrations/ 下的增量迁移为准
+--    (用 `npx wrangler d1 migrations apply` 执行)。改表结构时请同时更新这里与 migrations/,
+--    避免两者漂移。
 -- 主键全部用 UUID(TEXT),由应用层 crypto.randomUUID() 生成,不暴露递增规律。
 -- created_at 统一为毫秒时间戳(INTEGER),由应用层 Date.now() 填充,与 JWT exp 口径一致。
 CREATE TABLE IF NOT EXISTS users (
@@ -114,3 +118,18 @@ CREATE TABLE IF NOT EXISTS post_responses (
 );
 -- 列某帖的响应者 / 判断我是否已响应
 CREATE INDEX IF NOT EXISTS idx_post_responses_post ON post_responses(post_id);
+
+-- 举报:用户对帖子或评论发起举报,沉淀待人工复核(本期无管理后台,先存表)。
+-- target_type 取 'post' / 'comment';同一用户对同一目标只记一次(UNIQUE)。
+CREATE TABLE IF NOT EXISTS reports (
+  id TEXT PRIMARY KEY,           -- UUID
+  reporter_id TEXT NOT NULL,     -- 举报人
+  target_type TEXT NOT NULL,     -- 'post' / 'comment'
+  target_id TEXT NOT NULL,       -- 被举报的帖子/评论 id
+  reason TEXT,                   -- 举报理由(可选)
+  status TEXT DEFAULT 'pending', -- pending / reviewed / dismissed(预留给后续后台)
+  created_at INTEGER,            -- 毫秒时间戳
+  UNIQUE (reporter_id, target_type, target_id),
+  FOREIGN KEY (reporter_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_reports_status_created ON reports(status, created_at DESC);
