@@ -13,6 +13,7 @@ import PersonOutlineIcon from '@mui/icons-material/PersonOutlined'
 import AddIcon from '@mui/icons-material/Add'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
+import { usePageVisible, pollInterval } from '../hooks/usePageVisible'
 import { toast } from '../toast'
 
 const WARM = '#EC6E33'
@@ -25,13 +26,15 @@ export default function BottomNav() {
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const { user } = useAuth()
+  const visible = usePageVisible()
 
   // 复用首页同款 ['unread'] 查询缓存,给消息项加红点
   const { data: unread } = useQuery({
     queryKey: ['unread'],
     queryFn: () => api.getUnread(),
     enabled: !!user,
-    refetchInterval: 30000,
+    // 角标可见时 20s 刷新,后台暂停;切回由 refetchOnWindowFocus 补刷。
+    refetchInterval: pollInterval(visible, 20000),
   })
   const unreadTotal = unread?.total ?? 0
 

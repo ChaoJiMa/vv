@@ -112,6 +112,8 @@ export const api = {
   reportContent: (targetType, targetId, reason) => post('/api/reports/create', { targetType, targetId, reason }),
   // 小区结构(注册/发帖位置选择用),公开接口
   getCommunity: () => post('/api/community/structure'),
+  // 首页公告与安全提示(运营可在后台调整),公开接口
+  getAnnouncements: () => post('/api/announcements/list'),
   // 图片:上传单张返回 { key };imgUrl 把 key 拼成可访问的代理 URL
   uploadImage,
   imgUrl: (key) => `${BASE}/api/img/${key}`,

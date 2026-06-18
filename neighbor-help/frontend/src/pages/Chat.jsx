@@ -12,6 +12,7 @@ import CircularProgress from '@mui/material/CircularProgress'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
+import { usePageVisible, pollInterval } from '../hooks/usePageVisible'
 import { toast } from '../toast'
 
 export default function Chat() {
@@ -25,6 +26,7 @@ export default function Chat() {
   const [text, setText] = useState('')
   const bottomRef = useRef(null)
   const topRef = useRef(null)
+  const visible = usePageVisible()
 
   // 会话分页:每页取更早的一段(后端按时间倒序取、正序返回)。
   // 第 1 页是最新消息,翻页向更早翻;渲染时把更早的页拼在前面。
@@ -36,7 +38,8 @@ export default function Chat() {
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
     enabled: !!user,
-    refetchInterval: 10000,
+    // 活跃会话:可见时 4s 轮询接近实时;切到后台暂停,切回由 refetchOnWindowFocus 补刷。
+    refetchInterval: pollInterval(visible, 4000),
   })
   // pages[0]=最新页,pages[n]=更早页。展平时反转页顺序,使更早消息在上、最新在下。
   const list = data ? [...data.pages].reverse().flatMap(p => p.list) : []

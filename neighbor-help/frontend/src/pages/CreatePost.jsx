@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import AppBar from '@mui/material/AppBar'
@@ -66,6 +66,15 @@ export default function CreatePost() {
     queryFn: () => api.getPost(id),
     enabled: isEdit,
   })
+
+  // 已完成的帖子不可编辑(后端也会拦)。这里在详情到达后即时拦截,
+  // 避免用户填完一通才收到后端报错。用 effect 跳转,不在渲染期 navigate。
+  useEffect(() => {
+    if (isEdit && editing && editing.status !== 'open') {
+      toast.error('已完成的帖子不可编辑')
+      navigate(`/post/${id}`, { replace: true })
+    }
+  }, [isEdit, editing, id, navigate])
 
   // 详情到达后填充表单一次。用渲染期派生(记录已填充的 id),避免在 effect 里 setState。
   const [filledId, setFilledId] = useState(null)

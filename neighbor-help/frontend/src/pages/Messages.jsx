@@ -13,6 +13,7 @@ import Tab from '@mui/material/Tab'
 import CircularProgress from '@mui/material/CircularProgress'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
+import { usePageVisible, pollInterval } from '../hooks/usePageVisible'
 import BottomNav from '../components/BottomNav'
 
 const WARM = '#EC6E33'
@@ -23,6 +24,7 @@ export default function Messages() {
   const { user } = useAuth()
   const qc = useQueryClient()
   const [tab, setTab] = useState('message') // 'message' 私信 | 'comment' 通知
+  const visible = usePageVisible()
 
   // 私信会话(分页)
   const conv = useInfiniteQuery({
@@ -49,7 +51,8 @@ export default function Messages() {
     queryKey: ['unread'],
     queryFn: () => api.getUnread(),
     enabled: !!user,
-    refetchInterval: 30000,
+    // 可见时 15s 刷新通知角标;切到后台暂停,切回由 refetchOnWindowFocus 补刷。
+    refetchInterval: pollInterval(visible, 15000),
   })
   const notiUnread = unread?.notiUnread ?? 0
 

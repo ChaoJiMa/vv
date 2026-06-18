@@ -25,15 +25,15 @@ import BottomNav from '../components/BottomNav'
 const WARM = '#EC6E33'
 const WARM_DARK = '#D85F26'
 
-// 顶部滚动公告(后端暂无公告接口,先用静态文案,后续接 /api/announcements 即可替换)
-const NOTICES = [
+// 顶部滚动公告 / 新手必读默认文案(后端 app_config 未配置时的兜底)
+const NOTICES_FALLBACK = [
   '欢迎来到邻里里,远亲不如近邻 🏠',
   '文明互助,共建友善社区 🌱',
   '交易注意安全,谨防诈骗 ⚠️',
 ]
 
 // 新手必读 / 风险告知(悬浮帮助入口里展示)
-const SAFETY_TIPS = [
+const SAFETY_TIPS_FALLBACK = [
   { icon: '🔒', text: '见面交易选在小区公共区域,结伴更安心' },
   { icon: '💰', text: '大额交易当面验货,警惕预付定金类骗局' },
   { icon: '📵', text: '不向陌生人透露验证码、银行卡等敏感信息' },
@@ -53,14 +53,14 @@ export default function Home() {
   })
   const menuMap = Object.fromEntries(menus.map(m => [m.value, m]))
 
-  // 热度数据源:独立拉一次「全部」最近列表,统计每类近期条数,给入口卡角标用
-  const { data: hotData } = useQuery({
-    queryKey: ['posts-hot'],
-    queryFn: () => api.getPosts('', 1, ''),
-    staleTime: 60 * 1000,
+  // 首页公告 / 安全提示(后端 app_config 下发,失败用内置兜底)
+  const { data: ann } = useQuery({
+    queryKey: ['announcements'],
+    queryFn: () => api.getAnnouncements(),
+    staleTime: 5 * 60 * 1000,
   })
-  const hotByType = {}
-  ;(hotData?.list ?? []).forEach(p => { hotByType[p.type] = (hotByType[p.type] || 0) + 1 })
+  const notices = ann?.notices?.length ? ann.notices : NOTICES_FALLBACK
+  const safetyTips = ann?.safetyTips?.length ? ann.safetyTips : SAFETY_TIPS_FALLBACK
 
   // 首页动态:最新全部帖子流(不带筛选,筛选/搜索在发现页)
   const {
@@ -74,6 +74,10 @@ export default function Home() {
   const posts = data?.pages.flatMap(p => p.list) ?? []
   const total = data?.pages?.[0]?.total ?? 0
   const todayCount = posts.filter(p => isToday(p.created_at)).length
+
+  // 入口卡热度角标:直接从已加载的帖子流统计每类条数,复用主列表数据,不额外发请求。
+  const hotByType = {}
+  posts.forEach(p => { hotByType[p.type] = (hotByType[p.type] || 0) + 1 })
 
   // 触底自动加载下一页
   const sentinelRef = useRef(null)
@@ -132,7 +136,7 @@ export default function Home() {
                 '&:hover': { animationPlayState: 'paused' },
               }}
             >
-              {[...NOTICES, ...NOTICES].map((n, i) => (
+              {[...notices, ...notices].map((n, i) => (
                 <Typography key={i} component="span" sx={{ fontSize: 12.5, color: 'text.secondary', mr: 5 }}>
                   {n}
                 </Typography>
@@ -343,7 +347,7 @@ export default function Home() {
             </IconButton>
           </Box>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-            {SAFETY_TIPS.map((t, i) => (
+            {safetyTips.map((t, i) => (
               <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.25 }}>
                 <Typography sx={{ fontSize: 18, lineHeight: 1.4, flexShrink: 0 }}>{t.icon}</Typography>
                 <Typography sx={{ fontSize: 13.5, color: 'text.secondary', lineHeight: 1.5 }}>{t.text}</Typography>
