@@ -55,6 +55,7 @@ export const api = {
   getMenus: () => post('/api/menus/list'),
   getPosts: (type, page = 1, keyword = '') => post('/api/posts/list', { type, page, keyword }),
   getPost: (id) => post('/api/posts/detail', { id }),
+  getComments: (id, page = 1) => post('/api/posts/comments', { id, page }),
   createPost: (body) => post('/api/posts/create', body),
   updatePost: (id, body) => post('/api/posts/update', { id, ...body }),
   deletePost: (id) => post('/api/posts/delete', { id }),
@@ -73,7 +74,8 @@ export const api = {
   // 私信 / 通知
   sendMessage: (receiverId, content, postId) => post('/api/messages/send', { receiverId, content, postId }),
   getThread: (peerId, page = 1) => post('/api/messages/thread', { peerId, page }),
-  getInbox: () => post('/api/messages/inbox'),
+  getConversations: (page = 1) => post('/api/messages/conversations', { page }),
+  getNotifications: (page = 1) => post('/api/notifications/list', { page }),
   getUnread: () => post('/api/messages/unread', {}, { silentAuth: true, silentError: true }),
   readNotification: (id) => post('/api/notifications/read', { id }),
   register: (body) => post('/auth/register', body),

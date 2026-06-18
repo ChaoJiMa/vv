@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import AppBar from '@mui/material/AppBar'
 import Toolbar from '@mui/material/Toolbar'
 import Box from '@mui/material/Box'
@@ -28,10 +28,13 @@ const RESPOND_LABEL = {
 export default function PostDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const { user } = useAuth()
   const qc = useQueryClient()
   const [comment, setComment] = useState('')
+  // 从个人页「完成」入口进来时带 state.openAdopt,加载后自动打开采纳抽屉(统一走采纳流程)
   const [adoptOpen, setAdoptOpen] = useState(false)
+  const [adoptAuto, setAdoptAuto] = useState(false)
 
   const { data: menus = [] } = useQuery({
     queryKey: ['menus'],
@@ -45,28 +48,27 @@ export default function PostDetail() {
     queryFn: () => api.getPost(id),
   })
 
+  // 评论分页:独立 useInfiniteQuery,按时间正序,触底加载更多
+  const {
+    data: commentData, fetchNextPage, hasNextPage, isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['comments', id],
+    queryFn: ({ pageParam }) => api.getComments(id, pageParam),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
+  })
+  const comments = commentData?.pages.flatMap(p => p.list) ?? []
+  const commentTotal = commentData?.pages?.[0]?.total ?? post?.comment_count ?? 0
+
   const commentMutation = useMutation({
     // content 通过 variables 显式传入,不依赖闭包:onMutate 里会 setComment('') 清空输入,
     // 若 mutationFn 读闭包的 comment,await 让出后会读到已清空的空串,导致提交空内容。
     mutationFn: (text) => api.addComment(id, text),
-    // 乐观更新:先把评论插入本地缓存,失败再回滚
-    onMutate: async (text) => {
-      await qc.cancelQueries({ queryKey: ['post', id] })
-      const prev = qc.getQueryData(['post', id])
-      qc.setQueryData(['post', id], (old) => old ? {
-        ...old,
-        comments: [
-          ...(old.comments || []),
-          { id: `tmp-${Date.now()}`, content: text, nickname: user?.nickname || '我', building: user?.building || '', _optimistic: true },
-        ],
-      } : old)
+    onSuccess: () => {
       setComment('')
-      return { prev }
+      qc.invalidateQueries({ queryKey: ['comments', id] })
+      qc.invalidateQueries({ queryKey: ['post', id] }) // 刷新 comment_count
     },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev) qc.setQueryData(['post', id], ctx.prev)
-    },
-    onSettled: () => qc.invalidateQueries({ queryKey: ['post', id] }),
   })
 
   const closeMutation = useMutation({
@@ -112,21 +114,26 @@ export default function PostDetail() {
 
   const deleteCommentMutation = useMutation({
     mutationFn: (commentId) => api.deleteComment(commentId),
-    // 乐观移除:先从缓存删掉,失败回滚
-    onMutate: async (commentId) => {
-      await qc.cancelQueries({ queryKey: ['post', id] })
-      const prev = qc.getQueryData(['post', id])
-      qc.setQueryData(['post', id], (old) => old ? {
-        ...old,
-        comments: (old.comments || []).filter(c => c.id !== commentId),
-      } : old)
-      return { prev }
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['comments', id] })
+      qc.invalidateQueries({ queryKey: ['post', id] })
     },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev) qc.setQueryData(['post', id], ctx.prev)
-    },
-    onSettled: () => qc.invalidateQueries({ queryKey: ['post', id] }),
   })
+
+  // 触底自动加载更多评论
+  const sentinelRef = useRef(null)
+  const observe = useCallback((node) => {
+    if (!node) return
+    const io = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && hasNextPage && !isFetchingNextPage) fetchNextPage()
+    }, { rootMargin: '200px' })
+    io.observe(node)
+    return io
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
+  useEffect(() => {
+    const io = observe(sentinelRef.current)
+    return () => io?.disconnect()
+  }, [observe])
 
   if (isLoading) {
     return <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}><CircularProgress size={24} /></Box>
@@ -136,6 +143,14 @@ export default function PostDetail() {
   }
 
   const menu = menuMap[post.type]
+
+  // 自动打开采纳抽屉:仅当来源带 openAdopt、本人帖、未完成,且只触发一次
+  if (!adoptAuto && location.state?.openAdopt) {
+    if (user && user.id === post.user_id && post.status === 'open') {
+      setAdoptOpen(true)
+    }
+    setAdoptAuto(true)
+  }
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
@@ -284,14 +299,14 @@ export default function PostDetail() {
         {/* 评论列表 */}
         <Box sx={{ px: 2, py: 1.5 }}>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-            共 {post.comments?.length || 0} 条回复
+            共 {commentTotal} 条回复
           </Typography>
-          {post.comments?.map(c => (
+          {comments.map(c => (
             <Box key={c.id} sx={{ mb: 2 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                 <Typography variant="caption" fontWeight={500} color="text.primary">{c.nickname}</Typography>
                 <Typography variant="caption" color="text.disabled">{c.building || ''}</Typography>
-                {user && user.id === c.user_id && !c._optimistic && (
+                {user && user.id === c.user_id && (
                   <Typography
                     variant="caption"
                     color="error"
@@ -305,6 +320,12 @@ export default function PostDetail() {
               <Typography variant="body2" color="text.secondary">{c.content}</Typography>
             </Box>
           ))}
+          {/* 触底加载更多评论 */}
+          {comments.length > 0 && (
+            <Box ref={sentinelRef} sx={{ textAlign: 'center', py: 1, color: 'text.disabled' }}>
+              {isFetchingNextPage && <CircularProgress size={18} />}
+            </Box>
+          )}
         </Box>
 
         {/* 评论输入框 */}

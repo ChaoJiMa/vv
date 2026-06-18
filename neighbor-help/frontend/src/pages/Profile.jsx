@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useInfiniteQuery } from '@tanstack/react-query'
 import AppBar from '@mui/material/AppBar'
 import Toolbar from '@mui/material/Toolbar'
 import Box from '@mui/material/Box'
@@ -212,28 +212,35 @@ function PasswordForm({ onDone }) {
 
 // ===== 我发布的帖子 =====
 function MyPosts({ navigate }) {
-  const qc = useQueryClient()
   const [status, setStatus] = useState('') // '' 全部 | 'open' 进行中 | 'closed' 已完成
 
-  const { data, isLoading } = useQuery({
+  const {
+    data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ['myPosts', status],
-    queryFn: () => api.getMyPosts(1, status),
+    queryFn: ({ pageParam }) => api.getMyPosts(pageParam, status),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
   })
-  const list = data?.list ?? []
+  const list = data?.pages.flatMap(p => p.list) ?? []
+  const total = data?.pages?.[0]?.total ?? 0
 
-  const closeMutation = useMutation({
-    mutationFn: (id) => api.closePost(id),
-    onSuccess: () => {
-      toast.success('已标记完成')
-      qc.invalidateQueries({ queryKey: ['myPosts'] })
-      qc.invalidateQueries({ queryKey: ['posts'] })
-    },
-  })
+  // 触底自动加载下一页
+  const sentinelRef = useRef(null)
+  useEffect(() => {
+    const node = sentinelRef.current
+    if (!node) return
+    const io = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && hasNextPage && !isFetchingNextPage) fetchNextPage()
+    }, { rootMargin: '120px' })
+    io.observe(node)
+    return () => io.disconnect()
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage, list.length])
 
   return (
     <Box sx={{ px: 2.5, py: 2 }}>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-        我发布的{data?.total ? `(${data.total})` : ''}
+        我发布的{total ? `(${total})` : ''}
       </Typography>
 
       {/* 状态筛选 */}
@@ -276,12 +283,11 @@ function MyPosts({ navigate }) {
             <Typography variant="caption" color="text.secondary">
               {p.comment_count > 0 ? `💬 ${p.comment_count} 条回复` : '暂无回复'}
             </Typography>
-            {/* 进行中的帖子可一键标记完成,点击不冒泡到跳转 */}
+            {/* 进行中的帖子可标记完成:跳详情页并自动打开采纳抽屉(统一走采纳流程),点击不冒泡 */}
             {p.status === 'open' && (
               <Button
                 size="small"
-                onClick={(e) => { e.stopPropagation(); closeMutation.mutate(p.id) }}
-                disabled={closeMutation.isPending}
+                onClick={(e) => { e.stopPropagation(); navigate(`/post/${p.id}`, { state: { openAdopt: true } }) }}
                 sx={{ minWidth: 0, py: 0, px: 1, fontSize: 12, color: WARM }}
               >
                 完成
@@ -290,6 +296,14 @@ function MyPosts({ navigate }) {
           </Box>
         </Box>
       ))}
+
+      {/* 触底加载哨兵 */}
+      {list.length > 0 && (
+        <Box ref={sentinelRef} sx={{ textAlign: 'center', py: 1.5, color: 'text.disabled' }}>
+          {isFetchingNextPage && <CircularProgress size={18} />}
+          {!hasNextPage && <Typography variant="caption">没有更多了</Typography>}
+        </Box>
+      )}
     </Box>
   )
 }

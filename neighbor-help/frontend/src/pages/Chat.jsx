@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import AppBar from '@mui/material/AppBar'
 import Toolbar from '@mui/material/Toolbar'
 import Box from '@mui/material/Box'
@@ -23,36 +23,58 @@ export default function Chat() {
   const qc = useQueryClient()
   const [text, setText] = useState('')
   const bottomRef = useRef(null)
+  const topRef = useRef(null)
 
-  // 进入会话即拉取(并在后端标记对方发我的为已读);轮询 10s 拿新消息
-  const { data, isLoading } = useQuery({
+  // 会话分页:每页取更早的一段(后端按时间倒序取、正序返回)。
+  // 第 1 页是最新消息,翻页向更早翻;渲染时把更早的页拼在前面。
+  const {
+    data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ['thread', peerId],
-    queryFn: () => api.getThread(peerId),
+    queryFn: ({ pageParam }) => api.getThread(peerId, pageParam),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
     enabled: !!user,
     refetchInterval: 10000,
   })
-  const list = data?.list ?? []
-  const peer = data?.peer
+  // pages[0]=最新页,pages[n]=更早页。展平时反转页顺序,使更早消息在上、最新在下。
+  const list = data ? [...data.pages].reverse().flatMap(p => p.list) : []
+  const peer = data?.pages?.[0]?.peer
 
-  // 拉取后未读已被后端清零,刷新首页角标与消息列表
+  // 拉取后未读已被后端清零,刷新首页角标与会话列表
   useEffect(() => {
     if (data) {
       qc.invalidateQueries({ queryKey: ['unread'] })
-      qc.invalidateQueries({ queryKey: ['inbox'] })
+      qc.invalidateQueries({ queryKey: ['conversations'] })
     }
   }, [data, qc])
 
-  // 新消息到达滚到底部
+  // 顶部哨兵进入视口时加载更早消息
+  const observeTop = useCallback((node) => {
+    if (!node) return
+    const io = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && hasNextPage && !isFetchingNextPage) fetchNextPage()
+    }, { rootMargin: '100px' })
+    io.observe(node)
+    return io
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [list.length])
+    const io = observeTop(topRef.current)
+    return () => io?.disconnect()
+  }, [observeTop])
+
+  // 首屏 / 自己发新消息后滚到底部(仅在第 1 页时,避免向上翻历史被打断)
+  const pageCount = data?.pages.length ?? 0
+  useEffect(() => {
+    if (pageCount <= 1) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [list.length, pageCount])
 
   const sendMutation = useMutation({
     mutationFn: (content) => api.sendMessage(peerId, content, fromPostId),
     onSuccess: () => {
       setText('')
       qc.invalidateQueries({ queryKey: ['thread', peerId] })
-      qc.invalidateQueries({ queryKey: ['inbox'] })
+      qc.invalidateQueries({ queryKey: ['conversations'] })
     },
   })
 
@@ -94,6 +116,13 @@ export default function Chat() {
         )}
 
         <Box sx={{ px: 2, py: 2 }}>
+          {/* 顶部哨兵 + 加载更早提示 */}
+          {list.length > 0 && (
+            <Box ref={topRef} sx={{ textAlign: 'center', py: 1, color: 'text.disabled' }}>
+              {isFetchingNextPage && <CircularProgress size={16} />}
+              {!hasNextPage && <Typography variant="caption">没有更早的消息了</Typography>}
+            </Box>
+          )}
           {list.map(m => {
             const mine = m.sender_id === user.id
             return (

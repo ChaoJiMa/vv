@@ -67,15 +67,13 @@ api.post('/posts/list', async (c) => {
 })
 
 // POST /api/posts/detail —— 帖子详情,参数 { id } 走 body
+// 评论改由 /api/posts/comments 分页拉取,这里只带 comment_count(总数)。
 api.post('/posts/detail', async (c) => {
   const { id } = await bodyOf(c)
   const post = await c.env.DB.prepare(
-    'SELECT p.*, u.nickname, u.building, u.unit FROM posts p JOIN users u ON p.user_id=u.id WHERE p.id=?'
+    'SELECT p.*, u.nickname, u.building, u.unit, (SELECT COUNT(*) FROM comments WHERE post_id=p.id) AS comment_count FROM posts p JOIN users u ON p.user_id=u.id WHERE p.id=?'
   ).bind(id).first()
   if (!post) return fail(CODE.POST_NOT_FOUND, '帖子不存在')
-  const { results: comments } = await c.env.DB.prepare(
-    'SELECT c.*, u.nickname, u.building FROM comments c JOIN users u ON c.user_id=u.id WHERE c.post_id=? ORDER BY c.created_at ASC'
-  ).bind(id).all()
   // 已采纳的帮助者(完成帖会有)
   const { results: helpers } = await c.env.DB.prepare(
     'SELECT h.helper_id, h.thanked, u.nickname, u.building FROM post_helpers h JOIN users u ON u.id=h.helper_id WHERE h.post_id=? ORDER BY h.created_at ASC'
@@ -88,7 +86,24 @@ api.post('/posts/detail', async (c) => {
   const auth = await verifyAuth(c.req.raw, c.env)
   const myId = auth?.userId || null
   const myResponded = myId ? (responses || []).some(r => r.user_id === myId) : false
-  return success({ ...post, comments, helpers, responses, myResponded })
+  return success({ ...post, helpers, responses, myResponded })
+})
+
+// POST /api/posts/comments —— 帖子评论列表(分页),参数 { id, page }。按时间正序(最早在上)。
+api.post('/posts/comments', async (c) => {
+  const { id, page: rawPage } = await bodyOf(c)
+  const page = Math.max(1, parseInt(rawPage || '1') || 1)
+  const limit = 20
+  const offset = (page - 1) * limit
+
+  const [{ results: list }, countRow] = await Promise.all([
+    c.env.DB.prepare(
+      'SELECT c.*, u.nickname, u.building FROM comments c JOIN users u ON c.user_id=u.id WHERE c.post_id=? ORDER BY c.created_at ASC LIMIT ? OFFSET ?'
+    ).bind(id, limit, offset).all(),
+    c.env.DB.prepare('SELECT COUNT(*) AS n FROM comments WHERE post_id=?').bind(id).first(),
+  ])
+  const total = countRow?.n ?? 0
+  return success({ list, total, page, hasMore: offset + list.length < total })
 })
 
 // ===== 需登录接口(authRequired 中间件)=====
@@ -301,15 +316,22 @@ api.post('/posts/helpers/candidates', authRequired, async (c) => {
 api.post('/posts/respond', authRequired, async (c) => {
   const userId = c.get('userId')
   const { id } = await bodyOf(c)
-  const post = await c.env.DB.prepare('SELECT user_id, type, status FROM posts WHERE id = ?').bind(id).first()
+  const post = await c.env.DB.prepare('SELECT user_id, type, status, title FROM posts WHERE id = ?').bind(id).first()
   if (!post) return fail(CODE.POST_NOT_FOUND, '帖子不存在')
   if (post.user_id === userId) return fail(CODE.POST_MISSING_FIELD, '不能响应自己的帖子')
   if (!['help', 'idle', 'lost'].includes(post.type)) return fail(CODE.POST_MISSING_FIELD, '该类型帖子不支持响应')
   if (post.status !== 'open') return fail(CODE.POST_MISSING_FIELD, '该帖已完成')
   // INSERT OR IGNORE:已响应过则静默成功(幂等)
-  await c.env.DB.prepare(
+  const now = Date.now()
+  const { meta } = await c.env.DB.prepare(
     'INSERT OR IGNORE INTO post_responses (id, post_id, user_id, created_at) VALUES (?, ?, ?, ?)'
-  ).bind(genId(), id, userId, Date.now()).run()
+  ).bind(genId(), id, userId, now).run()
+  // 仅首次响应(真正插入)时通知帖主,避免重复响应反复打扰
+  if (meta.changes) {
+    await c.env.DB.prepare(
+      'INSERT INTO notifications (id, user_id, type, post_id, actor_id, content, read, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)'
+    ).bind(genId(), post.user_id, 'respond', id, userId, post.title || '', now).run()
+  }
   return success({ success: true })
 })
 

@@ -71,12 +71,15 @@ messages.post('/messages/thread', async (c) => {
   return success({ peer, list, page, hasMore: results.length === limit })
 })
 
-// POST /api/messages/inbox —— 统一消息列表:私信会话 + 评论通知,按时间倒序混排
-// 私信会话:每个对话对象取最新一条 + 未读数;评论通知:每条带帖子标题与评论人昵称。
-messages.post('/messages/inbox', async (c) => {
+// POST /api/messages/conversations —— 私信会话列表(分页)。
+// 每个对话对象取最新一条消息 + 未读数,按最新消息时间倒序。参数 { page }。
+messages.post('/messages/conversations', async (c) => {
   const userId = c.get('userId')
+  const { page: rawPage } = await bodyOf(c)
+  const page = Math.max(1, parseInt(rawPage || '1') || 1)
+  const limit = 20
+  const offset = (page - 1) * limit
 
-  // 1) 私信会话:窗口函数按对方分组取最新一条
   const convSql = `
     WITH conv AS (
       SELECT
@@ -93,9 +96,44 @@ messages.post('/messages/inbox', async (c) => {
            u.nickname AS peer_name, u.avatar AS peer_avatar, u.building AS peer_building,
            (SELECT COUNT(*) FROM messages m WHERE m.receiver_id = ?1 AND m.sender_id = c.peer_id AND m.read = 0) AS unread
     FROM conv c JOIN users u ON u.id = c.peer_id
-    WHERE c.rn = 1`
+    WHERE c.rn = 1
+    ORDER BY c.created_at DESC
+    LIMIT ?2 OFFSET ?3`
+  // 会话总数:不同对话对象的个数
+  const countSql = `
+    SELECT COUNT(*) AS n FROM (
+      SELECT DISTINCT CASE WHEN sender_id = ?1 THEN receiver_id ELSE sender_id END AS peer_id
+      FROM messages WHERE sender_id = ?1 OR receiver_id = ?1
+    )`
 
-  // 2) 评论通知
+  const [{ results: convs }, countRow] = await Promise.all([
+    c.env.DB.prepare(convSql).bind(userId, limit, offset).all(),
+    c.env.DB.prepare(countSql).bind(userId).first(),
+  ])
+
+  const list = (convs || []).map(r => ({
+    peerId: r.peer_id,
+    peerName: r.peer_name || '邻居',
+    peerAvatar: r.peer_avatar || null,
+    peerBuilding: r.peer_building || '',
+    content: r.content,
+    fromMe: r.sender_id === userId,
+    unread: r.unread || 0,
+    createdAt: r.created_at,
+  }))
+  const total = countRow?.n ?? 0
+  return success({ list, total, page, hasMore: offset + list.length < total })
+})
+
+// POST /api/notifications/list —— 通知列表(分页)。参数 { page }。
+// type 取 comment(评论)/respond(响应)/adopt(采纳)/thank(感谢)。
+messages.post('/notifications/list', async (c) => {
+  const userId = c.get('userId')
+  const { page: rawPage } = await bodyOf(c)
+  const page = Math.max(1, parseInt(rawPage || '1') || 1)
+  const limit = 20
+  const offset = (page - 1) * limit
+
   const notiSql = `
     SELECT n.id, n.type, n.post_id, n.content, n.read, n.created_at,
            p.title AS post_title, a.nickname AS actor_name
@@ -103,40 +141,26 @@ messages.post('/messages/inbox', async (c) => {
     LEFT JOIN posts p ON p.id = n.post_id
     LEFT JOIN users a ON a.id = n.actor_id
     WHERE n.user_id = ?
-    ORDER BY n.created_at DESC LIMIT 100`
+    ORDER BY n.created_at DESC LIMIT ? OFFSET ?`
+  const countSql = 'SELECT COUNT(*) AS n FROM notifications WHERE user_id = ?'
 
-  const [{ results: convs }, { results: notis }] = await Promise.all([
-    c.env.DB.prepare(convSql).bind(userId).all(),
-    c.env.DB.prepare(notiSql).bind(userId).all(),
+  const [{ results: notis }, countRow] = await Promise.all([
+    c.env.DB.prepare(notiSql).bind(userId, limit, offset).all(),
+    c.env.DB.prepare(countSql).bind(userId).first(),
   ])
 
-  // 统一成同构条目,kind 区分类型
-  const items = [
-    ...(convs || []).map(r => ({
-      kind: 'message',
-      peerId: r.peer_id,
-      peerName: r.peer_name || '邻居',
-      peerAvatar: r.peer_avatar || null,
-      peerBuilding: r.peer_building || '',
-      content: r.content,
-      fromMe: r.sender_id === userId,    // 最新一条是不是我发的
-      unread: r.unread || 0,
-      createdAt: r.created_at,
-    })),
-    ...(notis || []).map(r => ({
-      kind: 'comment',
-      notiType: r.type,                  // 'comment' 评论回复 / 'thank' 采纳感谢
-      notificationId: r.id,
-      postId: r.post_id,
-      postTitle: r.post_title || '(帖子已删除)',
-      actorName: r.actor_name || '邻居',
-      content: r.content || '',
-      read: r.read === 1,
-      createdAt: r.created_at,
-    })),
-  ].sort((a, b) => b.createdAt - a.createdAt)
-
-  return success({ items })
+  const list = (notis || []).map(r => ({
+    notiType: r.type,
+    notificationId: r.id,
+    postId: r.post_id,
+    postTitle: r.post_title || '(帖子已删除)',
+    actorName: r.actor_name || '邻居',
+    content: r.content || '',
+    read: r.read === 1,
+    createdAt: r.created_at,
+  }))
+  const total = countRow?.n ?? 0
+  return success({ list, total, page, hasMore: offset + list.length < total })
 })
 
 // POST /api/messages/unread —— 总未读数(私信未读 + 通知未读),给首页角标轮询用

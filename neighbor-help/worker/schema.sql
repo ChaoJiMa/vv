@@ -63,8 +63,8 @@ CREATE TABLE IF NOT EXISTS messages (
   FOREIGN KEY (receiver_id) REFERENCES users(id)
 );
 
--- 通知:type 取 'comment'(评论回复)/ 'adopt'(被采纳)/ 'thank'(被采纳并感谢)。
--- actor_id 为触发者(评论人/帖主),user_id 为接收者。content 冗余:评论为评论内容,采纳/感谢为帖子标题。
+-- 通知:type 取 'comment'(评论回复)/ 'respond'(有人响应)/ 'adopt'(被采纳)/ 'thank'(被采纳并感谢)。
+-- actor_id 为触发者(评论人/响应人/帖主),user_id 为接收者。content 冗余:评论为评论内容,其余为帖子标题。
 CREATE TABLE IF NOT EXISTS notifications (
   id TEXT PRIMARY KEY,           -- UUID
   user_id TEXT NOT NULL,         -- 接收通知的用户(帖子作者)

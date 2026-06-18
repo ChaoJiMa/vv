@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import AppBar from '@mui/material/AppBar'
 import Toolbar from '@mui/material/Toolbar'
 import Box from '@mui/material/Box'
@@ -17,18 +17,33 @@ import BottomNav from '../components/BottomNav'
 
 const WARM = '#EC6E33'
 
-// 消息页:双 Tab(私信 / 通知)。后端 inbox 返回统一流,前端按 kind 拆分到两个 Tab。
+// 消息页:双 Tab(私信 / 通知)。私信会话与通知各自独立分页,触底加载。
 export default function Messages() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const qc = useQueryClient()
   const [tab, setTab] = useState('message') // 'message' 私信 | 'comment' 通知
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['inbox'],
-    queryFn: () => api.getInbox(),
+  // 私信会话(分页)
+  const conv = useInfiniteQuery({
+    queryKey: ['conversations'],
+    queryFn: ({ pageParam }) => api.getConversations(pageParam),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
     enabled: !!user,
   })
+  const messages = conv.data?.pages.flatMap(p => p.list) ?? []
+
+  // 通知(分页)
+  const noti = useInfiniteQuery({
+    queryKey: ['notifications'],
+    queryFn: ({ pageParam }) => api.getNotifications(pageParam),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
+    enabled: !!user,
+  })
+  const notifications = noti.data?.pages.flatMap(p => p.list) ?? []
+
   // 通知 Tab 角标:复用 unread 查询的 notiUnread
   const { data: unread } = useQuery({
     queryKey: ['unread'],
@@ -38,18 +53,34 @@ export default function Messages() {
   })
   const notiUnread = unread?.notiUnread ?? 0
 
-  const items = data?.items ?? []
-  const messages = items.filter(it => it.kind === 'message')
-  const notifications = items.filter(it => it.kind === 'comment')
-
   // 点开评论通知:标记该通知已读后跳到帖子
   const readNoti = useMutation({
     mutationFn: (id) => api.readNotification(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['inbox'] })
+      qc.invalidateQueries({ queryKey: ['notifications'] })
       qc.invalidateQueries({ queryKey: ['unread'] })
     },
   })
+
+  // 当前 Tab 的分页状态
+  const active = tab === 'message' ? conv : noti
+  const isLoading = active.isLoading
+  const list = tab === 'message' ? messages : notifications
+
+  // 触底自动加载下一页
+  const sentinelRef = useRef(null)
+  const observe = useCallback((node) => {
+    if (!node) return
+    const io = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && active.hasNextPage && !active.isFetchingNextPage) active.fetchNextPage()
+    }, { rootMargin: '200px' })
+    io.observe(node)
+    return io
+  }, [active])
+  useEffect(() => {
+    const io = observe(sentinelRef.current)
+    return () => io?.disconnect()
+  }, [observe])
 
   if (!user) {
     return (
@@ -64,8 +95,6 @@ export default function Messages() {
     if (!it.read) readNoti.mutate(it.notificationId)
     if (it.postId) navigate(`/post/${it.postId}`)
   }
-
-  const list = tab === 'message' ? messages : notifications
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
@@ -149,16 +178,19 @@ export default function Messages() {
 
         {/* 通知列表 */}
         {!isLoading && tab === 'comment' && notifications.map((it) => {
-          // thank:采纳并感谢;adopt:采纳;comment:评论回复
+          // thank:采纳并感谢;adopt:采纳;respond:有人响应;comment:评论回复
           const isThank = it.notiType === 'thank'
           const isAdopt = it.notiType === 'adopt'
-          const icon = isThank ? '🙏' : isAdopt ? '✅' : '💬'
+          const isRespond = it.notiType === 'respond'
+          const icon = isThank ? '🙏' : isAdopt ? '✅' : isRespond ? '🙋' : '💬'
           const title = isThank
             ? `${it.actorName} 采纳并感谢了你`
             : isAdopt
               ? `${it.actorName} 采纳了你的帮助`
-              : `${it.actorName} 回复了你`
-          const showContent = !isThank && !isAdopt // 采纳/感谢只展示帖子标题,无评论正文
+              : isRespond
+                ? `${it.actorName} 响应了你的帖子`
+                : `${it.actorName} 回复了你`
+          const showContent = !isThank && !isAdopt && !isRespond // 仅评论展示正文,其余只展示帖子标题
           return (
             <Box
               key={`n-${it.notificationId}`}
@@ -186,6 +218,14 @@ export default function Messages() {
             </Box>
           )
         })}
+
+        {/* 触底加载哨兵 */}
+        {!isLoading && list.length > 0 && (
+          <Box ref={sentinelRef} sx={{ textAlign: 'center', py: 2, color: 'text.disabled' }}>
+            {active.isFetchingNextPage && <CircularProgress size={20} />}
+            {!active.hasNextPage && <Typography variant="caption">没有更多了</Typography>}
+          </Box>
+        )}
       </Box>
       <BottomNav />
     </Box>
