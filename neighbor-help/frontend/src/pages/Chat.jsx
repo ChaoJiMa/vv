@@ -12,6 +12,7 @@ import CircularProgress from '@mui/material/CircularProgress'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
+import { toast } from '../toast'
 
 export default function Chat() {
   const { peerId } = useParams()
@@ -76,6 +77,7 @@ export default function Chat() {
       qc.invalidateQueries({ queryKey: ['thread', peerId] })
       qc.invalidateQueries({ queryKey: ['conversations'] })
     },
+    onError: (e) => toast.error(e.message || '发送失败'),
   })
 
   const handleSend = () => {

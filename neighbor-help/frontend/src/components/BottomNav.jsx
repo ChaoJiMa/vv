@@ -13,6 +13,7 @@ import PersonOutlineIcon from '@mui/icons-material/PersonOutlined'
 import AddIcon from '@mui/icons-material/Add'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
+import { toast } from '../toast'
 
 const WARM = '#EC6E33'
 const WARM_DARK = '#D85F26'
@@ -34,13 +35,24 @@ export default function BottomNav() {
   })
   const unreadTotal = unread?.total ?? 0
 
+  // 游客点需登录的入口(消息/我的/发布):给一句轻提示并带 from 跳登录,
+  // 登录后跳回目标页 —— 取代 RequireAuth 的静默重定向(那样太突兀)。
+  const go = (path, requireAuth) => {
+    if (requireAuth && !user) {
+      toast.info('登录后可用')
+      navigate('/login', { state: { from: { pathname: path } } })
+      return
+    }
+    navigate(path)
+  }
+
   const left = [
     { key: 'home', label: '首页', path: '/', active: HomeRoundedIcon, inactive: HomeOutlinedIcon },
     { key: 'discover', label: '发现', path: '/discover', active: SearchIcon, inactive: SearchIcon },
   ]
   const right = [
-    { key: 'msg', label: '消息', path: '/messages', active: ChatBubbleIcon, inactive: ChatBubbleOutlineIcon, badge: unreadTotal },
-    { key: 'me', label: '我的', path: '/profile', active: PersonIcon, inactive: PersonOutlineIcon },
+    { key: 'msg', label: '消息', path: '/messages', active: ChatBubbleIcon, inactive: ChatBubbleOutlineIcon, badge: unreadTotal, auth: true },
+    { key: 'me', label: '我的', path: '/profile', active: PersonIcon, inactive: PersonOutlineIcon, auth: true },
   ]
 
   return (
@@ -56,11 +68,11 @@ export default function BottomNav() {
         pb: 'env(safe-area-inset-bottom)',
       }}
     >
-      {left.map(it => <NavItem key={it.key} item={it} pathname={pathname} navigate={navigate} />)}
+      {left.map(it => <NavItem key={it.key} item={it} pathname={pathname} go={go} />)}
       {/* 中:发布凸起按钮 */}
       <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
         <Box
-          onClick={() => navigate('/create')}
+          onClick={() => go('/create', true)}
           sx={{
             width: 52, height: 52, mt: '-18px', borderRadius: '50%', cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -73,17 +85,17 @@ export default function BottomNav() {
           <AddIcon sx={{ fontSize: 28 }} />
         </Box>
       </Box>
-      {right.map(it => <NavItem key={it.key} item={it} pathname={pathname} navigate={navigate} />)}
+      {right.map(it => <NavItem key={it.key} item={it} pathname={pathname} go={go} />)}
     </Box>
   )
 }
 
-function NavItem({ item, pathname, navigate }) {
+function NavItem({ item, pathname, go }) {
   const selected = pathname === item.path
   const Icon = selected ? item.active : item.inactive
   return (
     <Box
-      onClick={() => navigate(item.path)}
+      onClick={() => go(item.path, item.auth)}
       sx={{
         flex: 1, py: 0.75, cursor: 'pointer',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.25,

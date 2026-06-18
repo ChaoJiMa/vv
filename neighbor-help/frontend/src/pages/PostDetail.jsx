@@ -11,9 +11,11 @@ import Chip from '@mui/material/Chip'
 import InputBase from '@mui/material/InputBase'
 import CircularProgress from '@mui/material/CircularProgress'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import OutlinedFlagIcon from '@mui/icons-material/OutlinedFlag'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { toast } from '../toast'
+import { safeParse } from '../utils/image'
 import BottomSheet from '../components/BottomSheet'
 
 const WARM = '#EC6E33'
@@ -69,6 +71,7 @@ export default function PostDetail() {
       qc.invalidateQueries({ queryKey: ['comments', id] })
       qc.invalidateQueries({ queryKey: ['post', id] }) // 刷新 comment_count
     },
+    onError: (e) => toast.error(e.message || '发送失败'),
   })
 
   const closeMutation = useMutation({
@@ -82,6 +85,7 @@ export default function PostDetail() {
       qc.invalidateQueries({ queryKey: ['posts'] })
       qc.invalidateQueries({ queryKey: ['myStats'] })
     },
+    onError: (e) => toast.error(e.message || '操作失败'),
   })
 
   const deleteMutation = useMutation({
@@ -92,6 +96,7 @@ export default function PostDetail() {
       qc.removeQueries({ queryKey: ['post', id] })
       navigate('/')
     },
+    onError: (e) => toast.error(e.message || '删除失败'),
   })
 
   // 响应帖子:记一条响应后跳到与发帖人的私信
@@ -101,6 +106,7 @@ export default function PostDetail() {
       qc.invalidateQueries({ queryKey: ['post', id] })
       navigate(`/messages/${post.user_id}`, { state: { postId: id } })
     },
+    onError: (e) => toast.error(e.message || '响应失败'),
   })
 
   // 取消响应:从响应者列表移除自己(不跳转)
@@ -110,6 +116,7 @@ export default function PostDetail() {
       toast.success('已取消响应')
       qc.invalidateQueries({ queryKey: ['post', id] })
     },
+    onError: (e) => toast.error(e.message || '取消失败'),
   })
 
   const deleteCommentMutation = useMutation({
@@ -117,6 +124,23 @@ export default function PostDetail() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['comments', id] })
       qc.invalidateQueries({ queryKey: ['post', id] })
+    },
+    onError: (e) => toast.error(e.message || '删除失败'),
+  })
+
+  // 举报:reportTarget = { type:'post'|'comment', id } | null,有值即打开举报抽屉
+  const [reportTarget, setReportTarget] = useState(null)
+  // 图片灯箱:点击缩略图看大图,viewerIdx 为当前查看的图序号(null=关闭)
+  const [viewerIdx, setViewerIdx] = useState(null)
+  const reportMutation = useMutation({
+    mutationFn: ({ targetType, targetId, reason }) => api.reportContent(targetType, targetId, reason),
+    onSuccess: () => {
+      setReportTarget(null)
+      toast.success('举报已提交,我们会尽快核实')
+    },
+    onError: (e) => {
+      setReportTarget(null)
+      toast.error(e.message || '举报失败')
     },
   })
 
@@ -143,6 +167,7 @@ export default function PostDetail() {
   }
 
   const menu = menuMap[post.type]
+  const postImages = safeParse(post.images)
 
   // 自动打开采纳抽屉:仅当来源带 openAdopt、本人帖、未完成,且只触发一次
   if (!adoptAuto && location.state?.openAdopt) {
@@ -172,6 +197,29 @@ export default function PostDetail() {
           {post.content && (
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>{post.content}</Typography>
           )}
+          {/* 图片网格:点击看大图 */}
+          {postImages.length > 0 && (
+            <Box sx={{ display: 'grid', gridTemplateColumns: postImages.length === 1 ? '1fr' : 'repeat(3, 1fr)', gap: 0.75, mb: 1.5 }}>
+              {postImages.map((key, i) => (
+                <Box
+                  key={key}
+                  onClick={() => setViewerIdx(i)}
+                  sx={{
+                    position: 'relative', pt: postImages.length === 1 ? '56%' : '100%',
+                    borderRadius: 2, overflow: 'hidden', bgcolor: 'grey.100', cursor: 'pointer',
+                  }}
+                >
+                  <Box
+                    component="img"
+                    src={api.imgUrl(key)}
+                    alt=""
+                    loading="lazy"
+                    sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                </Box>
+              ))}
+            </Box>
+          )}
           {/* 位置 / 联系方式 */}
           {(post.location || post.contact) && (
             <Box sx={{ mb: 1.5 }}>
@@ -198,9 +246,22 @@ export default function PostDetail() {
             </Box>
           )}
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Typography variant="caption" color="text.secondary">
-              {post.building || ''}{post.unit || ''}邻居 · {post.nickname}
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {post.building || ''}{post.unit || ''}邻居 · {post.nickname}
+              </Typography>
+              {/* 举报:登录的非本人用户可举报本帖 */}
+              {user && user.id !== post.user_id && (
+                <IconButton
+                  size="small"
+                  onClick={() => setReportTarget({ type: 'post', id })}
+                  sx={{ p: 0.25, color: 'text.disabled' }}
+                  aria-label="举报"
+                >
+                  <OutlinedFlagIcon sx={{ fontSize: 15 }} />
+                </IconButton>
+              )}
+            </Box>
             {user && user.id === post.user_id && (
               <Box sx={{ display: 'flex', gap: 0.5 }}>
                 {post.status === 'open' && (
@@ -222,6 +283,18 @@ export default function PostDetail() {
                   删除
                 </Button>
               </Box>
+            )}
+            {/* 未登录:引导去登录后参与 */}
+            {!user && (
+              <Button
+                size="small"
+                variant="contained"
+                disableElevation
+                onClick={() => navigate('/login', { state: { from: location } })}
+                sx={{ bgcolor: WARM, '&:hover': { bgcolor: '#D85F26' } }}
+              >
+                登录后参与
+              </Button>
             )}
             {/* 非本人帖子 */}
             {user && user.id !== post.user_id && (
@@ -316,6 +389,17 @@ export default function PostDetail() {
                     删除
                   </Typography>
                 )}
+                {/* 非本人评论:登录后可举报 */}
+                {user && user.id !== c.user_id && (
+                  <Typography
+                    variant="caption"
+                    color="text.disabled"
+                    onClick={() => setReportTarget({ type: 'comment', id: c.id })}
+                    sx={{ ml: 'auto', cursor: 'pointer' }}
+                  >
+                    举报
+                  </Typography>
+                )}
               </Box>
               <Typography variant="body2" color="text.secondary">{c.content}</Typography>
             </Box>
@@ -359,6 +443,47 @@ export default function PostDetail() {
           onConfirm={(helpers) => closeMutation.mutate(helpers)}
           submitting={closeMutation.isPending}
         />
+      )}
+
+      {/* 举报理由抽屉 */}
+      {reportTarget && (
+        <ReportSheet
+          open={!!reportTarget}
+          onClose={() => setReportTarget(null)}
+          targetType={reportTarget.type}
+          submitting={reportMutation.isPending}
+          onSubmit={(reason) => reportMutation.mutate({ targetType: reportTarget.type, targetId: reportTarget.id, reason })}
+        />
+      )}
+
+      {/* 图片灯箱:全屏黑底看大图,点击任意处关闭 */}
+      {viewerIdx !== null && postImages[viewerIdx] && (
+        <Box
+          onClick={() => setViewerIdx(null)}
+          sx={{
+            position: 'fixed', inset: 0, zIndex: 1400, bgcolor: 'rgba(0,0,0,0.92)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2,
+          }}
+        >
+          <Box
+            component="img"
+            src={api.imgUrl(postImages[viewerIdx])}
+            alt=""
+            sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+          />
+          {/* 多图时显示序号 */}
+          {postImages.length > 1 && (
+            <Typography sx={{ position: 'absolute', top: 'calc(16px + env(safe-area-inset-top))', left: 0, right: 0, textAlign: 'center', color: '#fff', fontSize: 13 }}>
+              {viewerIdx + 1} / {postImages.length}
+            </Typography>
+          )}
+          <IconButton
+            onClick={(e) => { e.stopPropagation(); setViewerIdx(null) }}
+            sx={{ position: 'absolute', top: 'calc(8px + env(safe-area-inset-top))', right: 8, color: '#fff' }}
+          >
+            <ArrowBackIcon />
+          </IconButton>
+        </Box>
       )}
     </Box>
   )
@@ -490,6 +615,68 @@ function AdoptSheet({ open, onClose, postId, postType, onConfirm, submitting }) 
           sx={{ py: 1.3, bgcolor: WARM, '&:hover': { bgcolor: '#D85F26' } }}
         >
           {pickedCount > 0 ? `完成并采纳 ${pickedCount} 位邻居` : '直接完成(不采纳)'}
+        </Button>
+      </Box>
+    </BottomSheet>
+  )
+}
+
+// ===== 举报理由抽屉 =====
+// 预设理由 chip 可单选,选「其他」后填自由文本。理由可选,不填也能提交。
+const REPORT_REASONS = ['垃圾广告 / 引流', '欺诈 / 虚假信息', '色情低俗', '辱骂 / 人身攻击', '违法违禁', '其他']
+
+function ReportSheet({ open, onClose, targetType, onSubmit, submitting }) {
+  const [reason, setReason] = useState('')
+  const [custom, setCustom] = useState('')
+  const isOther = reason === '其他'
+  // 选「其他」时优先用自由文本;留空则回退为「其他」,避免审核端看到空白理由。
+  const finalReason = isOther ? (custom.trim() || '其他') : reason
+  const label = targetType === 'post' ? '帖子' : '评论'
+
+  return (
+    <BottomSheet open={open} onClose={onClose} title={`举报${label}`} heightVh={52}>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        请选择举报原因,我们会尽快核实处理。
+      </Typography>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+        {REPORT_REASONS.map(r => {
+          const active = reason === r
+          return (
+            <Chip
+              key={r}
+              label={r}
+              onClick={() => setReason(r)}
+              sx={{
+                height: 34, fontSize: 13, borderRadius: '10px',
+                bgcolor: active ? WARM : 'grey.100',
+                color: active ? '#fff' : 'text.primary',
+                '&:hover': { bgcolor: active ? '#D85F26' : 'grey.200' },
+              }}
+            />
+          )
+        })}
+      </Box>
+      {isOther && (
+        <InputBase
+          value={custom}
+          onChange={e => setCustom(e.target.value)}
+          placeholder="补充说明(可选)"
+          inputProps={{ maxLength: 200 }}
+          multiline
+          minRows={2}
+          sx={{ width: '100%', bgcolor: 'grey.100', borderRadius: 2, px: 1.5, py: 1, fontSize: 14, mb: 2 }}
+        />
+      )}
+      <Box sx={{ mt: 'auto', pt: 1 }}>
+        <Button
+          fullWidth
+          variant="contained"
+          disableElevation
+          onClick={() => onSubmit(finalReason)}
+          disabled={submitting || !reason}
+          sx={{ py: 1.3, bgcolor: WARM, '&:hover': { bgcolor: '#D85F26' } }}
+        >
+          提交举报
         </Button>
       </Box>
     </BottomSheet>

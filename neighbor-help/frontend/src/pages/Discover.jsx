@@ -15,6 +15,8 @@ import SearchIcon from '@mui/icons-material/Search'
 import CloseIcon from '@mui/icons-material/Close'
 import CircularProgress from '@mui/material/CircularProgress'
 import { api } from '../api'
+import { useAuth } from '../hooks/useAuth'
+import { safeParse } from '../utils/image'
 import BottomNav from '../components/BottomNav'
 
 const WARM = '#EC6E33'
@@ -24,6 +26,7 @@ const WARM = '#EC6E33'
 export default function Discover() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { user } = useAuth()
   const [activeTab, setActiveTab] = useState(location.state?.type || '') // '' = 全部
   const [search, setSearch] = useState('') // 输入框当前值
   const [keyword, setKeyword] = useState('') // 已提交的搜索词(点按钮/回车后生效)
@@ -70,7 +73,20 @@ export default function Discover() {
         {/* 头部:固定顶部搜索 + 分类下划线 Tab */}
         <AppBar position="sticky" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: 'grey.100' }}>
           <Toolbar sx={{ flexDirection: 'column', alignItems: 'stretch', py: 1.25, gap: 1 }}>
-            <Typography variant="subtitle1" fontWeight={700}>发现</Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <Typography variant="subtitle1" fontWeight={700}>发现</Typography>
+              {/* 游客:右上角登录入口 */}
+              {!user && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => navigate('/login')}
+                  sx={{ ml: 'auto', borderColor: WARM, color: WARM, '&:hover': { borderColor: '#D85F26', bgcolor: 'transparent' } }}
+                >
+                  登录
+                </Button>
+              )}
+            </Box>
             {/* 搜索框 + 搜索按钮 */}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', gap: 1, bgcolor: 'grey.100', borderRadius: 5, px: 1.5, py: 0.5 }}>
@@ -142,29 +158,43 @@ export default function Discover() {
         {/* 列表:时间倒序 */}
         {posts.map(post => {
           const menu = menuMap[post.type]
+          const thumb = safeParse(post.images)[0]
           return (
             <Box
               key={post.id}
               onClick={() => navigate(`/post/${post.id}`)}
               sx={{ px: 2, py: 1.75, borderBottom: 1, borderColor: 'grey.100', cursor: 'pointer', '&:active': { bgcolor: 'grey.50' } }}
             >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                <Chip label={menu?.label || post.type} color={menu?.color || 'default'} size="small" sx={{ height: 20, fontSize: 12 }} />
-                {post.status === 'closed' && <Chip label="已完成" size="small" sx={{ height: 20, fontSize: 12 }} />}
-              </Box>
-              <Typography variant="body2" fontWeight={500} sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                {post.title}
-              </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 0.5 }}>
-                <Typography variant="caption" color="text.secondary" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {post.nickname || '邻居'}
-                  {(post.building || post.unit) ? ` · ${post.building || ''}${post.unit || ''}` : ''}
-                  {' · '}
-                  {post.last_reply_at ? `最近回复 ${formatTime(post.last_reply_at)}` : formatTime(post.created_at)}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0, ml: 1 }}>
-                  💬 {post.comment_count || 0}
-                </Typography>
+              <Box sx={{ display: 'flex', gap: 1.25 }}>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                    <Chip label={menu?.label || post.type} color={menu?.color || 'default'} size="small" sx={{ height: 20, fontSize: 12 }} />
+                    {post.status === 'closed' && <Chip label="已完成" size="small" sx={{ height: 20, fontSize: 12 }} />}
+                  </Box>
+                  <Typography variant="body2" fontWeight={500} sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                    {post.title}
+                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 0.5 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {post.nickname || '邻居'}
+                      {(post.building || post.unit) ? ` · ${post.building || ''}${post.unit || ''}` : ''}
+                      {' · '}
+                      {post.last_reply_at ? `最近回复 ${formatTime(post.last_reply_at)}` : formatTime(post.created_at)}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0, ml: 1 }}>
+                      💬 {post.comment_count || 0}
+                    </Typography>
+                  </Box>
+                </Box>
+                {thumb && (
+                  <Box
+                    component="img"
+                    src={api.imgUrl(thumb)}
+                    alt=""
+                    loading="lazy"
+                    sx={{ width: 72, height: 72, flexShrink: 0, borderRadius: 2, objectFit: 'cover', bgcolor: 'grey.100' }}
+                  />
+                )}
               </Box>
             </Box>
           )

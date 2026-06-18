@@ -151,6 +151,7 @@ function EditProfileForm({ user, setUser, onDone }) {
       toast.success('保存成功')
       onDone()
     },
+    onError: (e) => toast.error(e.message || '保存失败'),
   })
 
   return (
@@ -184,9 +185,15 @@ function PasswordForm({ onDone }) {
       toast.success('密码修改成功')
       onDone()
     },
+    // 旧密码错误等失败必须告知用户
+    onError: (e) => toast.error(e.message || '修改失败'),
   })
 
   const handleSubmit = () => {
+    if (newPassword.length < 8) {
+      toast.error('新密码至少8位')
+      return
+    }
     if (newPassword !== confirm) {
       toast.error('两次输入的新密码不一致')
       return
@@ -199,7 +206,7 @@ function PasswordForm({ onDone }) {
   return (
     <>
       <TextField type="password" label="旧密码" value={oldPassword} onChange={e => setOldPassword(e.target.value)} fullWidth size="small" sx={{ mb: 2 }} />
-      <TextField type="password" label="新密码(至少6位)" value={newPassword} onChange={e => setNewPassword(e.target.value)} fullWidth size="small" sx={{ mb: 2 }} />
+      <TextField type="password" label="新密码(至少8位)" value={newPassword} onChange={e => setNewPassword(e.target.value)} fullWidth size="small" sx={{ mb: 2 }} />
       <TextField type="password" label="确认新密码" value={confirm} onChange={e => setConfirm(e.target.value)} fullWidth size="small" />
       <Box sx={{ mt: 'auto', pt: 2.5 }}>
         <Button onClick={handleSubmit} disabled={!canSubmit} fullWidth variant="contained" disableElevation sx={{ py: 1.3, bgcolor: WARM, '&:hover': { bgcolor: '#D85F26' } }}>

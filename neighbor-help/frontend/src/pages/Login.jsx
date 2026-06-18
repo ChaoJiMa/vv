@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import TextField from '@mui/material/TextField'
@@ -26,24 +27,8 @@ const WARM_DARK = '#D85F26'
 // 弹窗/选择块的暖调灰底(原冷灰 #F2F2F7,微微往暖白偏,呼应整页暖橙)
 const WARM_FILL = '#F4EEE7'
 const WARM_FILL_HOVER = '#EDE4DA'
-// 小区结构:期数 -> 楼栋 -> 单元 三层级联(占位数据,等接入真实小区结构后替换)
-const COMMUNITY = {
-  '一期': {
-    '1号楼': ['1单元', '2单元', '3单元'],
-    '2号楼': ['1单元', '2单元'],
-    '3号楼': ['1单元', '2单元', '3单元', '4单元'],
-  },
-  '二期': {
-    '4号楼': ['1单元', '2单元'],
-    '5号楼': ['1单元', '2单元', '3单元'],
-    '6号楼': ['1单元'],
-  },
-  '三期': {
-    '7号楼': ['1单元', '2单元'],
-    '8号楼': ['1单元', '2单元', '3单元'],
-  },
-}
-const PHASES = Object.keys(COMMUNITY)
+// 小区结构(期数 -> 楼栋 -> 单元)改由后端 /api/community/structure 返回,
+// 不再硬编码:改小区无需重新发版。接口未就绪时回退空对象。
 
 // 位置选择弹窗内的 chip 样式:选中暖橙、未选暖灰
 const regChipSx = (active) => ({
@@ -60,6 +45,14 @@ export default function Login() {
   const location = useLocation()
   const { login, user } = useAuth()
   const code = params.get('code')
+
+  // 小区结构从后端拉取(公开接口),缓存 5 分钟。未就绪时回退空对象不报错。
+  const { data: community = {} } = useQuery({
+    queryKey: ['community'],
+    queryFn: () => api.getCommunity(),
+    staleTime: 5 * 60 * 1000,
+  })
+  const phases = Object.keys(community)
 
   // 登录成功后的去向:来自 RequireAuth 重定向时带 state.from(原目标);
   // 直接进登录页(非重定向)则默认回首页。pathname+search 一起带,保留查询串。
@@ -521,7 +514,7 @@ export default function Login() {
           <Box>
             <Typography sx={{ fontSize: 13, color: '#8E8E93', mb: 1 }}>期数</Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {PHASES.map(p => (
+              {phases.map(p => (
                 <Chip
                   key={p}
                   label={p}
@@ -537,7 +530,7 @@ export default function Login() {
             <Box>
               <Typography sx={{ fontSize: 13, color: '#8E8E93', mb: 1 }}>楼栋</Typography>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {Object.keys(COMMUNITY[reg.phase] || {}).map(b => (
+                {Object.keys(community[reg.phase] || {}).map(b => (
                   <Chip
                     key={b}
                     label={b}
@@ -554,7 +547,7 @@ export default function Login() {
             <Box>
               <Typography sx={{ fontSize: 13, color: '#8E8E93', mb: 1 }}>单元</Typography>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {(COMMUNITY[reg.phase]?.[reg.building] || []).map(u => (
+                {(community[reg.phase]?.[reg.building] || []).map(u => (
                   <Chip
                     key={u}
                     label={u}

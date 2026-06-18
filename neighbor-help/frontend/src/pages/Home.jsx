@@ -17,6 +17,8 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutlineRounded'
 import IconButton from '@mui/material/IconButton'
 import CircularProgress from '@mui/material/CircularProgress'
 import { api } from '../api'
+import { useAuth } from '../hooks/useAuth'
+import { safeParse } from '../utils/image'
 import BottomNav from '../components/BottomNav'
 
 // 品牌暖橙(与登录页统一)
@@ -41,6 +43,7 @@ const SAFETY_TIPS = [
 export default function Home() {
   const [helpOpen, setHelpOpen] = useState(false) // 悬浮帮助弹窗
   const navigate = useNavigate()
+  const { user } = useAuth()
 
   // 菜单由后端返回(4 类服务,带 icon/label/desc/color)
   const { data: menus = [] } = useQuery({
@@ -100,6 +103,17 @@ export default function Home() {
               <Typography variant="subtitle1" fontWeight={700}>邻里里</Typography>
               <Typography variant="caption" color="text.secondary">远亲不如近邻</Typography>
             </Box>
+            {/* 游客:右上角登录入口(已登录则隐藏,个人入口在底部菜单) */}
+            {!user && (
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => navigate('/login')}
+                sx={{ ml: 'auto', borderColor: WARM, color: WARM, '&:hover': { borderColor: WARM_DARK, bgcolor: 'transparent' } }}
+              >
+                登录
+              </Button>
+            )}
           </Toolbar>
         </AppBar>
 
@@ -253,23 +267,37 @@ export default function Home() {
         {/* 列表:时间倒序 */}
         {posts.map(post => {
           const menu = menuMap[post.type]
+          const thumb = safeParse(post.images)[0]
           return (
             <Box
               key={post.id}
               onClick={() => navigate(`/post/${post.id}`)}
               sx={{ px: 2, py: 1.75, borderBottom: 1, borderColor: 'grey.100', cursor: 'pointer', '&:active': { bgcolor: 'grey.50' } }}
             >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                <Chip label={menu?.label || post.type} color={menu?.color || 'default'} size="small" sx={{ height: 20, fontSize: 12 }} />
-                {post.status === 'closed' && <Chip label="已完成" size="small" sx={{ height: 20, fontSize: 12 }} />}
+              <Box sx={{ display: 'flex', gap: 1.25 }}>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                    <Chip label={menu?.label || post.type} color={menu?.color || 'default'} size="small" sx={{ height: 20, fontSize: 12 }} />
+                    {post.status === 'closed' && <Chip label="已完成" size="small" sx={{ height: 20, fontSize: 12 }} />}
+                  </Box>
+                  <Typography variant="body2" fontWeight={500} sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                    {post.title}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                    {post.building || ''}{post.unit || ''}邻居 · {formatTime(post.created_at)}
+                    {post.comment_count > 0 && ` · 💬 ${post.comment_count}`}
+                  </Typography>
+                </Box>
+                {thumb && (
+                  <Box
+                    component="img"
+                    src={api.imgUrl(thumb)}
+                    alt=""
+                    loading="lazy"
+                    sx={{ width: 72, height: 72, flexShrink: 0, borderRadius: 2, objectFit: 'cover', bgcolor: 'grey.100' }}
+                  />
+                )}
               </Box>
-              <Typography variant="body2" fontWeight={500} sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                {post.title}
-              </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                {post.building || ''}{post.unit || ''}邻居 · {formatTime(post.created_at)}
-                {post.comment_count > 0 && ` · 💬 ${post.comment_count}`}
-              </Typography>
             </Box>
           )
         })}

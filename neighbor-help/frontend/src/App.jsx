@@ -50,21 +50,21 @@ export default function App() {
             <BrowserRouter>
               <Suspense fallback={<Loading />}>
                 <Routes>
-                  {/* 登录页:唯一无需登录即可访问的路由 */}
+                  {/* 公开路由:无需登录即可浏览(帖子详情可看,但评论/响应等操作需登录) */}
                   <Route path="/login" element={<Login />} />
+                  <Route path="/" element={<Home />} />
+                  <Route path="/discover" element={<Discover />} />
+                  <Route path="/post/:id" element={<PostDetail />} />
                   {/* 受保护区:未登录一律跳 /login,登录后跳回原目标 */}
                   <Route element={<RequireAuth />}>
-                    <Route path="/" element={<Home />} />
-                    <Route path="/discover" element={<Discover />} />
-                    <Route path="/post/:id" element={<PostDetail />} />
                     <Route path="/create" element={<CreatePost />} />
                     <Route path="/edit/:id" element={<CreatePost />} />
                     <Route path="/profile" element={<Profile />} />
                     <Route path="/messages" element={<Messages />} />
                     <Route path="/messages/:peerId" element={<Chat />} />
-                    {/* 未知路径:落到 404(也受登录保护,未登录先去登录再回来) */}
-                    <Route path="*" element={<NotFound />} />
                   </Route>
+                  {/* 未知路径:落到 404(公开,不强制登录) */}
+                  <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>
             </BrowserRouter>

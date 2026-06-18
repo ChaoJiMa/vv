@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import AppBar from '@mui/material/AppBar'
@@ -8,14 +8,20 @@ import Button from '@mui/material/Button'
 import Typography from '@mui/material/Typography'
 import TextField from '@mui/material/TextField'
 import Collapse from '@mui/material/Collapse'
+import CircularProgress from '@mui/material/CircularProgress'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import AddPhotoAlternateOutlinedIcon from '@mui/icons-material/AddPhotoAlternateOutlined'
+import CloseIcon from '@mui/icons-material/Close'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
+import { toast } from '../toast'
+import { downscaleImage, safeParse } from '../utils/image'
 import BottomNav from '../components/BottomNav'
 import BottomSheet from '../components/BottomSheet'
 
 const WARM = '#EC6E33'
 const WARM_DARK = '#D85F26'
+const MAX_IMAGES = 6
 
 // 标题占位文案随分类变化
 const TITLE_PLACEHOLDER = {
@@ -42,6 +48,10 @@ export default function CreatePost() {
   const [postLocation, setPostLocation] = useState(() => [user?.building, user?.unit].filter(Boolean).join(' '))
   const [moreOpen, setMoreOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
+  // 图片:存已上传的 key 数组;uploading 计数(并发上传时禁用提交)
+  const [images, setImages] = useState([])
+  const [uploading, setUploading] = useState(0)
+  const fileInputRef = useRef(null)
 
   // 类型菜单由后端返回
   const { data: menus = [] } = useQuery({
@@ -65,30 +75,59 @@ export default function CreatePost() {
     setContent(editing.content || '')
     setContact(editing.contact || '')
     setPostLocation(editing.location || '')
+    setImages(safeParse(editing.images))
     if (editing.contact) setMoreOpen(true)
     setFilledId(id)
   }
 
   const mutation = useMutation({
     mutationFn: () => isEdit
-      ? api.updatePost(id, { type, title, content, contact, location: postLocation })
-      : api.createPost({ type, title, content, contact, location: postLocation }),
+      ? api.updatePost(id, { type, title, content, contact, location: postLocation, images })
+      : api.createPost({ type, title, content, contact, location: postLocation, images }),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['posts'] })
       qc.invalidateQueries({ queryKey: ['myPosts'] })
       if (isEdit) qc.invalidateQueries({ queryKey: ['post', id] })
+      toast.success(isEdit ? '已保存' : '发布成功')
       navigate(`/post/${data.id}`, { replace: true })
     },
+    // 失败(限流/网络/校验)给出后端文案,否则用户点了发布毫无反馈
+    onError: (e) => toast.error(e.message || (isEdit ? '保存失败' : '发布失败')),
   })
 
-  const canSubmit = type && title.trim() && content.trim()
+  const canSubmit = type && title.trim() && content.trim() && uploading === 0
   // 有草稿(填了任意内容)时,取消需二次确认
-  const hasDraft = !isEdit && (type || title.trim() || content.trim() || contact.trim())
+  const hasDraft = !isEdit && (type || title.trim() || content.trim() || contact.trim() || images.length)
 
   const handleCancel = () => {
     if (hasDraft) setCancelOpen(true)
     else navigate(-1)
   }
+
+  // 选择图片:逐张降采样后上传,成功的 key 追加到 images。超额/失败给 toast。
+  const handlePickImages = async (e) => {
+    const files = Array.from(e.target.files || [])
+    e.target.value = '' // 清空,允许再次选同一文件
+    if (!files.length) return
+    const room = MAX_IMAGES - images.length
+    if (room <= 0) { toast.error(`最多上传 ${MAX_IMAGES} 张图片`); return }
+    const todo = files.slice(0, room)
+    if (files.length > room) toast.info(`最多上传 ${MAX_IMAGES} 张,已选取前 ${room} 张`)
+    setUploading(n => n + todo.length)
+    for (const f of todo) {
+      try {
+        const compressed = await downscaleImage(f)
+        const { key } = await api.uploadImage(compressed)
+        setImages(prev => [...prev, key])
+      } catch (err) {
+        toast.error(err.message || '图片上传失败')
+      } finally {
+        setUploading(n => n - 1)
+      }
+    }
+  }
+
+  const removeImage = (key) => setImages(prev => prev.filter(k => k !== key))
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
@@ -156,6 +195,62 @@ export default function CreatePost() {
             size="small"
             sx={{ mb: 2 }}
           />
+
+          {/* 图片:缩略图网格 + 添加按钮(最多 MAX_IMAGES 张) */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            multiple
+            hidden
+            onChange={handlePickImages}
+          />
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 1, mb: 2 }}>
+            {images.map(key => (
+              <Box key={key} sx={{ position: 'relative', pt: '100%', borderRadius: 2, overflow: 'hidden', bgcolor: 'grey.100' }}>
+                <Box
+                  component="img"
+                  src={api.imgUrl(key)}
+                  alt=""
+                  sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+                <Box
+                  onClick={() => removeImage(key)}
+                  sx={{
+                    position: 'absolute', top: 2, right: 2, width: 20, height: 20, borderRadius: '50%',
+                    bgcolor: 'rgba(0,0,0,0.55)', color: '#fff', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  <CloseIcon sx={{ fontSize: 14 }} />
+                </Box>
+              </Box>
+            ))}
+            {/* 上传中占位 */}
+            {uploading > 0 && Array.from({ length: uploading }).map((_, i) => (
+              <Box key={`up-${i}`} sx={{ position: 'relative', pt: '100%', borderRadius: 2, bgcolor: 'grey.100' }}>
+                <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <CircularProgress size={20} sx={{ color: WARM }} />
+                </Box>
+              </Box>
+            ))}
+            {/* 添加按钮:未达上限时显示 */}
+            {images.length + uploading < MAX_IMAGES && (
+              <Box
+                onClick={() => fileInputRef.current?.click()}
+                sx={{
+                  position: 'relative', pt: '100%', borderRadius: 2, cursor: 'pointer',
+                  border: '1.5px dashed', borderColor: 'grey.300',
+                  '&:active': { bgcolor: 'grey.50' },
+                }}
+              >
+                <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'text.disabled' }}>
+                  <AddPhotoAlternateOutlinedIcon sx={{ fontSize: 24 }} />
+                  <Typography sx={{ fontSize: 10, mt: 0.25 }}>{images.length}/{MAX_IMAGES}</Typography>
+                </Box>
+              </Box>
+            )}
+          </Box>
 
           {/* 更多选项(折叠):联系方式 + 位置 */}
           <Box

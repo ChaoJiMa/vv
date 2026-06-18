@@ -51,6 +51,36 @@ function post(path, body, options = {}) {
   return request(path, { method: 'POST', body: JSON.stringify(body || {}), ...options })
 }
 
+// 图片上传:走 multipart/form-data,不能用 post()(它强制 application/json)。
+// 不手动设 Content-Type —— 让浏览器自动带上 multipart boundary。
+// 解析同样遵循 { code, message, data } 协议,失败抛 Error(message)。
+async function uploadImage(file) {
+  const token = getToken()
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(BASE + '/api/upload', {
+    method: 'POST',
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: form,
+  })
+  const body = await res.json().catch(() => ({}))
+  // token 失效:与 request() 一致地清登录态并跳登录,避免上传时卡在过期会话。
+  if (res.status === 401 || body.code === 401) {
+    localStorage.removeItem('token')
+    toast.error('登录已过期，请重新登录')
+    if (!location.pathname.startsWith('/login')) location.href = '/login'
+    const err = new Error(body.message || '登录已过期')
+    err.code = 401
+    throw err
+  }
+  if (body.code !== 200) {
+    const err = new Error(body.message || '上传失败')
+    err.code = body.code
+    throw err
+  }
+  return body.data // { key }
+}
+
 export const api = {
   getMenus: () => post('/api/menus/list'),
   getPosts: (type, page = 1, keyword = '') => post('/api/posts/list', { type, page, keyword }),
@@ -78,6 +108,13 @@ export const api = {
   getNotifications: (page = 1) => post('/api/notifications/list', { page }),
   getUnread: () => post('/api/messages/unread', {}, { silentAuth: true, silentError: true }),
   readNotification: (id) => post('/api/notifications/read', { id }),
+  // 举报帖子/评论:targetType 取 'post' | 'comment'
+  reportContent: (targetType, targetId, reason) => post('/api/reports/create', { targetType, targetId, reason }),
+  // 小区结构(注册/发帖位置选择用),公开接口
+  getCommunity: () => post('/api/community/structure'),
+  // 图片:上传单张返回 { key };imgUrl 把 key 拼成可访问的代理 URL
+  uploadImage,
+  imgUrl: (key) => `${BASE}/api/img/${key}`,
   register: (body) => post('/auth/register', body),
   loginWithPassword: (body) => post('/auth/login', body),
   loginWithCode: (code) => post('/auth/wechat', { code }),
