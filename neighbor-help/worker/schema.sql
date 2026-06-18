@@ -133,3 +133,11 @@ CREATE TABLE IF NOT EXISTS reports (
   FOREIGN KEY (reporter_id) REFERENCES users(id)
 );
 CREATE INDEX IF NOT EXISTS idx_reports_status_created ON reports(status, created_at DESC);
+
+-- 应用配置:把原先写死在代码里的「小区结构」与「敏感词表」移入 D1,运营可直接 UPDATE 调整。
+-- value 统一存 JSON 字符串(小区为对象、敏感词为数组),应用层 JSON.parse 读取并带 60s 内存缓存。
+-- 见 src/config.js(community)与 src/sensitive.js(sensitive_words)。种子数据见 migrations/0008_app_config.sql。
+CREATE TABLE IF NOT EXISTS app_config (
+  key TEXT PRIMARY KEY,          -- 'community' / 'sensitive_words'
+  value TEXT                     -- JSON 字符串
+);

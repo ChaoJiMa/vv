@@ -12,3 +12,9 @@ migrations_dir = "migrations"
 [[r2_buckets]]
 binding = "IMAGES"
 bucket_name = "neighbor-help-images"
+
+# 定时任务:每天凌晨 4:17(UTC)对账一次 R2 图片孤儿,清理无帖子引用且超过宽限期的对象。
+# 见 src/reconcile.js 与 src/index.js 的 scheduled 导出。
+[triggers]
+crons = ["17 4 * * *"]
+

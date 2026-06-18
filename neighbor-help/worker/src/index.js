@@ -8,6 +8,7 @@ import apiRoutes from './routes/posts.js'
 import messageRoutes from './routes/messages.js'
 import reportRoutes from './routes/reports.js'
 import imageRoutes from './routes/images.js'
+import { reconcileImages } from './reconcile.js'
 
 // 允许的来源:本地开发 + Pages 域名(含每次部署的预览子域名)
 function resolveCorsOrigin(origin) {
@@ -47,4 +48,20 @@ app.notFound(() => fail(CODE.NOT_FOUND, '接口不存在'))
 // 错误兜底:不向客户端泄露内部细节,异常详情由日志中间件记录
 app.onError(() => fail(CODE.SERVER_ERROR, '服务器内部错误'))
 
-export default app
+// 导出 fetch(HTTP)+ scheduled(定时任务)。
+// scheduled:定时对账 R2 图片孤儿(无帖子引用且超过宽限期的对象),兜底删帖/编辑时的漏网清理。
+// 触发频率见 wrangler.toml 的 [triggers] crons。
+export default {
+  fetch: app.fetch,
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil((async () => {
+      const start = Date.now()
+      try {
+        const { scanned, deleted } = await reconcileImages(env)
+        console.log('[CRON]', JSON.stringify({ task: 'reconcileImages', scanned, deleted, durationMs: Date.now() - start }))
+      } catch (e) {
+        console.error('[CRON]', JSON.stringify({ task: 'reconcileImages', error: e.stack || String(e) }))
+      }
+    })())
+  },
+}

@@ -6,11 +6,19 @@
 // 仍在有效期内的记录(例如发帖请求把 1~10 分钟前的登录限流计数清空,防爆破失效)。
 const STALE_MS = 60 * 60 * 1000 // 1 小时,安全覆盖所有业务窗口
 
+// 清理采样:不在每次调用都全表扫删(那是写放大),而是约每 N 次调用清理一次。
+// 陈旧记录最坏多留一会儿不影响正确性(过期窗口本就会被重置逻辑覆盖)。
+const CLEAN_EVERY = 50
+let cleanTick = 0
+
 // 检查并累加一次计数。超过 limit 返回 { limited: true, retryAfter }(秒);否则 { limited: false }。
 export async function rateLimit(env, key, limit, windowMs) {
   const now = Date.now()
-  // 清理远超任何业务窗口的陈旧记录,防止表无限膨胀(失败/未清零的记录会一直残留)。
-  await env.DB.prepare('DELETE FROM rate_limits WHERE window_start < ?').bind(now - STALE_MS).run()
+  // 概率清理:约每 CLEAN_EVERY 次调用删一次陈旧记录,避免每请求都全表扫描。
+  cleanTick = (cleanTick + 1) % CLEAN_EVERY
+  if (cleanTick === 0) {
+    await env.DB.prepare('DELETE FROM rate_limits WHERE window_start < ?').bind(now - STALE_MS).run()
+  }
 
   const row = await env.DB.prepare('SELECT window_start, count FROM rate_limits WHERE key = ?').bind(key).first()
 

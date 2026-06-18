@@ -99,7 +99,8 @@ function b64urlEncode(str) {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
 }
 
-function b64urlDecode(b64url) {
+// 导出:供 logger 复用,统一 JWT payload 的 UTF-8 解码口径(替代废弃的 escape/unescape)。
+export function b64urlDecode(b64url) {
   const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/')
   const bin = atob(b64)
   const bytes = Uint8Array.from(bin, c => c.charCodeAt(0))

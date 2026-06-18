@@ -2,7 +2,10 @@
 //
 // 这是「基础防线」而非完备方案 —— 词表精简、只做包含匹配,目的是挡住最明显的
 // 辱骂/赌博/色情/诈骗引流类内容。真正的内容治理还需配合「举报 + 人工复核」
-// (见 routes/reports.js)。词表后续可按社区实际情况增补。
+// (见 routes/reports.js)。
+//
+// 词表存于 D1 的 app_config 表(key='sensitive_words',value 为 JSON 数组),
+// 运营可直接 UPDATE 调整,无需改代码部署。本模块带 60s 内存缓存,避免每次发帖打 D1。
 //
 // 设计取舍:
 // - 归一化后匹配:转小写 + 去掉空白与常见分隔符,挡住"赌 博""d博"这类拆字规避。
@@ -12,36 +15,50 @@
 // 分隔符:空白 + 常见用于拆字规避的标点。归一化时一并剔除。
 const SEPARATORS = /[\s.·•、,，。!！?？*~\-_/\\|]+/g
 
-// 词表:按类别组织,仅供示意与基础拦截,生产可持续增补或改为远端配置。
-const WORDS = [
-  // 赌博 / 资金盘引流
-  '赌博', '博彩', '澳门赌场', '六合彩', '时时彩', '私彩', '菠菜平台',
-  // 色情
-  '色情', '裸聊', '约炮', '一夜情', '黄片', '成人影片',
-  // 诈骗 / 违规交易引流
-  '刷单返利', '兼职刷单', '高额返利', '微信加我转账', '代开发票', '办理证件',
-  '出售个人信息', '银行卡套现', '贷款无抵押秒下',
-  // 违禁品
-  '枪支弹药', '管制刀具', '迷药', '催情',
-  // 辱骂(轻量,避免误伤,仅列最常见)
-  '傻逼', '操你妈', '草泥马', '狗东西',
-]
-
-// 预归一化词表,匹配时与归一化后的输入做包含判断
-const NORMALIZED = WORDS.map(w => ({ raw: w, norm: normalize(w) }))
-
 // 归一化:转小写 + 去分隔符
 function normalize(text) {
   return String(text).toLowerCase().replace(SEPARATORS, '')
 }
 
-// 返回命中的第一个敏感词(原词),未命中返回 null。
-export function findSensitive(text) {
-  if (!text) return null
+// 纯函数:给定词表与待检文本,返回命中的第一个敏感词(原词),未命中返回 null。
+// 抽成纯函数便于单测,不依赖 env/DB。
+export function matchSensitive(words, text) {
+  if (!text || !Array.isArray(words)) return null
   const norm = normalize(text)
   if (!norm) return null
-  for (const w of NORMALIZED) {
-    if (w.norm && norm.includes(w.norm)) return w.raw
+  for (const w of words) {
+    const wn = normalize(w)
+    if (wn && norm.includes(wn)) return w
   }
   return null
+}
+
+// ===== 词表加载(D1 + 60s TTL 内存缓存) =====
+let cache = { words: null, at: 0 }
+const TTL_MS = 60 * 1000
+
+// 从 app_config 读敏感词数组,带缓存。读取/解析失败时回退空数组(不拦截),
+// 避免配置异常时阻断所有发帖。
+async function loadWords(env) {
+  const now = Date.now()
+  if (cache.words && now - cache.at < TTL_MS) return cache.words
+  let words = []
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key = 'sensitive_words'").first()
+    const parsed = row?.value ? JSON.parse(row.value) : []
+    if (Array.isArray(parsed)) words = parsed
+  } catch { /* 配置缺失/损坏:回退空表,不拦截 */ }
+  cache = { words, at: now }
+  return words
+}
+
+// 异步:从 D1(带缓存)加载词表后做匹配。返回命中的第一个敏感词或 null。
+export async function findSensitive(env, text) {
+  const words = await loadWords(env)
+  return matchSensitive(words, text)
+}
+
+// 测试用:清空缓存,确保用例间不互相影响。
+export function _clearSensitiveCache() {
+  cache = { words: null, at: 0 }
 }

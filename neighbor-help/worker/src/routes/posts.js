@@ -8,6 +8,8 @@ import { authRequired } from '../middleware.js'
 import { rateLimit } from '../ratelimit.js'
 import { findSensitive } from '../sensitive.js'
 import { sanitizeImages } from '../images.js'
+import { getCommunity, getAnnouncements } from '../config.js'
+import { pickValidHelpers } from './helpers.js'
 
 // 服务类型菜单:前端 Home 的 Tab 与 CreatePost 的类型卡片都从这里取,
 // 保证菜单由后端统一维护(增删服务类型无需改前端)。
@@ -18,24 +20,8 @@ const MENUS = [
   { value: 'group', label: '拼单拼团', icon: '🛒', desc: '一起拼外卖或团购', color: 'success' },
 ]
 
-// 小区结构:期数 -> 楼栋 -> 单元。注册/发帖的位置选择从这里取,
-// 由后端统一维护,改小区无需改前端。后续可改为读 D1 配置表或环境变量。
-const COMMUNITY = {
-  '一期': {
-    '1号楼': ['1单元', '2单元', '3单元'],
-    '2号楼': ['1单元', '2单元'],
-    '3号楼': ['1单元', '2单元', '3单元', '4单元'],
-  },
-  '二期': {
-    '4号楼': ['1单元', '2单元'],
-    '5号楼': ['1单元', '2单元', '3单元'],
-    '6号楼': ['1单元'],
-  },
-  '三期': {
-    '7号楼': ['1单元', '2单元'],
-    '8号楼': ['1单元', '2单元', '3单元'],
-  },
-}
+// 小区结构(期数/楼栋/单元)现存于 D1 的 app_config 表,经 config.js 读取(带缓存),
+// 运营可直接 UPDATE 调整,无需改代码部署。注册/发帖的位置选择从 community/structure 接口取。
 
 const bodyOf = async (c) => { try { return await c.req.json() } catch { return {} } }
 
@@ -51,7 +37,10 @@ const api = new Hono()
 api.post('/menus/list', () => success(MENUS))
 
 // POST /api/community/structure —— 小区结构(期数/楼栋/单元),注册与发帖位置选择用
-api.post('/community/structure', () => success(COMMUNITY))
+api.post('/community/structure', async (c) => success(await getCommunity(c.env)))
+
+// POST /api/announcements/list —— 首页公告与安全提示(运营可在 app_config 调整)
+api.post('/announcements/list', async (c) => success(await getAnnouncements(c.env)))
 
 // POST /api/posts/list —— 帖子列表,参数 { type, page, keyword } 走 body
 // 返回 { list, total, page, hasMore }:前端据此翻页/触底加载,无需再靠"返回条数==页大小"猜测。
@@ -77,8 +66,17 @@ api.post('/posts/list', async (c) => {
   }
   const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : ''
 
-  // last_reply_at:该帖最近一条评论时间,无评论时为 NULL,前端据此显示"最近回复/发布"时间
-  const listSql = `SELECT p.*, u.nickname, u.building, u.unit, (SELECT COUNT(*) FROM comments WHERE post_id=p.id) AS comment_count, (SELECT MAX(created_at) FROM comments WHERE post_id=p.id) AS last_reply_at FROM posts p JOIN users u ON p.user_id=u.id ${whereSql} ORDER BY p.created_at DESC LIMIT ? OFFSET ?`
+  // comment_count / last_reply_at:用一次 LEFT JOIN comments + GROUP BY 聚合得出,
+  // 避免每行跑两个相关子查询(各扫一遍 comments)。无评论时 COUNT=0、MAX=NULL。
+  // 按 p.id 分组,u.* 随 p.user_id 函数依赖,取值确定。
+  const listSql = `SELECT p.*, u.nickname, u.building, u.unit,
+      COUNT(c.id) AS comment_count, MAX(c.created_at) AS last_reply_at
+    FROM posts p
+    JOIN users u ON p.user_id = u.id
+    LEFT JOIN comments c ON c.post_id = p.id
+    ${whereSql}
+    GROUP BY p.id
+    ORDER BY p.created_at DESC LIMIT ? OFFSET ?`
   const countSql = `SELECT COUNT(*) AS n FROM posts p ${whereSql}`
 
   const [{ results: list }, countRow] = await Promise.all([
@@ -253,7 +251,7 @@ api.post('/posts/create', authRequired, async (c) => {
   const loc = optionalText(location, LIMITS.location, '位置')
   if (!loc.ok) return fail(CODE.INVALID_INPUT, loc.message)
   // 敏感词:标题 + 内容一并检查,命中即拦截
-  const bad = findSensitive(`${t.value} ${ct.value}`)
+  const bad = await findSensitive(c.env, `${t.value} ${ct.value}`)
   if (bad) return fail(CODE.CONTENT_BLOCKED, `内容含违规词「${bad}」,请修改后再发布`)
   // 位置默认带入发帖人资料的楼栋单元(用户未填时)
   let locValue = loc.value
@@ -272,8 +270,8 @@ api.post('/posts/create', authRequired, async (c) => {
 api.post('/posts/update', authRequired, async (c) => {
   const userId = c.get('userId')
   const { id, type, title, content, images, contact, location } = await bodyOf(c)
-  // 先取帖子,校验归属与状态
-  const post = await c.env.DB.prepare('SELECT user_id, status FROM posts WHERE id = ?').bind(id).first()
+  // 先取帖子,校验归属与状态;同时取旧 images,用于更新后清理被移除的图片对象
+  const post = await c.env.DB.prepare('SELECT user_id, status, images FROM posts WHERE id = ?').bind(id).first()
   if (!post || post.user_id !== userId) return fail(CODE.POST_NOT_FOUND, '帖子不存在或无权操作')
   if (post.status !== 'open') return fail(CODE.POST_MISSING_FIELD, '已完成的帖子不可编辑')
   // 字段校验与发帖一致
@@ -288,10 +286,21 @@ api.post('/posts/update', authRequired, async (c) => {
   if (!cont.ok) return fail(CODE.INVALID_INPUT, cont.message)
   const loc = optionalText(location, LIMITS.location, '位置')
   if (!loc.ok) return fail(CODE.INVALID_INPUT, loc.message)
-  const bad = findSensitive(`${t.value} ${ct.value}`)
+  const bad = await findSensitive(c.env, `${t.value} ${ct.value}`)
   if (bad) return fail(CODE.CONTENT_BLOCKED, `内容含违规词「${bad}」,请修改后再保存`)
+  const newImages = sanitizeImages(images)
   await c.env.DB.prepare('UPDATE posts SET type=?, title=?, content=?, images=?, contact=?, location=? WHERE id=? AND user_id=?')
-    .bind(type, t.value, ct.value, JSON.stringify(sanitizeImages(images)), cont.value, loc.value, id, userId).run()
+    .bind(type, t.value, ct.value, JSON.stringify(newImages), cont.value, loc.value, id, userId).run()
+  // 清理被移除的旧图(编辑时删掉的图片),避免 R2 孤儿对象累积。
+  // best-effort:解析失败或 R2 异常都忽略,不影响编辑结果。复刻 posts/delete 的清理写法。
+  try {
+    const oldImages = JSON.parse(post.images || '[]')
+    if (Array.isArray(oldImages) && oldImages.length && c.env.IMAGES) {
+      const kept = new Set(newImages)
+      const removed = oldImages.filter(k => !kept.has(k))
+      if (removed.length) await c.env.IMAGES.delete(removed)
+    }
+  } catch { /* 解析失败或 R2 异常都忽略,不阻断编辑 */ }
   return success({ id })
 })
 
@@ -304,7 +313,7 @@ api.post('/posts/comment', authRequired, async (c) => {
   const { id, content } = await bodyOf(c)
   const ct = requireText(content, LIMITS.comment, '评论内容')
   if (!ct.ok) return fail(CODE.COMMENT_EMPTY, ct.message)
-  const bad = findSensitive(ct.value)
+  const bad = await findSensitive(c.env, ct.value)
   if (bad) return fail(CODE.CONTENT_BLOCKED, `评论含违规词「${bad}」,请修改后再发`)
   // 校验帖子存在,避免对不存在的 id 插入孤儿评论;同时取作者以便写通知
   const post = await c.env.DB.prepare('SELECT id, user_id FROM posts WHERE id = ?').bind(id).first()
@@ -398,7 +407,7 @@ api.post('/posts/close', authRequired, async (c) => {
   if (!post || post.user_id !== userId) return fail(CODE.POST_NOT_FOUND, '帖子不存在或无权操作')
   if (post.status !== 'open') return fail(CODE.POST_NOT_FOUND, '帖子已完成或无权操作')
 
-  // 采纳者校验:必须是本帖响应者或评论者,排除自己;去重
+  // 采纳者校验:必须是本帖响应者或评论者,排除自己;去重(纯逻辑见 pickValidHelpers)
   const picked = Array.isArray(helpers) ? helpers : []
   let validHelpers = []
   if (picked.length) {
@@ -409,14 +418,7 @@ api.post('/posts/close', authRequired, async (c) => {
        ) WHERE uid != ?2`
     ).bind(id, userId).all()
     const allow = new Set((cand || []).map(r => r.uid))
-    const seen = new Set()
-    for (const h of picked) {
-      const hid = h?.helperId
-      if (hid && hid !== userId && allow.has(hid) && !seen.has(hid)) {
-        seen.add(hid)
-        validHelpers.push({ helperId: hid, thanked: h.thanked ? 1 : 0 })
-      }
-    }
+    validHelpers = pickValidHelpers(picked, allow, userId)
   }
 
   // 关帖 + 写采纳记录 + 通知,一次性原子写入。

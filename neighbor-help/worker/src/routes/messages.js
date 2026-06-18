@@ -29,7 +29,7 @@ messages.post('/messages/send', async (c) => {
   const { receiverId, postId, content } = await bodyOf(c)
   const ct = requireText(content, LIMITS.message, '消息内容')
   if (!ct.ok) return fail(CODE.MESSAGE_EMPTY, ct.message)
-  const bad = findSensitive(ct.value)
+  const bad = await findSensitive(c.env, ct.value)
   if (bad) return fail(CODE.CONTENT_BLOCKED, `消息含违规词「${bad}」,请修改后再发`)
   // 不能发给自己;对端必须存在
   if (!receiverId || receiverId === userId) return fail(CODE.MESSAGE_BAD_TARGET, '私信对象无效')

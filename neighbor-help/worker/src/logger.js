@@ -1,5 +1,6 @@
 // 请求日志:在统一入口记录每个请求的接口描述、入参、出参、报错原因、耗时。
 // 日志输出到 console,生产环境用 `npx wrangler tail` 查看。
+import { b64urlDecode } from './auth.js'
 
 // 路由 -> 中文接口描述。全部接口统一 POST,按精确路径匹配。
 const ROUTES = [
@@ -33,6 +34,7 @@ const ROUTES = [
   { method: 'POST', re: /^\/api\/notifications\/read$/,     desc: '标记通知已读' },
   { method: 'POST', re: /^\/api\/reports\/create$/,         desc: '举报帖子或评论' },
   { method: 'POST', re: /^\/api\/community\/structure$/,    desc: '小区结构' },
+  { method: 'POST', re: /^\/api\/announcements\/list$/,     desc: '首页公告' },
   { method: 'POST', re: /^\/api\/upload$/,                  desc: '上传图片' },
   { method: 'GET',  re: /^\/api\/img\/.+$/,                 desc: '读取图片' },
 ]
@@ -89,8 +91,8 @@ export function peekUserId(request) {
     if (!token) return undefined
     const body = token.split('.')[1]
     if (!body) return undefined
-    const b64 = body.replace(/-/g, '+').replace(/_/g, '/')
-    const payload = JSON.parse(decodeURIComponent(escape(atob(b64))))
+    // 复用 auth 的 base64url+UTF-8 解码,与 verifyJWT 同口径(不再用废弃的 escape)
+    const payload = JSON.parse(b64urlDecode(body))
     return payload.userId
   } catch {
     return undefined
