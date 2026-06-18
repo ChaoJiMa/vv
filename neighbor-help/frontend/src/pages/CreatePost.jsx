@@ -1,26 +1,54 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate, useParams } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import AppBar from '@mui/material/AppBar'
+import Toolbar from '@mui/material/Toolbar'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Typography from '@mui/material/Typography'
+import TextField from '@mui/material/TextField'
 import { api } from '../api'
-
-const TYPES = [
-  { value: 'help', label: '求助互助', icon: '🙋', desc: '需要邻居帮忙' },
-  { value: 'idle', label: '闲置转让', icon: '📦', desc: '转让或免费赠送' },
-  { value: 'lost', label: '失物招领', icon: '🔍', desc: '丢东西或捡到东西' },
-  { value: 'group', label: '拼单拼团', icon: '🛒', desc: '一起拼外卖或团购' },
-]
 
 export default function CreatePost() {
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const { id } = useParams() // 有 id 即编辑模式
+  const isEdit = !!id
   const [type, setType] = useState('')
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
 
+  // 类型菜单由后端返回
+  const { data: menus = [] } = useQuery({
+    queryKey: ['menus'],
+    queryFn: () => api.getMenus(),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // 编辑模式:拉取原帖详情用于预填
+  const { data: editing } = useQuery({
+    queryKey: ['post', id],
+    queryFn: () => api.getPost(id),
+    enabled: isEdit,
+  })
+
+  // 详情到达后填充表单一次。用渲染期派生(记录已填充的 id),避免在 effect 里 setState。
+  const [filledId, setFilledId] = useState(null)
+  if (editing && filledId !== id) {
+    setType(editing.type || '')
+    setTitle(editing.title || '')
+    setContent(editing.content || '')
+    setFilledId(id)
+  }
+
   const mutation = useMutation({
-    mutationFn: () => api.createPost({ type, title, content }),
+    mutationFn: () => isEdit
+      ? api.updatePost(id, { type, title, content })
+      : api.createPost({ type, title, content }),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['posts'] })
+      qc.invalidateQueries({ queryKey: ['myPosts'] })
+      if (isEdit) qc.invalidateQueries({ queryKey: ['post', id] })
       navigate(`/post/${data.id}`)
     },
   })
@@ -28,63 +56,70 @@ export default function CreatePost() {
   const canSubmit = type && title.trim()
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-lg mx-auto bg-white min-h-screen">
+    <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
+      <Box sx={{ maxWidth: 480, mx: 'auto', bgcolor: 'background.paper', minHeight: '100vh' }}>
         {/* 头部 */}
-        <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
-          <button onClick={() => navigate(-1)} className="text-gray-500">取消</button>
-          <span className="font-medium text-gray-800">发布帖子</span>
-          <button
-            onClick={() => mutation.mutate()}
-            disabled={!canSubmit || mutation.isPending}
-            className="text-green-600 font-medium disabled:opacity-40"
-          >
-            发布
-          </button>
-        </div>
+        <AppBar position="sticky" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: 'grey.100' }}>
+          <Toolbar sx={{ justifyContent: 'space-between' }}>
+            <Button color="inherit" onClick={() => navigate(-1)} sx={{ color: 'text.secondary' }}>取消</Button>
+            <Typography fontWeight={500}>{isEdit ? '编辑帖子' : '发布帖子'}</Typography>
+            <Button
+              color="primary"
+              onClick={() => mutation.mutate()}
+              disabled={!canSubmit || mutation.isPending}
+            >
+              {isEdit ? '保存' : '发布'}
+            </Button>
+          </Toolbar>
+        </AppBar>
 
-        <div className="px-4 py-4">
+        <Box sx={{ px: 2, py: 2 }}>
           {/* 类型选择 */}
-          <p className="text-sm text-gray-500 mb-3">选择类型</p>
-          <div className="grid grid-cols-2 gap-2 mb-6">
-            {TYPES.map(t => (
-              <button
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>选择类型</Typography>
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mb: 3 }}>
+            {menus.map(t => (
+              <Box
                 key={t.value}
                 onClick={() => setType(t.value)}
-                className={`p-3 rounded-xl border-2 text-left transition-colors ${
-                  type === t.value ? 'border-green-500 bg-green-50' : 'border-gray-200'
-                }`}
+                sx={{
+                  p: 1.5,
+                  borderRadius: 2,
+                  border: 2,
+                  borderColor: type === t.value ? 'primary.main' : 'grey.200',
+                  bgcolor: type === t.value ? 'primary.50' : 'transparent',
+                  cursor: 'pointer',
+                }}
               >
-                <span className="text-xl">{t.icon}</span>
-                <p className="text-sm font-medium text-gray-800 mt-1">{t.label}</p>
-                <p className="text-xs text-gray-400">{t.desc}</p>
-              </button>
+                <Typography sx={{ fontSize: 20 }}>{t.icon}</Typography>
+                <Typography variant="body2" fontWeight={500} sx={{ mt: 0.5 }}>{t.label}</Typography>
+                <Typography variant="caption" color="text.secondary">{t.desc}</Typography>
+              </Box>
             ))}
-          </div>
+          </Box>
 
           {/* 标题 */}
-          <div className="mb-4">
-            <input
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              placeholder="标题（必填，简洁描述你的需求）"
-              maxLength={50}
-              className="w-full text-sm border border-gray-200 rounded-xl px-4 py-3 outline-none focus:border-green-400"
-            />
-          </div>
+          <TextField
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            placeholder="标题（必填，简洁描述你的需求）"
+            inputProps={{ maxLength: 50 }}
+            fullWidth
+            size="small"
+            sx={{ mb: 2 }}
+          />
 
           {/* 详情 */}
-          <div>
-            <textarea
-              value={content}
-              onChange={e => setContent(e.target.value)}
-              placeholder="补充详情（可选）"
-              rows={5}
-              className="w-full text-sm border border-gray-200 rounded-xl px-4 py-3 outline-none focus:border-green-400 resize-none"
-            />
-          </div>
-        </div>
-      </div>
-    </div>
+          <TextField
+            value={content}
+            onChange={e => setContent(e.target.value)}
+            placeholder="补充详情（可选）"
+            multiline
+            rows={5}
+            fullWidth
+            size="small"
+          />
+        </Box>
+      </Box>
+    </Box>
   )
 }

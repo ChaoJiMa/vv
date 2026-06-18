@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 登录页标题字体:开心就笑林雨就走体,已子集化(仅含标题用字),自托管 woff2 约 3.4KB */
+@font-face {
+  font-family: 'KaiXinTi';
+  src: url('/fonts/kaixin-subset.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+
 :root {
   --text: #6b6375;
   --text-h: #08060d;

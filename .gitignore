@@ -2,4 +2,8 @@ node_modules/
 dist/
 .env
 .env.local
+.dev.vars
 .wrangler/
+
+# 字体原始文件(13MB),仅用于本地重新子集化;线上只用 public/fonts 下的 woff2 子集
+fonts-src/

@@ -1,7 +1,8 @@
--- 主键全部用 UUID(TEXT),由应用层 crypto.randomUUID() 生成,不暴露递增规律。
--- created_at 统一为毫秒时间戳(INTEGER),由应用层 Date.now() 填充,与 JWT exp 口径一致。
+-- 0001_init.sql —— 初始表结构 + 索引
+-- 对应 schema.sql 的完整建表。新库执行 `wrangler d1 migrations apply` 时按编号顺序应用。
+
 CREATE TABLE IF NOT EXISTS users (
-  id TEXT PRIMARY KEY,            -- UUID,应用层生成
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT UNIQUE,           -- 用户名密码登录用(可空,微信用户没有)
   password TEXT,                  -- PBKDF2 哈希,绝不存明文
   openid TEXT UNIQUE,             -- 微信登录用(可空)
@@ -9,28 +10,27 @@ CREATE TABLE IF NOT EXISTS users (
   avatar TEXT,
   building TEXT,
   unit TEXT,
-  created_at INTEGER,            -- 毫秒时间戳,Date.now()
-  token_version INTEGER DEFAULT 0  -- token 吊销版本:改密码/退出登录时 +1,使旧 token 立即失效
+  created_at INTEGER DEFAULT (unixepoch())
 );
 
 CREATE TABLE IF NOT EXISTS posts (
-  id TEXT PRIMARY KEY,           -- UUID
-  user_id TEXT NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
   type TEXT NOT NULL,
   title TEXT NOT NULL,
   content TEXT,
   images TEXT,
   status TEXT DEFAULT 'open',
-  created_at INTEGER,           -- 毫秒时间戳
+  created_at INTEGER DEFAULT (unixepoch()),
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS comments (
-  id TEXT PRIMARY KEY,          -- UUID
-  post_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
   content TEXT NOT NULL,
-  created_at INTEGER,          -- 毫秒时间戳
+  created_at INTEGER DEFAULT (unixepoch()),
   FOREIGN KEY (post_id) REFERENCES posts(id),
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
@@ -40,10 +40,3 @@ CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_posts_type_created_at ON posts(type, created_at DESC);
 -- 详情页加载某帖的评论
 CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);
-
--- 限流计数(固定窗口):登录/注册防暴力破解
-CREATE TABLE IF NOT EXISTS rate_limits (
-  key TEXT PRIMARY KEY,         -- 如 login:<ip>
-  window_start INTEGER,         -- 窗口起点毫秒时间戳
-  count INTEGER DEFAULT 0
-);

@@ -1,10 +1,18 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import AppBar from '@mui/material/AppBar'
+import Toolbar from '@mui/material/Toolbar'
+import Box from '@mui/material/Box'
+import Typography from '@mui/material/Typography'
+import IconButton from '@mui/material/IconButton'
+import Button from '@mui/material/Button'
+import Chip from '@mui/material/Chip'
+import InputBase from '@mui/material/InputBase'
+import CircularProgress from '@mui/material/CircularProgress'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
-
-const TYPE_LABELS = { help: '求助互助', idle: '闲置转让', lost: '失物招领', group: '拼单拼团' }
 
 export default function PostDetail() {
   const { id } = useParams()
@@ -13,6 +21,13 @@ export default function PostDetail() {
   const qc = useQueryClient()
   const [comment, setComment] = useState('')
 
+  const { data: menus = [] } = useQuery({
+    queryKey: ['menus'],
+    queryFn: () => api.getMenus(),
+    staleTime: 5 * 60 * 1000,
+  })
+  const menuMap = Object.fromEntries(menus.map(m => [m.value, m]))
+
   const { data: post, isLoading } = useQuery({
     queryKey: ['post', id],
     queryFn: () => api.getPost(id),
@@ -20,81 +35,188 @@ export default function PostDetail() {
 
   const commentMutation = useMutation({
     mutationFn: () => api.addComment(id, comment),
-    onSuccess: () => {
+    // 乐观更新:先把评论插入本地缓存,失败再回滚
+    onMutate: async () => {
+      const text = comment
+      await qc.cancelQueries({ queryKey: ['post', id] })
+      const prev = qc.getQueryData(['post', id])
+      qc.setQueryData(['post', id], (old) => old ? {
+        ...old,
+        comments: [
+          ...(old.comments || []),
+          { id: `tmp-${Date.now()}`, content: text, nickname: user?.nickname || '我', building: user?.building || '', _optimistic: true },
+        ],
+      } : old)
       setComment('')
-      qc.invalidateQueries({ queryKey: ['post', id] })
+      return { prev }
     },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['post', id], ctx.prev)
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['post', id] }),
   })
 
   const closeMutation = useMutation({
     mutationFn: () => api.closePost(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['post', id] }),
+    // 乐观更新:立即置为已完成
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: ['post', id] })
+      const prev = qc.getQueryData(['post', id])
+      qc.setQueryData(['post', id], (old) => old ? { ...old, status: 'closed' } : old)
+      return { prev }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['post', id], ctx.prev)
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['post', id] })
+      qc.invalidateQueries({ queryKey: ['myPosts'] })
+    },
   })
 
-  if (isLoading) return <div className="flex justify-center py-20 text-gray-400 text-sm">加载中...</div>
-  if (!post) return <div className="flex justify-center py-20 text-gray-400 text-sm">帖子不存在</div>
+  const deleteMutation = useMutation({
+    mutationFn: () => api.deletePost(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['posts'] })
+      qc.invalidateQueries({ queryKey: ['myPosts'] })
+      qc.removeQueries({ queryKey: ['post', id] })
+      navigate('/')
+    },
+  })
+
+  const deleteCommentMutation = useMutation({
+    mutationFn: (commentId) => api.deleteComment(commentId),
+    // 乐观移除:先从缓存删掉,失败回滚
+    onMutate: async (commentId) => {
+      await qc.cancelQueries({ queryKey: ['post', id] })
+      const prev = qc.getQueryData(['post', id])
+      qc.setQueryData(['post', id], (old) => old ? {
+        ...old,
+        comments: (old.comments || []).filter(c => c.id !== commentId),
+      } : old)
+      return { prev }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['post', id], ctx.prev)
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['post', id] }),
+  })
+
+  if (isLoading) {
+    return <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}><CircularProgress size={24} /></Box>
+  }
+  if (!post) {
+    return <Box sx={{ textAlign: 'center', py: 10, color: 'text.disabled' }}>帖子不存在</Box>
+  }
+
+  const menu = menuMap[post.type]
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-lg mx-auto bg-white min-h-screen pb-24">
+    <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
+      <Box sx={{ maxWidth: 480, mx: 'auto', bgcolor: 'background.paper', minHeight: '100vh', pb: 12 }}>
         {/* 头部 */}
-        <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 py-3 flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="text-gray-500 text-lg">←</button>
-          <span className="font-medium text-gray-800">{TYPE_LABELS[post.type]}</span>
-          {post.status === 'closed' && (
-            <span className="ml-auto text-xs bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full">已完成</span>
-          )}
-        </div>
+        <AppBar position="sticky" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: 'grey.100' }}>
+          <Toolbar sx={{ gap: 1 }}>
+            <IconButton edge="start" onClick={() => navigate(-1)}><ArrowBackIcon /></IconButton>
+            <Typography fontWeight={500}>{menu?.label || post.type}</Typography>
+            {post.status === 'closed' && (
+              <Chip label="已完成" size="small" sx={{ ml: 'auto', height: 22 }} />
+            )}
+          </Toolbar>
+        </AppBar>
 
         {/* 帖子内容 */}
-        <div className="px-4 py-4 border-b border-gray-100">
-          <h2 className="text-base font-semibold text-gray-800 mb-2">{post.title}</h2>
-          {post.content && <p className="text-sm text-gray-600 leading-relaxed mb-3">{post.content}</p>}
-          <div className="flex items-center justify-between text-xs text-gray-400">
-            <span>{post.building || ''}{post.unit || ''}邻居 · {post.nickname}</span>
-            {user && user.id === post.user_id && post.status === 'open' && (
-              <button
-                onClick={() => closeMutation.mutate()}
-                className="text-green-600 font-medium"
-              >
-                标记完成
-              </button>
+        <Box sx={{ px: 2, py: 2, borderBottom: 1, borderColor: 'grey.100' }}>
+          <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>{post.title}</Typography>
+          {post.content && (
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>{post.content}</Typography>
+          )}
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Typography variant="caption" color="text.secondary">
+              {post.building || ''}{post.unit || ''}邻居 · {post.nickname}
+            </Typography>
+            {user && user.id === post.user_id && (
+              <Box sx={{ display: 'flex', gap: 0.5 }}>
+                {post.status === 'open' && (
+                  <>
+                    <Button size="small" color="primary" onClick={() => navigate(`/edit/${id}`)}>
+                      编辑
+                    </Button>
+                    <Button size="small" color="primary" onClick={() => closeMutation.mutate()} disabled={closeMutation.isPending}>
+                      标记完成
+                    </Button>
+                  </>
+                )}
+                <Button
+                  size="small"
+                  color="error"
+                  onClick={() => { if (window.confirm('确定删除这条帖子吗?')) deleteMutation.mutate() }}
+                  disabled={deleteMutation.isPending}
+                >
+                  删除
+                </Button>
+              </Box>
             )}
-          </div>
-        </div>
+            {/* 非本人帖子:私信发帖人。来源帖 id 一并带上 */}
+            {user && user.id !== post.user_id && (
+              <Button
+                size="small"
+                variant="outlined"
+                color="primary"
+                onClick={() => navigate(`/messages/${post.user_id}`, { state: { postId: id } })}
+              >
+                私信 TA
+              </Button>
+            )}
+          </Box>
+        </Box>
 
         {/* 评论列表 */}
-        <div className="px-4 py-3">
-          <p className="text-xs text-gray-400 mb-3">共 {post.comments?.length || 0} 条回复</p>
+        <Box sx={{ px: 2, py: 1.5 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+            共 {post.comments?.length || 0} 条回复
+          </Typography>
           {post.comments?.map(c => (
-            <div key={c.id} className="mb-4">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs font-medium text-gray-700">{c.nickname}</span>
-                <span className="text-xs text-gray-300">{c.building || ''}</span>
-              </div>
-              <p className="text-sm text-gray-600">{c.content}</p>
-            </div>
+            <Box key={c.id} sx={{ mb: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                <Typography variant="caption" fontWeight={500} color="text.primary">{c.nickname}</Typography>
+                <Typography variant="caption" color="text.disabled">{c.building || ''}</Typography>
+                {user && user.id === c.user_id && !c._optimistic && (
+                  <Typography
+                    variant="caption"
+                    color="error"
+                    onClick={() => { if (window.confirm('删除这条评论?')) deleteCommentMutation.mutate(c.id) }}
+                    sx={{ ml: 'auto', cursor: 'pointer' }}
+                  >
+                    删除
+                  </Typography>
+                )}
+              </Box>
+              <Typography variant="body2" color="text.secondary">{c.content}</Typography>
+            </Box>
           ))}
-        </div>
+        </Box>
 
         {/* 评论输入框 */}
-        <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-lg bg-white border-t border-gray-100 px-4 py-3 flex gap-2">
-          <input
+        <Box sx={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 480, bgcolor: 'background.paper', borderTop: 1, borderColor: 'grey.100', px: 2, py: 1.5, display: 'flex', gap: 1 }}>
+          <InputBase
             value={comment}
             onChange={e => setComment(e.target.value)}
             placeholder={user ? '写下你的回复...' : '登录后才能回复'}
             disabled={!user}
-            className="flex-1 text-sm bg-gray-100 rounded-full px-4 py-2 outline-none"
+            sx={{ flex: 1, bgcolor: 'grey.100', borderRadius: 5, px: 2, py: 0.5, fontSize: 14 }}
           />
-          <button
+          <Button
+            variant="contained"
+            color="primary"
             onClick={() => user ? commentMutation.mutate() : navigate('/login')}
-            disabled={user && !comment.trim()}
-            className="bg-green-500 text-white text-sm px-4 py-2 rounded-full disabled:opacity-40"
+            disabled={user && (!comment.trim() || commentMutation.isPending)}
+            sx={{ borderRadius: 5, minWidth: 64 }}
           >
             发送
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </Box>
+      </Box>
+    </Box>
   )
 }
