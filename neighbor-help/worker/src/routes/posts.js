@@ -8,7 +8,7 @@ import { authRequired } from '../middleware.js'
 import { rateLimit } from '../ratelimit.js'
 import { findSensitive } from '../sensitive.js'
 import { sanitizeImages } from '../images.js'
-import { getCommunity, getAnnouncements } from '../config.js'
+import { getCommunity } from '../config.js'
 import { pickValidHelpers } from './helpers.js'
 
 // 服务类型菜单:前端 Home 的 Tab 与 CreatePost 的类型卡片都从这里取,
@@ -38,9 +38,6 @@ api.post('/menus/list', () => success(MENUS))
 
 // POST /api/community/structure —— 小区结构(期数/楼栋/单元),注册与发帖位置选择用
 api.post('/community/structure', async (c) => success(await getCommunity(c.env)))
-
-// POST /api/announcements/list —— 首页公告与安全提示(运营可在 app_config 调整)
-api.post('/announcements/list', async (c) => success(await getAnnouncements(c.env)))
 
 // POST /api/posts/list —— 帖子列表,参数 { type, page, keyword } 走 body
 // 返回 { list, total, page, hasMore }:前端据此翻页/触底加载,无需再靠"返回条数==页大小"猜测。
@@ -137,7 +134,7 @@ api.post('/posts/comments', async (c) => {
 // POST /api/me/get —— 当前用户信息
 api.post('/me/get', authRequired, async (c) => {
   const userId = c.get('userId')
-  const user = await c.env.DB.prepare('SELECT id, username, openid, nickname, avatar, building, unit, created_at FROM users WHERE id = ?').bind(userId).first()
+  const user = await c.env.DB.prepare('SELECT id, username, openid, nickname, avatar, building, unit, role, created_at FROM users WHERE id = ?').bind(userId).first()
   return success(user)
 })
 

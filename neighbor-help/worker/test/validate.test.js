@@ -36,6 +36,13 @@ describe('LIMITS', () => {
     expect(LIMITS.comment).toBeGreaterThan(0)
     expect(LIMITS.content).toBeGreaterThan(0)
   })
+  it('announcement limit is 200', () => {
+    expect(LIMITS.announcement).toBe(200)
+  })
+  it('requireText rejects announcement over 200 chars', () => {
+    const r = requireText('字'.repeat(201), LIMITS.announcement, '公告内容')
+    expect(r.ok).toBe(false)
+  })
 })
 
 describe('escapeLike', () => {

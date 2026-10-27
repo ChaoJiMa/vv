@@ -112,8 +112,12 @@ export const api = {
   reportContent: (targetType, targetId, reason) => post('/api/reports/create', { targetType, targetId, reason }),
   // 小区结构(注册/发帖位置选择用),公开接口
   getCommunity: () => post('/api/community/structure'),
-  // 首页公告与安全提示(运营可在后台调整),公开接口
+  // 首页公告与安全提示(notices 来自表,safetyTips 来自配置),公开接口
   getAnnouncements: () => post('/api/announcements/list'),
+  adminListAnnouncements: () => post('/api/announcements/admin/list', {}),
+  adminCreateAnnouncement: (body) => post('/api/announcements/admin/create', body),
+  adminUpdateAnnouncement: (body) => post('/api/announcements/admin/update', body),
+  adminDeleteAnnouncement: (id) => post('/api/announcements/admin/delete', { id }),
   // 图片:上传单张返回 { key };imgUrl 把 key 拼成可访问的代理 URL
   uploadImage,
   imgUrl: (key) => `${BASE}/api/img/${key}`,

@@ -19,6 +19,7 @@ const Profile = lazy(() => import('./pages/Profile'))
 const Messages = lazy(() => import('./pages/Messages'))
 const Chat = lazy(() => import('./pages/Chat'))
 const NotFound = lazy(() => import('./pages/NotFound'))
+const AnnouncementsManage = lazy(() => import('./pages/AnnouncementsManage'))
 
 // 默认重试策略:只要后端给出了明确响应(error.code 存在),除 500 外一律不重试 ——
 // 4xx、限流(429)、业务错误(10xx/20xx)重试也是同样结果,徒增请求。
@@ -60,6 +61,7 @@ export default function App() {
                     <Route path="/create" element={<CreatePost />} />
                     <Route path="/edit/:id" element={<CreatePost />} />
                     <Route path="/profile" element={<Profile />} />
+                    <Route path="/announcements/manage" element={<AnnouncementsManage />} />
                     <Route path="/messages" element={<Messages />} />
                     <Route path="/messages/:peerId" element={<Chat />} />
                   </Route>

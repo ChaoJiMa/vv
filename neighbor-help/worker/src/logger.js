@@ -35,6 +35,10 @@ const ROUTES = [
   { method: 'POST', re: /^\/api\/reports\/create$/,         desc: '举报帖子或评论' },
   { method: 'POST', re: /^\/api\/community\/structure$/,    desc: '小区结构' },
   { method: 'POST', re: /^\/api\/announcements\/list$/,     desc: '首页公告' },
+  { method: 'POST', re: /^\/api\/announcements\/admin\/list$/,   desc: '管理-公告列表' },
+  { method: 'POST', re: /^\/api\/announcements\/admin\/create$/, desc: '管理-创建公告' },
+  { method: 'POST', re: /^\/api\/announcements\/admin\/update$/, desc: '管理-更新公告' },
+  { method: 'POST', re: /^\/api\/announcements\/admin\/delete$/, desc: '管理-删除公告' },
   { method: 'POST', re: /^\/api\/upload$/,                  desc: '上传图片' },
   { method: 'GET',  re: /^\/api\/img\/.+$/,                 desc: '读取图片' },
 ]

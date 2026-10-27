@@ -8,6 +8,7 @@ import apiRoutes from './routes/posts.js'
 import messageRoutes from './routes/messages.js'
 import reportRoutes from './routes/reports.js'
 import imageRoutes from './routes/images.js'
+import announcementRoutes from './routes/announcements.js'
 import { reconcileImages } from './reconcile.js'
 
 // 允许的来源:本地开发 + Pages 域名(含每次部署的预览子域名)
@@ -39,6 +40,7 @@ app.use('*', logging)
 app.route('/auth', authRoutes)
 app.route('/api', apiRoutes)
 app.route('/api', imageRoutes)
+app.route('/api', announcementRoutes)
 app.route('/api', messageRoutes)
 app.route('/api', reportRoutes)
 

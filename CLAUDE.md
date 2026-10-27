@@ -20,7 +20,7 @@ npx wrangler dev                                   # 本地开发，监听 local
 npx wrangler d1 migrations apply neighbor-help-db  # 应用增量迁移（远端加 --remote）
 npx wrangler d1 execute neighbor-help-db --command="SELECT * FROM users"  # 即席查询
 npx wrangler deploy                                # 部署
-npm test                                           # vitest（当前无用例）
+npm test                                           # vitest：worker/test 下单元测（auth/validate/logger/images/helpers/sensitive）
 ```
 
 ### 前端 (frontend/)
@@ -32,7 +32,7 @@ npm run build    # 产物输出到 dist/
 npx wrangler pages deploy dist   # 部署
 ```
 
-无实质测试用例（worker 配了 vitest 但无 `*.test.js`，前端无测试）。
+Worker 有 vitest 单测；前端目前无自动化测试套件（以 `npm run lint` 为主）。
 
 ## 本地开发约定
 
@@ -48,12 +48,14 @@ npx wrangler pages deploy dist   # 部署
 
 路由文件在 `worker/src/routes/`，每个是独立 Hono 子应用：
 - `auth.js` → `/auth/*`：注册、登录、微信登录
-- `posts.js` → `/api/*`：菜单、小区结构、帖子 CRUD、评论、响应、采纳、个人资料/统计
+- `posts.js` → `/api/*`：菜单、小区结构、首页公告、帖子 CRUD、评论、响应、采纳、个人资料/统计
 - `images.js` → `/api/*`：图片上传（需登录）+ `GET /api/img/:key` 公开代理读图
 - `messages.js` → `/api/*`：私信 + 通知（整个子应用 `authRequired`）
 - `reports.js` → `/api/*`：举报（整个子应用 `authRequired`）
 
-新增接口：在对应子应用里 `api.post('/xxx', authRequired?, handler)`。**几乎所有业务接口都是 `POST`**（含纯查询），靠动词后缀路径区分（如 `/api/posts/list`、`/api/posts/detail`）。
+运营配置集中在 `config.js` / `sensitive.js`：从 D1 表 `app_config` 读 JSON（带短时内存缓存），种子在迁移 `0008`/`0009`。改小区结构、敏感词、首页公告等一般 **UPDATE `app_config`**，无需改代码部署。
+
+新增接口：在对应子应用里 `api.post('/xxx', authRequired?, handler)`。**几乎所有业务接口都是 `POST`**（含纯查询），靠动词后缀路径区分（如 `/api/posts/list`、`/api/posts/detail`）。读图是少数 `GET`。
 
 ### 统一响应协议（`response.js`）
 所有接口返回 `{ code, message, data }`。`code === 200` 为成功；否则失败，前端据 `message` toast。业务码分段：`10xx` 认证/用户、`20xx` 帖子/评论、`30xx` 私信/通知、`40xx` 举报，另有通用 `400/401/404/429/500`。`fail(code, msg)` 会按 `HTTP_STATUS` 映射设置真实 HTTP 状态码（便于前端按 401 拦截）。用 `success(data)` / `fail(CODE.X, msg)` 构造响应，不要手写 JSON。
@@ -82,14 +84,15 @@ npx wrangler pages deploy dist   # 部署
 - `post_responses`：帖子响应（我要帮忙/我想要/这是我的），`UNIQUE(post_id,user_id)` 保证幂等。
 - `post_helpers`：关帖时采纳的帮助者（可多人，`thanked` 区分是否额外感谢），个人页「帮助了/获得帮助」统计据此计算。
 - `reports`：举报沉淀（`status=pending`，**暂无管理后台**），`UNIQUE(reporter_id,target_type,target_id)` 防重复。
+- `app_config`：运营配置键值表（`key` + JSON `value`）。常用键：`community`（期数→楼栋→单元）、`sensitive_words`、`announcements`（首页滚动文案 + 安全提示）。
 - `rate_limits`：限流计数。
 
-小区结构（期数/楼栋/单元）由 `posts.js` 的 `COMMUNITY` 常量下发，注册/发帖位置选择用。
+小区结构由 `POST /api/community/structure` 下发（读 `app_config.community`）；首页公告由 `POST /api/announcements/list` 下发（读 `app_config.announcements`，配置缺失时用代码内兜底）。**均无应用内管理页**，改配置靠 D1 `UPDATE`。登录页「忘记密码」仅为引导，后端暂无自助重置接口。
 
 ### 前端
 - `src/api.js` 是唯一 HTTP 层：`request()` 自动附加 `Authorization: Bearer <token>`（token 存 localStorage），解析 `{code,message,data}`，非 200 默认 toast `message` 并抛 `Error`（`err.code` 带业务码）；401 清 token 并跳登录。`api` 对象集中所有接口方法，新增后端接口时在此加方法。图片上传 `uploadImage` 走 multipart，单独处理。
 - `src/hooks/useAuth.jsx`：`AuthProvider`/`useAuth`，挂载时用本地 token 调 `getMe()`（silentAuth）恢复登录态，失败则清 token。
-- 路由在 `App.jsx`（react-router）：公开 `/`、`/discover`、`/post/:id`、`/login`；受保护（`RequireAuth`）`/create`、`/edit/:id`、`/profile`、`/messages`、`/messages/:peerId`。页面在 `src/pages/`，路由级 `lazy` 懒加载。外层包 `ThemeProvider`(MUI) + `QueryClientProvider`(React Query) + `ErrorBoundary` + `ToastProvider`。
+- 路由在 `App.jsx`（react-router）：公开 `/login`、`/`、`/discover`、`/post/:id`、以及公开 `*` 404；受保护（`RequireAuth`）`/create`、`/edit/:id`、`/profile`、`/messages`、`/messages/:peerId`。页面在 `src/pages/`，路由级 `lazy` 懒加载。外层包 `ThemeProvider`(MUI) + `QueryClientProvider`(React Query) + `ErrorBoundary` + `ToastProvider`。
 - React Query 重试策略：后端给了明确 `code`（非 500）一律不重试，仅网络中断/500 重试最多 2 次。
 - 样式：**MUI 组件 + Tailwind v3 工具类并用**（Tailwind 经 `postcss.config.js` 接入，配置见 `tailwind.config.js`）。动效组件（如 `Orb`）用 `ogl`（WebGL）。
 

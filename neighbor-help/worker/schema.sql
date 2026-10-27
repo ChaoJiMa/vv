@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS users (
   building TEXT,
   unit TEXT,
   created_at INTEGER,            -- 毫秒时间戳,Date.now()
-  token_version INTEGER DEFAULT 0  -- token 吊销版本:改密码/退出登录时 +1,使旧 token 立即失效
+  token_version INTEGER DEFAULT 0, -- token 吊销版本:改密码/退出登录时 +1,使旧 token 立即失效
+  role TEXT NOT NULL DEFAULT 'user' -- user | admin;管理接口每次查库确认
 );
 
 CREATE TABLE IF NOT EXISTS posts (
@@ -138,6 +139,18 @@ CREATE INDEX IF NOT EXISTS idx_reports_status_created ON reports(status, created
 -- value 统一存 JSON 字符串(小区为对象、敏感词为数组),应用层 JSON.parse 读取并带 60s 内存缓存。
 -- 见 src/config.js(community)与 src/sensitive.js(sensitive_words)。种子数据见 migrations/0008_app_config.sql。
 CREATE TABLE IF NOT EXISTS app_config (
-  key TEXT PRIMARY KEY,          -- 'community' / 'sensitive_words'
+  key TEXT PRIMARY KEY,          -- 'community' / 'sensitive_words' / 'announcements'(safetyTips 等)
   value TEXT                     -- JSON 字符串
 );
+
+-- 首页滚动公告(可启用/排序);公开 list 的 notices 来自本表,safetyTips 仍读 app_config。
+CREATE TABLE IF NOT EXISTS announcements (
+  id TEXT PRIMARY KEY,
+  content TEXT NOT NULL,
+  sort INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER,
+  updated_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_announcements_enabled_sort
+  ON announcements(enabled, sort DESC, updated_at DESC);

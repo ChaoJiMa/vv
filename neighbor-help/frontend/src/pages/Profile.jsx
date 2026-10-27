@@ -82,6 +82,9 @@ export default function Profile() {
         <Box sx={{ mt: 1.5, bgcolor: 'background.paper' }}>
           <MenuRow label="编辑资料" onClick={() => setEditOpen(true)} />
           {user.username && <MenuRow label="修改密码" onClick={() => setPwdOpen(true)} />}
+          {user.role === 'admin' && (
+            <MenuRow label="公告管理" onClick={() => navigate('/announcements/manage')} />
+          )}
         </Box>
 
         {/* 我的帖子 */}

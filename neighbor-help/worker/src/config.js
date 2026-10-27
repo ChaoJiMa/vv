@@ -29,7 +29,7 @@ export function getCommunity(env) {
 
 // 首页公告与安全提示。配置缺失时返回内置兜底(避免首页空白)。
 // 形如 { notices: string[], safetyTips: [{ icon, text }] }。
-const ANNOUNCEMENTS_FALLBACK = {
+export const ANNOUNCEMENTS_FALLBACK = {
   notices: [
     '欢迎来到邻里里,远亲不如近邻 🏠',
     '文明互助,共建友善社区 🌱',
@@ -43,6 +43,14 @@ const ANNOUNCEMENTS_FALLBACK = {
   ],
 }
 
+// 仅读配置中的 safetyTips(及兼容旧整包);滚动 notices 改由 announcements 表提供。
+export async function getSafetyTips(env) {
+  const cfg = await loadConfig(env, 'announcements', ANNOUNCEMENTS_FALLBACK)
+  const tips = cfg?.safetyTips
+  return Array.isArray(tips) && tips.length ? tips : ANNOUNCEMENTS_FALLBACK.safetyTips
+}
+
+/** @deprecated 公开 list 已改走表拼 notices;保留给测试/兼容 */
 export function getAnnouncements(env) {
   return loadConfig(env, 'announcements', ANNOUNCEMENTS_FALLBACK)
 }

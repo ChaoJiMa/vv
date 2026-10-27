@@ -56,7 +56,7 @@ auth.post('/register', async (c) => {
     'INSERT INTO users (id, username, password, nickname, building, unit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
   ).bind(id, username, hashed, nick.value || username, bld.value, ut.value, Date.now()).run()
 
-  const user = await env.DB.prepare('SELECT id, username, nickname, avatar, building, unit FROM users WHERE id = ?')
+  const user = await env.DB.prepare('SELECT id, username, nickname, avatar, building, unit, role FROM users WHERE id = ?')
     .bind(id).first()
   const token = await signJWT({ userId: user.id, tv: 0 }, env.JWT_SECRET)
   return success({ token, user })
