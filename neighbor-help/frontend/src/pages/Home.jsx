@@ -20,6 +20,7 @@ import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { safeParse } from '../utils/image'
 import BottomNav from '../components/BottomNav'
+import ListError from '../components/ListError'
 
 // 品牌暖橙(与登录页统一)
 const WARM = '#EC6E33'
@@ -64,7 +65,7 @@ export default function Home() {
 
   // 首页动态:最新全部帖子流(不带筛选,筛选/搜索在发现页)
   const {
-    data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage,
+    data, isLoading, isError, refetch, fetchNextPage, hasNextPage, isFetchingNextPage,
   } = useInfiniteQuery({
     queryKey: ['posts', '', ''],
     queryFn: ({ pageParam }) => api.getPosts('', pageParam, ''),
@@ -249,9 +250,12 @@ export default function Home() {
         {isLoading && (
           <Box sx={{ textAlign: 'center', py: 6 }}><CircularProgress size={24} /></Box>
         )}
+        {!isLoading && isError && (
+          <ListError onRetry={() => refetch()} />
+        )}
 
         {/* 空态:icon + 文案 + 发布按钮 */}
-        {!isLoading && posts.length === 0 && (
+        {!isLoading && !isError && posts.length === 0 && (
           <Box sx={{ textAlign: 'center', py: 6, px: 3 }}>
             <Typography sx={{ fontSize: 52, mb: 1.5 }}>📝</Typography>
             <Typography sx={{ fontSize: 14, color: 'text.secondary', mb: 2.5 }}>

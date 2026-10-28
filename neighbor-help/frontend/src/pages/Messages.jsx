@@ -15,6 +15,7 @@ import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { usePageVisible, pollInterval } from '../hooks/usePageVisible'
 import BottomNav from '../components/BottomNav'
+import ListError from '../components/ListError'
 
 const WARM = '#EC6E33'
 
@@ -68,6 +69,7 @@ export default function Messages() {
   // 当前 Tab 的分页状态
   const active = tab === 'message' ? conv : noti
   const isLoading = active.isLoading
+  const isError = active.isError
   const list = tab === 'message' ? messages : notifications
 
   // 触底自动加载下一页
@@ -134,9 +136,12 @@ export default function Messages() {
         {isLoading && (
           <Box sx={{ textAlign: 'center', py: 6 }}><CircularProgress size={24} /></Box>
         )}
+        {!isLoading && isError && (
+          <ListError onRetry={() => active.refetch()} />
+        )}
 
         {/* 空状态:私信 / 通知文案不同 */}
-        {!isLoading && list.length === 0 && (
+        {!isLoading && !isError && list.length === 0 && (
           <Box sx={{ textAlign: 'center', py: 10, px: 3, color: 'text.disabled' }}>
             <Typography sx={{ fontSize: 40, mb: 1 }}>{tab === 'message' ? '📭' : '🔔'}</Typography>
             {tab === 'message' ? (

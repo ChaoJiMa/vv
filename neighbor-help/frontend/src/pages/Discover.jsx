@@ -18,6 +18,7 @@ import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { safeParse } from '../utils/image'
 import BottomNav from '../components/BottomNav'
+import ListError from '../components/ListError'
 
 const WARM = '#EC6E33'
 
@@ -39,7 +40,7 @@ export default function Discover() {
   const menuMap = Object.fromEntries(menus.map(m => [m.value, m]))
 
   const {
-    data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage,
+    data, isLoading, isError, refetch, fetchNextPage, hasNextPage, isFetchingNextPage,
   } = useInfiniteQuery({
     queryKey: ['posts', activeTab, keyword],
     queryFn: ({ pageParam }) => api.getPosts(activeTab, pageParam, keyword),
@@ -137,9 +138,12 @@ export default function Discover() {
         {isLoading && (
           <Box sx={{ textAlign: 'center', py: 6 }}><CircularProgress size={24} /></Box>
         )}
+        {!isLoading && isError && (
+          <ListError onRetry={() => refetch()} />
+        )}
 
         {/* 空状态:区分搜索无结果 / 该分类暂无帖子 */}
-        {!isLoading && posts.length === 0 && (
+        {!isLoading && !isError && posts.length === 0 && (
           <Box sx={{ textAlign: 'center', py: 8, px: 3, color: 'text.disabled' }}>
             <Typography sx={{ fontSize: 44, mb: 1 }}>{keyword ? '🔍' : '📭'}</Typography>
             {keyword ? (

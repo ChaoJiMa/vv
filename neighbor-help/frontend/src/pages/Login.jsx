@@ -84,9 +84,6 @@ export default function Login() {
   const [regionOpen, setRegionOpen] = useState(false)
   const regionText = [reg.phase, reg.building, reg.unit].filter(Boolean).join(' / ')
 
-  // 重置密码态
-  const [resetAccount, setResetAccount] = useState('')
-
   // 锁定首帧视口高度:微信 X5 进页面时工具栏/地址栏高度在首帧会变一次,
   // 用 100dvh + 贴底布局会随之被整体上顶 ——「弹跳」的真正来源(与动画无关)。
   // 惰性初始化在首次渲染就读 innerHeight(纯 px,不经 dvh),之后不随工具栏变化,布局不重排。
@@ -208,12 +205,6 @@ export default function Login() {
     } finally {
       setRegSubmitting(false)
     }
-  }
-
-  // 重置密码:后端暂无自助重置接口,这里只做引导(不假装已发送)
-  const handleReset = (e) => {
-    e?.preventDefault()
-    toast.info('暂未开放自助重置,请联系小区管理员核实身份后重置')
   }
 
   const handleWxLogin = () => {
@@ -477,15 +468,14 @@ export default function Login() {
         </Box>
       </BottomSheet>
 
-      {/* ===== 重置密码弹窗(44%) ===== */}
-      <BottomSheet open={sheet === 'forgot'} onClose={closeSheet} title="重置密码" heightVh={44}>
-        <Box component="form" onSubmit={handleReset} sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-          <Typography sx={{ fontSize: 13, color: '#8E8E93', mb: 2.5, lineHeight: 1.5 }}>
-            输入你的用户名,我们将协助你重置密码
+      {/* ===== 忘记密码：纯说明，无假提交 ===== */}
+      <BottomSheet open={sheet === 'forgot'} onClose={closeSheet} title="忘记密码" heightVh={40}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+          <Typography sx={{ fontSize: 14, color: '#8E8E93', lineHeight: 1.7 }}>
+            暂不支持自助重置密码。请联系小区管理员核实身份后协助重置。
           </Typography>
-          <TextField value={resetAccount} onChange={e => setResetAccount(e.target.value)} label="用户名" fullWidth variant="filled" sx={sheetFieldSx} />
           <Box sx={{ mt: 'auto', pt: 2.5 }}>
-            <Button type="submit" disabled={!resetAccount.trim()} sx={sheetDarkBtn}>联系管理员重置</Button>
+            <Button onClick={closeSheet} sx={sheetDarkBtn}>我知道了</Button>
           </Box>
         </Box>
       </BottomSheet>

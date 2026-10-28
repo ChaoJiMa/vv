@@ -102,7 +102,7 @@ export const api = {
   changePassword: (body) => post('/api/me/password', body),
   logout: () => post('/api/me/logout', {}, { silentError: true }),
   // 私信 / 通知
-  sendMessage: (receiverId, content, postId) => post('/api/messages/send', { receiverId, content, postId }),
+  sendMessage: (receiverId, content, postId, options) => post('/api/messages/send', { receiverId, content, postId }, options),
   getThread: (peerId, page = 1) => post('/api/messages/thread', { peerId, page }),
   getConversations: (page = 1) => post('/api/messages/conversations', { page }),
   getNotifications: (page = 1) => post('/api/notifications/list', { page }),

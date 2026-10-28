@@ -14,6 +14,7 @@ import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { usePageVisible, pollInterval } from '../hooks/usePageVisible'
 import { toast } from '../toast'
+import ListError from '../components/ListError'
 
 export default function Chat() {
   const { peerId } = useParams()
@@ -31,27 +32,19 @@ export default function Chat() {
   // 会话分页:每页取更早的一段(后端按时间倒序取、正序返回)。
   // 第 1 页是最新消息,翻页向更早翻;渲染时把更早的页拼在前面。
   const {
-    data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage,
+    data, isLoading, isError, refetch, fetchNextPage, hasNextPage, isFetchingNextPage,
   } = useInfiniteQuery({
     queryKey: ['thread', peerId],
     queryFn: ({ pageParam }) => api.getThread(peerId, pageParam),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
     enabled: !!user,
-    // 活跃会话:可见时 4s 轮询接近实时;切到后台暂停,切回由 refetchOnWindowFocus 补刷。
-    refetchInterval: pollInterval(visible, 4000),
+    // 可见时 8s 轮询;切到后台暂停,切回由 refetchOnWindowFocus 补刷。
+    refetchInterval: pollInterval(visible, 8000),
   })
   // pages[0]=最新页,pages[n]=更早页。展平时反转页顺序,使更早消息在上、最新在下。
   const list = data ? [...data.pages].reverse().flatMap(p => p.list) : []
   const peer = data?.pages?.[0]?.peer
-
-  // 拉取后未读已被后端清零,刷新首页角标与会话列表
-  useEffect(() => {
-    if (data) {
-      qc.invalidateQueries({ queryKey: ['unread'] })
-      qc.invalidateQueries({ queryKey: ['conversations'] })
-    }
-  }, [data, qc])
 
   // 顶部哨兵进入视口时加载更早消息
   const observeTop = useCallback((node) => {
@@ -74,18 +67,49 @@ export default function Chat() {
   }, [list.length, pageCount])
 
   const sendMutation = useMutation({
-    mutationFn: (content) => api.sendMessage(peerId, content, fromPostId),
-    onSuccess: () => {
+    mutationFn: (content) => api.sendMessage(peerId, content, fromPostId, { silentError: true }),
+    onMutate: async (content) => {
+      await qc.cancelQueries({ queryKey: ['thread', peerId] })
+      const prev = qc.getQueryData(['thread', peerId])
+      const tempId = `temp-${Date.now()}`
+      const optimistic = {
+        id: tempId,
+        sender_id: user.id,
+        receiver_id: peerId,
+        content,
+        created_at: Date.now(),
+        pending: true,
+      }
+      qc.setQueryData(['thread', peerId], (old) => {
+        if (!old?.pages?.length) {
+          return {
+            pages: [{ list: [optimistic], peer: null, page: 1, hasMore: false }],
+            pageParams: [1],
+          }
+        }
+        const pages = old.pages.map((p, i) => (
+          i === 0 ? { ...p, list: [...(p.list || []), optimistic] } : p
+        ))
+        return { ...old, pages }
+      })
       setText('')
+      return { prev, content }
+    },
+    onError: (e, _content, ctx) => {
+      if (ctx?.prev !== undefined) qc.setQueryData(['thread', peerId], ctx.prev)
+      if (ctx?.content) setText(ctx.content)
+      toast.error(e.message || '发送失败')
+    },
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['thread', peerId] })
       qc.invalidateQueries({ queryKey: ['conversations'] })
+      qc.invalidateQueries({ queryKey: ['unread'] })
     },
-    onError: (e) => toast.error(e.message || '发送失败'),
   })
 
   const handleSend = () => {
     const t = text.trim()
-    if (!t) return
+    if (!t || sendMutation.isPending) return
     sendMutation.mutate(t)
   }
 
@@ -114,7 +138,10 @@ export default function Chat() {
         {isLoading && (
           <Box sx={{ textAlign: 'center', py: 6 }}><CircularProgress size={24} /></Box>
         )}
-        {!isLoading && list.length === 0 && (
+        {!isLoading && isError && (
+          <ListError onRetry={() => refetch()} />
+        )}
+        {!isLoading && !isError && list.length === 0 && (
           <Box sx={{ textAlign: 'center', py: 10, color: 'text.disabled' }}>
             <Typography variant="body2">还没有消息,打个招呼吧</Typography>
           </Box>
@@ -139,6 +166,7 @@ export default function Chat() {
                     bgcolor: mine ? 'primary.main' : 'background.paper',
                     color: mine ? 'primary.contrastText' : 'text.primary',
                     border: mine ? 0 : 1, borderColor: 'grey.200',
+                    opacity: m.pending ? 0.7 : 1,
                     wordBreak: 'break-word',
                   }}
                 >
