@@ -1,36 +1,27 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import AppBar from '@mui/material/AppBar'
-import Toolbar from '@mui/material/Toolbar'
-import Box from '@mui/material/Box'
-import Typography from '@mui/material/Typography'
-import IconButton from '@mui/material/IconButton'
-import Button from '@mui/material/Button'
-import InputBase from '@mui/material/InputBase'
-import CircularProgress from '@mui/material/CircularProgress'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { usePageVisible, pollInterval } from '../hooks/usePageVisible'
 import { toast } from '../toast'
-import ListError from '../components/ListError'
+import { AppShell, Button, EmptyState, ListError } from '../components/ui'
 
 export default function Chat() {
   const { peerId } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
-  // 从帖子详情「私信 TA」进来时带的来源帖 id,发首条私信时记录来源
   const fromPostId = location.state?.postId
   const { user } = useAuth()
   const qc = useQueryClient()
   const [text, setText] = useState('')
+  const [keyboardPad, setKeyboardPad] = useState(0)
+  const [failedDraft, setFailedDraft] = useState(null)
   const bottomRef = useRef(null)
   const topRef = useRef(null)
   const visible = usePageVisible()
 
-  // 会话分页:每页取更早的一段(后端按时间倒序取、正序返回)。
-  // 第 1 页是最新消息,翻页向更早翻;渲染时把更早的页拼在前面。
   const {
     data, isLoading, isError, refetch, fetchNextPage, hasNextPage, isFetchingNextPage,
   } = useInfiniteQuery({
@@ -39,14 +30,27 @@ export default function Chat() {
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
     enabled: !!user,
-    // 可见时 8s 轮询;切到后台暂停,切回由 refetchOnWindowFocus 补刷。
     refetchInterval: pollInterval(visible, 8000),
   })
-  // pages[0]=最新页,pages[n]=更早页。展平时反转页顺序,使更早消息在上、最新在下。
   const list = data ? [...data.pages].reverse().flatMap(p => p.list) : []
   const peer = data?.pages?.[0]?.peer
 
-  // 顶部哨兵进入视口时加载更早消息
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return undefined
+    const sync = () => {
+      const gap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+      setKeyboardPad(gap)
+    }
+    sync()
+    vv.addEventListener('resize', sync)
+    vv.addEventListener('scroll', sync)
+    return () => {
+      vv.removeEventListener('resize', sync)
+      vv.removeEventListener('scroll', sync)
+    }
+  }, [])
+
   const observeTop = useCallback((node) => {
     if (!node) return
     const io = new IntersectionObserver(([entry]) => {
@@ -60,7 +64,6 @@ export default function Chat() {
     return () => io?.disconnect()
   }, [observeTop])
 
-  // 首屏 / 自己发新消息后滚到底部(仅在第 1 页时,避免向上翻历史被打断)
   const pageCount = data?.pages.length ?? 0
   useEffect(() => {
     if (pageCount <= 1) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -93,14 +96,19 @@ export default function Chat() {
         return { ...old, pages }
       })
       setText('')
+      setFailedDraft(null)
       return { prev, content }
     },
     onError: (e, _content, ctx) => {
       if (ctx?.prev !== undefined) qc.setQueryData(['thread', peerId], ctx.prev)
-      if (ctx?.content) setText(ctx.content)
+      if (ctx?.content) {
+        setText(ctx.content)
+        setFailedDraft(ctx.content)
+      }
       toast.error(e.message || '发送失败')
     },
     onSuccess: () => {
+      setFailedDraft(null)
       qc.invalidateQueries({ queryKey: ['thread', peerId] })
       qc.invalidateQueries({ queryKey: ['conversations'] })
       qc.invalidateQueries({ queryKey: ['unread'] })
@@ -113,91 +121,137 @@ export default function Chat() {
     sendMutation.mutate(t)
   }
 
+  const handleResend = () => {
+    if (!failedDraft || sendMutation.isPending) return
+    setText(failedDraft)
+    sendMutation.mutate(failedDraft)
+  }
+
   if (!user) {
     return (
-      <Box sx={{ textAlign: 'center', py: 10, color: 'text.disabled' }}>
-        <Typography variant="body2" sx={{ mb: 2 }}>请先登录</Typography>
-        <Button variant="contained" onClick={() => navigate('/login')}>去登录</Button>
-      </Box>
+      <AppShell>
+        <EmptyState title="请先登录" actionLabel="去登录" onAction={() => navigate('/login')} emoji="🔐" />
+      </AppShell>
     )
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
-      <Box sx={{ maxWidth: 480, mx: 'auto', bgcolor: 'grey.50', minHeight: '100vh', pb: 9 }}>
-        <AppBar position="sticky" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: 'grey.100' }}>
-          <Toolbar sx={{ gap: 1 }}>
-            <IconButton edge="start" onClick={() => navigate(-1)}><ArrowBackIcon /></IconButton>
-            <Typography fontWeight={500}>{peer?.nickname || '邻居'}</Typography>
-            {peer?.building && (
-              <Typography variant="caption" color="text.secondary">{peer.building}{peer.unit || ''}</Typography>
-            )}
-          </Toolbar>
-        </AppBar>
+    <AppShell style={{ paddingBottom: `calc(72px + ${keyboardPad}px)` }}>
+      <header style={{
+        position: 'sticky', top: 0, zIndex: 20,
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '8px 8px', minHeight: 52,
+        background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)',
+        backdropFilter: 'blur(10px)',
+        borderBottom: '1px solid var(--color-border)',
+      }}>
+        <button type="button" aria-label="返回" onClick={() => navigate(-1)} style={iconBtn}>
+          <ArrowBackIcon />
+        </button>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {peer?.nickname || '邻居'}
+          </div>
+          {peer?.building ? (
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{peer.building}{peer.unit || ''}</div>
+          ) : null}
+        </div>
+      </header>
 
-        {isLoading && (
-          <Box sx={{ textAlign: 'center', py: 6 }}><CircularProgress size={24} /></Box>
-        )}
-        {!isLoading && isError && (
-          <ListError onRetry={() => refetch()} />
-        )}
-        {!isLoading && !isError && list.length === 0 && (
-          <Box sx={{ textAlign: 'center', py: 10, color: 'text.disabled' }}>
-            <Typography variant="body2">还没有消息,打个招呼吧</Typography>
-          </Box>
-        )}
+      {isLoading && <div style={{ textAlign: 'center', padding: 48, color: 'var(--color-text-muted)' }}>加载中…</div>}
+      {!isLoading && isError && <ListError onRetry={() => refetch()} />}
+      {!isLoading && !isError && list.length === 0 && (
+        <EmptyState title="还没有消息" description="打个招呼吧" emoji="💬" />
+      )}
 
-        <Box sx={{ px: 2, py: 2 }}>
-          {/* 顶部哨兵 + 加载更早提示 */}
-          {list.length > 0 && (
-            <Box ref={topRef} sx={{ textAlign: 'center', py: 1, color: 'text.disabled' }}>
-              {isFetchingNextPage && <CircularProgress size={16} />}
-              {!hasNextPage && <Typography variant="caption">没有更早的消息了</Typography>}
-            </Box>
-          )}
-          {list.map(m => {
-            const mine = m.sender_id === user.id
-            return (
-              <Box key={m.id} sx={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start', mb: 1.5 }}>
-                <Box
-                  sx={{
-                    maxWidth: '72%',
-                    px: 1.5, py: 1, borderRadius: 2,
-                    bgcolor: mine ? 'primary.main' : 'background.paper',
-                    color: mine ? 'primary.contrastText' : 'text.primary',
-                    border: mine ? 0 : 1, borderColor: 'grey.200',
-                    opacity: m.pending ? 0.7 : 1,
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  <Typography variant="body2" sx={{ lineHeight: 1.6 }}>{m.content}</Typography>
-                </Box>
-              </Box>
-            )
-          })}
-          <div ref={bottomRef} />
-        </Box>
+      <div style={{ padding: '12px 16px 16px' }}>
+        {list.length > 0 && (
+          <div ref={topRef} style={{ textAlign: 'center', padding: 8, color: 'var(--color-text-muted)', fontSize: 12 }}>
+            {isFetchingNextPage ? '加载中…' : !hasNextPage ? '没有更早的消息了' : ''}
+          </div>
+        )}
+        {list.map(m => {
+          const mine = m.sender_id === user.id
+          return (
+            <div key={m.id} style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom: 12 }}>
+              <div style={{
+                maxWidth: '72%',
+                padding: '10px 14px',
+                borderRadius: 16,
+                background: mine ? 'var(--color-primary)' : 'var(--color-surface)',
+                color: mine ? 'var(--color-on-primary)' : 'var(--color-text)',
+                border: mine ? 'none' : '1px solid var(--color-border)',
+                opacity: m.pending ? 0.7 : 1,
+                wordBreak: 'break-word',
+                fontSize: 14,
+                lineHeight: 1.55,
+              }}>
+                {m.content}
+              </div>
+            </div>
+          )
+        })}
+        <div ref={bottomRef} />
+      </div>
 
-        {/* 输入框 */}
-        <Box sx={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 480, bgcolor: 'background.paper', borderTop: 1, borderColor: 'grey.100', px: 2, py: 1.5, display: 'flex', gap: 1 }}>
-          <InputBase
-            value={text}
-            onChange={e => setText(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
-            placeholder="发条私信..."
-            sx={{ flex: 1, bgcolor: 'grey.100', borderRadius: 5, px: 2, py: 0.5, fontSize: 14 }}
-          />
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={handleSend}
-            disabled={!text.trim() || sendMutation.isPending}
-            sx={{ borderRadius: 5, minWidth: 64 }}
+      {failedDraft ? (
+        <div style={{
+          position: 'fixed', left: '50%', transform: 'translateX(-50%)',
+          bottom: `calc(64px + ${keyboardPad}px + env(safe-area-inset-bottom))`,
+          width: '100%', maxWidth: 480, padding: '0 16px', boxSizing: 'border-box', zIndex: 30,
+        }}>
+          <button
+            type="button"
+            onClick={handleResend}
+            style={{
+              width: '100%', border: 'none', borderRadius: 12, padding: '8px 12px',
+              background: 'var(--color-bg-accent)', color: 'var(--color-danger)',
+              fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            }}
           >
-            发送
-          </Button>
-        </Box>
-      </Box>
-    </Box>
+            发送失败，点此重送
+          </button>
+        </div>
+      ) : null}
+
+      <div style={{
+        position: 'fixed', left: '50%', transform: 'translateX(-50%)',
+        bottom: keyboardPad,
+        width: '100%', maxWidth: 480,
+        display: 'flex', gap: 8, alignItems: 'center',
+        padding: '10px 12px calc(10px + env(safe-area-inset-bottom))',
+        background: 'var(--color-surface)',
+        borderTop: '1px solid var(--color-border)',
+        boxSizing: 'border-box',
+        zIndex: 40,
+      }}>
+        <input
+          value={text}
+          onChange={e => setText(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+          placeholder="发条私信..."
+          style={{
+            flex: 1, minHeight: 44, borderRadius: 999, border: '1.5px solid var(--color-border)',
+            background: 'var(--color-bg)', color: 'var(--color-text)', padding: '0 16px',
+            fontSize: 15, outline: 'none',
+          }}
+        />
+        <Button
+          type="button"
+          onClick={handleSend}
+          loading={sendMutation.isPending}
+          disabled={!text.trim()}
+          style={{ borderRadius: 999, minWidth: 72 }}
+        >
+          发送
+        </Button>
+      </div>
+    </AppShell>
   )
+}
+
+const iconBtn = {
+  width: 44, height: 44, border: 'none', borderRadius: 22,
+  background: 'transparent', color: 'var(--color-text)', cursor: 'pointer',
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
 }

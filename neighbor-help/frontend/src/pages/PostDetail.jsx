@@ -17,8 +17,9 @@ import { useAuth } from '../hooks/useAuth'
 import { toast } from '../toast'
 import { safeParse } from '../utils/image'
 import BottomSheet from '../components/BottomSheet'
+import { AppShell, Button as UiButton, Sheet } from '../components/ui'
 
-const WARM = '#EC6E33'
+const WARM = 'var(--color-primary)'
 
 // 响应按钮文案随分类变化;拼单(group)不支持响应
 const RESPOND_LABEL = {
@@ -130,6 +131,7 @@ export default function PostDetail() {
 
   // 举报:reportTarget = { type:'post'|'comment', id } | null,有值即打开举报抽屉
   const [reportTarget, setReportTarget] = useState(null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   // 图片灯箱:点击缩略图看大图,viewerIdx 为当前查看的图序号(null=关闭)
   const [viewerIdx, setViewerIdx] = useState(null)
   const reportMutation = useMutation({
@@ -160,10 +162,10 @@ export default function PostDetail() {
   }, [observe])
 
   if (isLoading) {
-    return <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}><CircularProgress size={24} /></Box>
+    return <AppShell><Box sx={{ display: 'flex', justifyContent: 'center', py: 10, color: 'var(--color-text-muted)' }}>加载中…</Box></AppShell>
   }
   if (!post) {
-    return <Box sx={{ textAlign: 'center', py: 10, color: 'text.disabled' }}>帖子不存在</Box>
+    return <AppShell><Box sx={{ textAlign: 'center', py: 10, color: 'var(--color-text-muted)' }}>帖子不存在</Box></AppShell>
   }
 
   const menu = menuMap[post.type]
@@ -178,12 +180,12 @@ export default function PostDetail() {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
-      <Box sx={{ maxWidth: 480, mx: 'auto', bgcolor: 'background.paper', minHeight: '100vh', pb: 12 }}>
+    <AppShell style={{ background: 'var(--color-bg)', paddingBottom: 96 }}>
+      <Box sx={{ bgcolor: 'var(--color-surface)', minHeight: '100vh', color: 'var(--color-text)' }}>
         {/* 头部 */}
-        <AppBar position="sticky" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: 'grey.100' }}>
+        <AppBar position="sticky" color="inherit" elevation={0} sx={{ bgcolor: 'var(--color-surface)', color: 'var(--color-text)', borderBottom: 1, borderColor: 'var(--color-border)' }}>
           <Toolbar sx={{ gap: 1 }}>
-            <IconButton edge="start" onClick={() => navigate(-1)}><ArrowBackIcon /></IconButton>
+            <IconButton edge="start" onClick={() => navigate(-1)} sx={{ color: 'var(--color-text)' }}><ArrowBackIcon /></IconButton>
             <Typography fontWeight={500}>{menu?.label || post.type}</Typography>
             {post.status === 'closed' && (
               <Chip label="已完成" size="small" sx={{ ml: 'auto', height: 22 }} />
@@ -285,7 +287,7 @@ export default function PostDetail() {
                 <Button
                   size="small"
                   color="error"
-                  onClick={() => { if (window.confirm('确定删除这条帖子吗?')) deleteMutation.mutate() }}
+                  onClick={() => setDeleteOpen(true)}
                   disabled={deleteMutation.isPending}
                 >
                   删除
@@ -493,7 +495,22 @@ export default function PostDetail() {
           </IconButton>
         </Box>
       )}
-    </Box>
+
+      <Sheet open={deleteOpen} onClose={() => setDeleteOpen(false)} title="确定删除这条帖子吗?" heightVh={28}>
+        <p style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--color-text-muted)' }}>删除后不可恢复。</p>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <UiButton type="button" variant="secondary" style={{ flex: 1 }} onClick={() => setDeleteOpen(false)}>取消</UiButton>
+          <UiButton
+            type="button"
+            loading={deleteMutation.isPending}
+            style={{ flex: 1, background: 'var(--color-danger)' }}
+            onClick={() => deleteMutation.mutate()}
+          >
+            删除
+          </UiButton>
+        </div>
+      </Sheet>
+    </AppShell>
   )
 }
 

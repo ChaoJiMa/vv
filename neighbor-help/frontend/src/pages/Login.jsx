@@ -150,7 +150,7 @@ export default function Login() {
   useEffect(() => {
     const prevBgColor = document.body.style.backgroundColor
     const prevOverscroll = document.body.style.overscrollBehavior
-    document.body.style.backgroundColor = '#FBEFE3'
+    document.body.style.backgroundColor = 'var(--color-bg)'
     document.body.style.overscrollBehavior = 'none'
     return () => {
       document.body.style.backgroundColor = prevBgColor
