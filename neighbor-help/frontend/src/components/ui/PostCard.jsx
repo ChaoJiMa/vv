@@ -1,5 +1,6 @@
 import { api } from '../../api'
 import { safeParse } from '../../utils/image'
+import { MenuIcon } from '../icons'
 import Sticker from './Sticker'
 
 function formatTime(ts) {
@@ -52,7 +53,10 @@ export default function PostCard({ post, menu, onClick }) {
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
         {menu?.label ? (
           <Sticker active={false} color="cream" style={{ minHeight: 28, padding: '4px 10px', fontSize: 12, pointerEvents: 'none' }}>
-            {menu.icon ? `${menu.icon} ` : ''}{menu.label}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <MenuIcon type={post.type} size={12} />
+              {menu.label}
+            </span>
           </Sticker>
         ) : null}
         <span style={{

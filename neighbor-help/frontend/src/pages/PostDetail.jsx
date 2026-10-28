@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
-import OutlinedFlagIcon from '@mui/icons-material/OutlinedFlag'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { toast } from '../toast'
@@ -10,6 +8,9 @@ import { safeParse } from '../utils/image'
 import {
   AppShell, Button, Field, IconBtn, Sheet, Sticker,
 } from '../components/ui'
+import {
+  BackIcon, CopyIcon, FlagIcon, MenuIcon, RefreshIcon,
+} from '../components/icons'
 
 const RESPOND_LABEL = {
   help: '我要帮忙',
@@ -177,12 +178,15 @@ export default function PostDetail() {
   return (
     <AppShell style={{ paddingBottom: 88 }}>
       <header style={headerBar}>
-        <IconBtn ariaLabel="返回" onClick={() => navigate(-1)}><ArrowBackIcon /></IconBtn>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <IconBtn ariaLabel="返回" onClick={() => navigate(-1)}><BackIcon size={22} /></IconBtn>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <MenuIcon type={post.type} size={18} style={{ color: 'var(--color-primary)' }} />
           <div style={{ fontWeight: 700, fontSize: 16 }}>{menu?.label || post.type}</div>
         </div>
         {post.status === 'closed' && <Sticker active={false} color="cream" style={{ minHeight: 28, padding: '4px 10px', pointerEvents: 'none' }}>已完成</Sticker>}
-        <button type="button" onClick={() => { refetch(); refetchComments() }} style={linkBtn}>刷新</button>
+        <button type="button" onClick={() => { refetch(); refetchComments() }} style={{ ...linkBtn, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <RefreshIcon size={16} /> 刷新
+        </button>
       </header>
 
       {postImages.length > 0 ? (
@@ -209,16 +213,19 @@ export default function PostDetail() {
       ) : (
         <div style={{
           margin: '12px 16px 0', padding: 28, borderRadius: 'var(--radius-card)',
-          background: 'var(--color-bg-accent)', textAlign: 'center', fontSize: 40,
+          background: 'var(--color-bg-accent)', display: 'flex', justifyContent: 'center', color: 'var(--color-primary)',
         }}>
-          {menu?.icon || '🏠'}
+          <MenuIcon type={post.type} size={48} />
         </div>
       )}
 
       <section style={{ padding: '16px 16px 12px' }}>
         {menu?.label && (
           <Sticker active={false} color="cream" style={{ minHeight: 28, padding: '4px 10px', marginBottom: 10, pointerEvents: 'none' }}>
-            {menu.icon ? `${menu.icon} ` : ''}{menu.label}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <MenuIcon type={post.type} size={14} />
+              {menu.label}
+            </span>
           </Sticker>
         )}
         <h1 style={{ margin: '0 0 10px', fontSize: 20, fontWeight: 800, lineHeight: 1.35 }}>{post.title}</h1>
@@ -235,7 +242,9 @@ export default function PostDetail() {
             {post.contact && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ ...metaLine, flex: 1 }}>📞 {post.contact}</span>
-                <button type="button" onClick={copyContact} style={linkBtn}>复制</button>
+                <button type="button" onClick={copyContact} style={{ ...linkBtn, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <CopyIcon size={14} /> 复制
+                </button>
               </div>
             )}
             {post.contactUnavailable && <div style={{ ...metaLine, color: 'var(--color-danger)' }}>联系方式暂时无法显示</div>}
@@ -263,8 +272,8 @@ export default function PostDetail() {
               {post.building || ''}{post.unit || ''}邻居 · {post.nickname}
             </span>
             {user && user.id !== post.user_id && (
-              <IconBtn ariaLabel="举报" onClick={() => setReportTarget({ type: 'post', id })} style={{ width: 32, height: 32, minWidth: 32, minHeight: 32 }}>
-                <OutlinedFlagIcon sx={{ fontSize: 16, color: 'var(--color-text-muted)' }} />
+              <IconBtn ariaLabel="举报" onClick={() => setReportTarget({ type: 'post', id })} style={{ width: 32, height: 32, minWidth: 32, minHeight: 32, color: 'var(--color-text-muted)' }}>
+                <FlagIcon size={16} />
               </IconBtn>
             )}
           </div>
@@ -408,7 +417,7 @@ export default function PostDetail() {
             </div>
           )}
           <IconBtn ariaLabel="关闭" onClick={(e) => { e.stopPropagation(); setViewerIdx(null) }} style={{ position: 'absolute', top: 'calc(8px + env(safe-area-inset-top))', right: 8, color: '#fff' }}>
-            <ArrowBackIcon />
+            <BackIcon size={22} />
           </IconBtn>
         </div>
       )}

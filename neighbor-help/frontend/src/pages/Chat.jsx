@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { usePageVisible, pollInterval } from '../hooks/usePageVisible'
 import { toast } from '../toast'
 import { AppShell, Button, EmptyState, ListError } from '../components/ui'
+import { BackIcon, SendIcon } from '../components/icons'
+import { EmptyMessages } from '../components/illustrations/EmptyArts'
 
 export default function Chat() {
   const { peerId } = useParams()
@@ -130,7 +131,7 @@ export default function Chat() {
   if (!user) {
     return (
       <AppShell>
-        <EmptyState title="请先登录" actionLabel="去登录" onAction={() => navigate('/login')} emoji="🔐" />
+        <EmptyState title="请先登录" actionLabel="去登录" onAction={() => navigate('/login')} illustration={<EmptyMessages />} />
       </AppShell>
     )
   }
@@ -146,7 +147,7 @@ export default function Chat() {
         borderBottom: '1px solid var(--color-border)',
       }}>
         <button type="button" aria-label="返回" onClick={() => navigate(-1)} style={iconBtn}>
-          <ArrowBackIcon />
+          <BackIcon size={22} />
         </button>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 700, fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -161,7 +162,7 @@ export default function Chat() {
       {isLoading && <div style={{ textAlign: 'center', padding: 48, color: 'var(--color-text-muted)' }}>加载中…</div>}
       {!isLoading && isError && <ListError onRetry={() => refetch()} />}
       {!isLoading && !isError && list.length === 0 && (
-        <EmptyState title="还没有消息" description="打个招呼吧" emoji="💬" />
+        <EmptyState title="还没有消息" description="打个招呼吧" illustration={<EmptyMessages />} />
       )}
 
       <div style={{ padding: '12px 16px 16px' }}>
@@ -243,7 +244,7 @@ export default function Chat() {
           disabled={!text.trim()}
           style={{ borderRadius: 999, minWidth: 72 }}
         >
-          发送
+          <SendIcon size={16} /> 发送
         </Button>
       </div>
     </AppShell>

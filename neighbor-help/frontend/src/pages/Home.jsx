@@ -3,13 +3,14 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import CampaignOutlinedIcon from '@mui/icons-material/CampaignOutlined'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
-import HelpOutlineIcon from '@mui/icons-material/HelpOutlineRounded'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import BottomNav from '../components/BottomNav'
 import {
   AppShell, Button, EmptyState, Fab, ListError, PostCard, Sheet, Skeleton,
 } from '../components/ui'
+import { HelpIcon, MenuIcon, RefreshIcon } from '../components/icons'
+import { EmptyPosts } from '../components/illustrations/EmptyArts'
 
 const NOTICES_FALLBACK = [
   '欢迎来到邻里里,远亲不如近邻',
@@ -95,9 +96,9 @@ export default function Home() {
           type="button"
           aria-label="刷新"
           onClick={() => refetch()}
-          style={ghostBtn}
+          style={{ ...ghostBtn, display: 'inline-flex', alignItems: 'center', gap: 4 }}
         >
-          刷新
+          <RefreshIcon size={16} /> 刷新
         </button>
         {!user && (
           <Button type="button" variant="secondary" onClick={() => navigate('/login')} style={{ minHeight: 36, padding: '6px 14px' }}>
@@ -176,7 +177,13 @@ export default function Home() {
                   fontSize: 10.5, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>{hot > 99 ? '99+' : hot}</span>
               ) : null}
-              <span style={{ fontSize: 22 }}>{m.icon}</span>
+              <span style={{
+                width: 40, height: 40, borderRadius: 12, flexShrink: 0,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                background: 'var(--color-surface)', color: 'var(--color-primary)',
+              }}>
+                <MenuIcon type={m.value} size={22} />
+              </span>
               <span style={{ minWidth: 0 }}>
                 <span style={{ display: 'block', fontSize: 14, fontWeight: 700 }}>{m.label}</span>
                 <span style={{ display: 'block', fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -208,7 +215,7 @@ export default function Home() {
             description="发布第一个求助,让邻居帮你!"
             actionLabel="发布求助"
             onAction={() => navigate('/create')}
-            emoji="📝"
+            illustration={<EmptyPosts />}
           />
         )}
         {posts.map(post => (
@@ -231,7 +238,7 @@ export default function Home() {
         onClick={() => setHelpOpen(true)}
         style={{ background: 'var(--color-surface)', color: 'var(--color-primary)' }}
       >
-        <HelpOutlineIcon />
+        <HelpIcon size={22} />
       </Fab>
 
       <Sheet open={helpOpen} onClose={() => setHelpOpen(false)} title="新手必读 · 安全提示" heightVh={48}>

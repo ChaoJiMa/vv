@@ -1,14 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { useNavigate, useLocation } from 'react-router-dom'
-import SearchIcon from '@mui/icons-material/Search'
-import CloseIcon from '@mui/icons-material/Close'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import BottomNav from '../components/BottomNav'
 import {
   AppShell, Button, EmptyState, ListError, PostCard, Skeleton, Sticker,
 } from '../components/ui'
+import { CloseIcon, MenuIcon, SearchIcon } from '../components/icons'
+import { EmptyPosts, EmptySearch } from '../components/illustrations/EmptyArts'
 
 export default function Discover() {
   const navigate = useNavigate()
@@ -76,7 +76,7 @@ export default function Discover() {
             background: 'var(--color-surface)', border: '1.5px solid var(--color-border)',
             borderRadius: 999, padding: '0 12px', minHeight: 44,
           }}>
-            <SearchIcon sx={{ fontSize: 20, color: 'var(--color-text-muted)' }} />
+            <SearchIcon size={20} style={{ color: 'var(--color-text-muted)' }} />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
@@ -88,8 +88,8 @@ export default function Discover() {
               }}
             />
             {search ? (
-              <button type="button" aria-label="清除" onClick={clearSearch} style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 4 }}>
-                <CloseIcon sx={{ fontSize: 16, color: 'var(--color-text-muted)' }} />
+              <button type="button" aria-label="清除" onClick={clearSearch} style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, color: 'var(--color-text-muted)' }}>
+                <CloseIcon size={16} />
               </button>
             ) : null}
           </div>
@@ -99,7 +99,9 @@ export default function Discover() {
           <Sticker active={activeTab === ''} onClick={() => setActiveTab('')}>全部</Sticker>
           {menus.map(m => (
             <Sticker key={m.value} active={activeTab === m.value} color="mint" onClick={() => setActiveTab(m.value)}>
-              {m.icon ? `${m.icon} ` : ''}{m.label}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <MenuIcon type={m.value} size={14} />{m.label}
+              </span>
             </Sticker>
           ))}
         </div>
@@ -115,7 +117,7 @@ export default function Discover() {
         {!isLoading && isError && <ListError onRetry={() => refetch()} />}
         {!isLoading && !isError && posts.length === 0 && (
           <EmptyState
-            emoji={keyword ? '🔍' : '📭'}
+            illustration={keyword ? <EmptySearch /> : <EmptyPosts />}
             title={keyword ? '没有找到相关帖子' : '这里还空着'}
             description={keyword ? '试试其他关键词' : '去首页发布第一条吧'}
             actionLabel={keyword ? undefined : '去首页'}

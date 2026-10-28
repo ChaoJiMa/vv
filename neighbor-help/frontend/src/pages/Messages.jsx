@@ -6,6 +6,10 @@ import { useAuth } from '../hooks/useAuth'
 import { usePageVisible, pollInterval } from '../hooks/usePageVisible'
 import BottomNav from '../components/BottomNav'
 import { AppShell, EmptyState, ListError, Skeleton, Sticker } from '../components/ui'
+import {
+  NotiAdoptIcon, NotiCommentIcon, NotiRespondIcon, NotiThankIcon, RefreshIcon,
+} from '../components/icons'
+import { EmptyMessages, EmptyNotices } from '../components/illustrations/EmptyArts'
 
 export default function Messages() {
   const navigate = useNavigate()
@@ -70,7 +74,7 @@ export default function Messages() {
   if (!user) {
     return (
       <AppShell>
-        <EmptyState title="请先登录" actionLabel="去登录" onAction={() => navigate('/login')} emoji="🔐" />
+        <EmptyState title="请先登录" actionLabel="去登录" onAction={() => navigate('/login')} illustration={<EmptyMessages />} />
       </AppShell>
     )
   }
@@ -91,7 +95,9 @@ export default function Messages() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
           <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, flex: 1 }}>消息</h1>
-          <button type="button" onClick={() => active.refetch()} style={linkBtn}>刷新</button>
+          <button type="button" onClick={() => active.refetch()} style={{ ...linkBtn, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <RefreshIcon size={16} /> 刷新
+          </button>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Sticker active={tab === 'message'} onClick={() => setTab('message')}>私信</Sticker>
@@ -111,7 +117,7 @@ export default function Messages() {
         {!isLoading && isError && <ListError onRetry={() => active.refetch()} />}
         {!isLoading && !isError && list.length === 0 && (
           <EmptyState
-            emoji={tab === 'message' ? '📭' : '🔔'}
+            illustration={tab === 'message' ? <EmptyMessages /> : <EmptyNotices />}
             title={tab === 'message' ? '暂无私信' : '暂无通知'}
             description={tab === 'message' ? '去社区认识新邻居吧' : '有新动态时会在这里提醒你'}
             actionLabel={tab === 'message' ? '去首页' : undefined}
@@ -145,7 +151,7 @@ export default function Messages() {
           const isThank = it.notiType === 'thank'
           const isAdopt = it.notiType === 'adopt'
           const isRespond = it.notiType === 'respond'
-          const icon = isThank ? '🙏' : isAdopt ? '✅' : isRespond ? '🙋' : '💬'
+          const NotiIcon = isThank ? NotiThankIcon : isAdopt ? NotiAdoptIcon : isRespond ? NotiRespondIcon : NotiCommentIcon
           const title = isThank
             ? `${it.actorName} 采纳并感谢了你`
             : isAdopt
@@ -165,7 +171,9 @@ export default function Messages() {
               }}
             >
               <span style={{ width: 8, height: 8, borderRadius: 4, flexShrink: 0, background: it.read ? 'transparent' : 'var(--color-primary)' }} />
-              <span style={{ ...avatar, background: 'var(--color-bg-accent)', fontSize: 20 }}>{icon}</span>
+              <span style={{ ...avatar, background: 'var(--color-bg-accent)', color: 'var(--color-primary)' }}>
+                <NotiIcon size={22} />
+              </span>
               <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                 <span style={{ display: 'block', fontWeight: it.read ? 500 : 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
                 <span style={{ display: 'block', fontSize: 12, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

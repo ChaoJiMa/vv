@@ -11,7 +11,7 @@ import Chip from '@mui/material/Chip'
 import Link from '@mui/material/Link'
 import CircularProgress from '@mui/material/CircularProgress'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
-import HomeRoundedIcon from '@mui/icons-material/HomeRounded'
+import { NavHomeIcon } from '../components/icons'
 import SplitText from '../components/SplitText'
 import AnimatedContent from '../components/AnimatedContent'
 import BottomSheet from '../components/BottomSheet'
@@ -314,7 +314,7 @@ export default function Login() {
               boxShadow: '0 8px 24px rgba(255,138,107,0.35)',
             }}
           >
-            <HomeRoundedIcon sx={{ fontSize: 34, color: '#fff' }} />
+            <NavHomeIcon size={34} style={{ color: '#fff' }} filled />
           </Box>
         </AnimatedContent>
         {/* 标题用 Split Text 逐字入场 */}

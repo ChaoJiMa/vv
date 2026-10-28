@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import AddPhotoAlternateOutlinedIcon from '@mui/icons-material/AddPhotoAlternateOutlined'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
@@ -9,6 +8,7 @@ import { toast } from '../toast'
 import { downscaleImage, safeParse } from '../utils/image'
 import BottomNav from '../components/BottomNav'
 import { AppShell, Button, Field, Sheet } from '../components/ui'
+import { ImageIcon, MenuIcon } from '../components/icons'
 
 const MAX_IMAGES = 6
 const TITLE_PLACEHOLDER = {
@@ -191,7 +191,7 @@ export default function CreatePost() {
                   color: 'var(--color-text)', minHeight: 88,
                 }}
               >
-                <div style={{ fontSize: 22 }}>{t.icon}</div>
+                <div style={{ color: active ? 'var(--color-primary)' : 'var(--color-text-muted)' }}><MenuIcon type={t.value} size={24} /></div>
                 <div style={{ fontSize: 14, fontWeight: 700, marginTop: 6 }}>{t.label}</div>
                 <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>{t.desc}</div>
               </button>
@@ -263,7 +263,7 @@ export default function CreatePost() {
               }}
             >
               <span style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-                <AddPhotoAlternateOutlinedIcon sx={{ fontSize: 24 }} />
+                <ImageIcon size={24} />
                 <span style={{ fontSize: 10 }}>{images.length}/{MAX_IMAGES}</span>
               </span>
             </button>

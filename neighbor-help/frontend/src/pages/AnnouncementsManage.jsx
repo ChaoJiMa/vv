@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { toast } from '../toast'
 import { AppShell, Button, EmptyState, Field, Sheet, Sticker } from '../components/ui'
+import { BackIcon } from '../components/icons'
+import { EmptyNotices } from '../components/illustrations/EmptyArts'
 
 const ADMIN_QK = ['announcements-admin']
 const PUBLIC_QK = ['announcements']
@@ -91,7 +92,7 @@ export default function AnnouncementsManage() {
         borderBottom: '1px solid var(--color-border)',
       }}>
         <button type="button" aria-label="返回" onClick={() => navigate('/profile')} style={iconBtn}>
-          <ArrowBackIcon />
+          <BackIcon size={22} />
         </button>
         <h1 style={{ margin: 0, flex: 1, fontSize: 17, fontWeight: 700 }}>公告管理</h1>
         <Button
@@ -107,7 +108,7 @@ export default function AnnouncementsManage() {
         {isLoading && <div style={{ textAlign: 'center', padding: 48, color: 'var(--color-text-muted)' }}>加载中…</div>}
         {!isLoading && list.length === 0 && (
           <EmptyState
-            emoji="📢"
+            illustration={<EmptyNotices />}
             title="还没有公告"
             description="点右上角新增一条滚动公告"
             actionLabel="新增公告"

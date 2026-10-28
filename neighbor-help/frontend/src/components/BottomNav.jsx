@@ -1,18 +1,13 @@
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import Badge from '@mui/material/Badge'
-import HomeRoundedIcon from '@mui/icons-material/HomeRounded'
-import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined'
-import SearchIcon from '@mui/icons-material/Search'
-import ChatBubbleIcon from '@mui/icons-material/ChatBubble'
-import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutlineSharp'
-import PersonIcon from '@mui/icons-material/Person'
-import PersonOutlineIcon from '@mui/icons-material/PersonOutlined'
-import AddIcon from '@mui/icons-material/Add'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { usePageVisible, pollInterval } from '../hooks/usePageVisible'
 import { toast } from '../toast'
+import {
+  NavHomeIcon, NavDiscoverIcon, NavMessageIcon, NavMeIcon, NavAddIcon,
+} from './icons'
 
 export default function BottomNav() {
   const navigate = useNavigate()
@@ -38,12 +33,12 @@ export default function BottomNav() {
   }
 
   const left = [
-    { key: 'home', label: '首页', path: '/', active: HomeRoundedIcon, inactive: HomeOutlinedIcon },
-    { key: 'discover', label: '发现', path: '/discover', active: SearchIcon, inactive: SearchIcon },
+    { key: 'home', label: '首页', path: '/', Icon: NavHomeIcon },
+    { key: 'discover', label: '发现', path: '/discover', Icon: NavDiscoverIcon },
   ]
   const right = [
-    { key: 'msg', label: '消息', path: '/messages', active: ChatBubbleIcon, inactive: ChatBubbleOutlineIcon, badge: unreadTotal, auth: true },
-    { key: 'me', label: '我的', path: '/profile', active: PersonIcon, inactive: PersonOutlineIcon, auth: true },
+    { key: 'msg', label: '消息', path: '/messages', Icon: NavMessageIcon, badge: unreadTotal, auth: true },
+    { key: 'me', label: '我的', path: '/profile', Icon: NavMeIcon, auth: true },
   ]
 
   return (
@@ -89,7 +84,7 @@ export default function BottomNav() {
             boxShadow: '0 6px 16px rgba(236,110,51,0.4)',
           }}
         >
-          <AddIcon sx={{ fontSize: 28 }} />
+          <NavAddIcon size={28} />
         </button>
       </div>
       {right.map(it => <NavItem key={it.key} item={it} pathname={pathname} go={go} />)}
@@ -111,7 +106,7 @@ export default function BottomNav() {
 
 function NavItem({ item, pathname, go }) {
   const selected = pathname === item.path
-  const Icon = selected ? item.active : item.inactive
+  const Icon = item.Icon
   return (
     <button
       type="button"
@@ -133,7 +128,9 @@ function NavItem({ item, pathname, go }) {
       }}
     >
       <Badge color="error" badgeContent={item.badge || 0} max={99}>
-        <Icon className="nh-nav-icon" sx={{ fontSize: 24 }} />
+        <span className="nh-nav-icon" style={{ display: 'inline-flex' }}>
+          <Icon size={24} filled={selected} />
+        </span>
       </Badge>
       <span style={{ fontSize: 10.5, fontWeight: selected ? 700 : 400, lineHeight: 1 }}>{item.label}</span>
     </button>

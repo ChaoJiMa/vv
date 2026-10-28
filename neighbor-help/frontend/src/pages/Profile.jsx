@@ -8,7 +8,7 @@ import TextField from '@mui/material/TextField'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
-import ChevronRightIcon from '@mui/icons-material/ChevronRight'
+import { ChevronIcon } from '../components/icons'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { useAppTheme } from '../theme/useAppTheme'
@@ -82,7 +82,7 @@ export default function Profile() {
             {location || '未设置楼栋单元'}
           </span>
         </span>
-        <ChevronRightIcon sx={{ color: 'var(--color-text-muted)' }} />
+        <ChevronIcon size={20} style={{ color: 'var(--color-text-muted)' }} />
       </button>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, margin: '12px 16px 0' }}>
@@ -179,7 +179,7 @@ function MenuRow({ label, onClick }) {
       }}
     >
       <span style={{ flex: 1, fontSize: 14 }}>{label}</span>
-      <ChevronRightIcon sx={{ color: 'var(--color-text-muted)', fontSize: 20 }} />
+      <ChevronIcon size={18} style={{ color: 'var(--color-text-muted)' }} />
     </button>
   )
 }
