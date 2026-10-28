@@ -10,6 +10,7 @@ import { findSensitive } from '../sensitive.js'
 import { sanitizeImages } from '../images.js'
 import { getCommunity } from '../config.js'
 import { pickValidHelpers } from './helpers.js'
+import { canSeeContact, encryptContact, decryptContact, omitContact } from '../contactCrypto.js'
 
 // 服务类型菜单:前端 Home 的 Tab 与 CreatePost 的类型卡片都从这里取,
 // 保证菜单由后端统一维护(增删服务类型无需改前端)。
@@ -81,8 +82,8 @@ api.post('/posts/list', async (c) => {
     c.env.DB.prepare(countSql).bind(...args).first(),
   ])
 
-  // contact(联系方式)属隐私,列表为公开接口,统一剔除——只在帖子详情(且登录后)才返回。
-  const safeList = (list || []).map(({ contact, ...rest }) => rest)
+  // contact 属隐私:公开列表一律剔除;明文仅在 detail 且作者/已响应时返回。
+  const safeList = (list || []).map(omitContact)
   const total = countRow?.n ?? 0
   return success({ list: safeList, total, page, hasMore: offset + safeList.length < total })
 })
@@ -107,9 +108,13 @@ api.post('/posts/detail', async (c) => {
   const auth = await verifyAuth(c.req.raw, c.env)
   const myId = auth?.userId || null
   const myResponded = myId ? (responses || []).some(r => r.user_id === myId) : false
-  // contact(联系方式)属隐私:仅登录用户可见,游客剔除,防止不带 token 直接抓接口采集。
-  const safePost = myId ? post : (() => { const { contact, ...rest } = post; return rest })()
-  return success({ ...safePost, helpers, responses, myResponded })
+  // contact 仅作者或已响应者可见;授权后再解密,避免登录即可批量采集。
+  const { contact: storedContact, ...rest } = post
+  if (!canSeeContact(myId, post.user_id, myResponded)) {
+    return success({ ...rest, helpers, responses, myResponded })
+  }
+  const contact = await decryptContact(storedContact, c.env.CONTACT_ENC_KEY)
+  return success({ ...rest, contact, helpers, responses, myResponded })
 })
 
 // POST /api/posts/comments —— 帖子评论列表(分页),参数 { id, page }。按时间正序(最早在上)。
@@ -210,8 +215,10 @@ api.post('/me/posts', authRequired, async (c) => {
     c.env.DB.prepare(`SELECT COUNT(*) AS n FROM posts p ${whereSql}`).bind(...args).first(),
   ])
 
+  // 与公开列表一致剔除 contact,避免密文/明文经「我的帖子」外泄;编辑走 detail 解密。
+  const safeList = (list || []).map(omitContact)
   const total = countRow?.n ?? 0
-  return success({ list, total, page, hasMore: offset + list.length < total })
+  return success({ list: safeList, total, page, hasMore: offset + safeList.length < total })
 })
 
 // POST /api/me/stats —— 个人页数据统计(基于采纳记录 post_helpers)
@@ -257,9 +264,10 @@ api.post('/posts/create', authRequired, async (c) => {
     locValue = [me?.building, me?.unit].filter(Boolean).join(' ')
   }
   const id = genId()
+  const contactStored = await encryptContact(cont.value, c.env.CONTACT_ENC_KEY)
   await c.env.DB.prepare(
     'INSERT INTO posts (id, user_id, type, title, content, images, contact, location, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).bind(id, userId, type, t.value, ct.value, JSON.stringify(sanitizeImages(images)), cont.value, locValue, Date.now()).run()
+  ).bind(id, userId, type, t.value, ct.value, JSON.stringify(sanitizeImages(images)), contactStored, locValue, Date.now()).run()
   return success({ id })
 })
 
@@ -286,8 +294,9 @@ api.post('/posts/update', authRequired, async (c) => {
   const bad = await findSensitive(c.env, `${t.value} ${ct.value}`)
   if (bad) return fail(CODE.CONTENT_BLOCKED, `内容含违规词「${bad}」,请修改后再保存`)
   const newImages = sanitizeImages(images)
+  const contactStored = await encryptContact(cont.value, c.env.CONTACT_ENC_KEY)
   await c.env.DB.prepare('UPDATE posts SET type=?, title=?, content=?, images=?, contact=?, location=? WHERE id=? AND user_id=?')
-    .bind(type, t.value, ct.value, JSON.stringify(newImages), cont.value, loc.value, id, userId).run()
+    .bind(type, t.value, ct.value, JSON.stringify(newImages), contactStored, loc.value, id, userId).run()
   // 清理被移除的旧图(编辑时删掉的图片),避免 R2 孤儿对象累积。
   // best-effort:解析失败或 R2 异常都忽略,不影响编辑结果。复刻 posts/delete 的清理写法。
   try {

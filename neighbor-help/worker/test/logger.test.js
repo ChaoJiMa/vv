@@ -18,9 +18,9 @@ describe('describeRoute', () => {
 })
 
 describe('redact 脱敏', () => {
-  it('脱敏密码/token 字段', () => {
-    const out = redact({ username: 'bob', password: 'secret', token: 'abc' })
-    expect(out).toEqual({ username: 'bob', password: '***', token: '***' })
+  it('脱敏密码/token/contact 字段', () => {
+    const out = redact({ username: 'bob', password: 'secret', token: 'abc', contact: '13800138000' })
+    expect(out).toEqual({ username: 'bob', password: '***', token: '***', contact: '***' })
   })
 
   it('递归脱敏嵌套对象', () => {

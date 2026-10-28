@@ -37,23 +37,24 @@ Worker 有 vitest 单测；前端目前无自动化测试套件（以 `npm run l
 ## 本地开发约定
 
 - 前端通过 `vite.config.js` 的 proxy 把 `/api` 和 `/auth` 转发到 `http://localhost:8787`，所以本地开发时**两个服务都要起**，且前端不需要设置 `VITE_API_URL`（留空走 proxy）。
-- 后端密钥放在 `worker/.dev.vars`（本地，git 忽略）；生产环境用 Cloudflare Dashboard 的 Workers 环境变量。所需变量：`JWT_SECRET`（必需）、`WX_APPID` / `WX_SECRET`（微信登录用，可选）。
+- 后端密钥放在 `worker/.dev.vars`（本地，git 忽略）；生产环境用 Cloudflare Dashboard 的 Workers 环境变量（或 `npx wrangler secret put`）。所需变量：`JWT_SECRET`（必需）、`CONTACT_ENC_KEY`（**生产必需**，64 位 hex，帖子联系方式 AES-GCM；缺省则明文落库，部署后应抽查 `posts.contact` 是否以 `enc:v1:` 开头）、`WX_APPID` / `WX_SECRET`（微信登录用，可选）。
 - 绑定见 `worker/wrangler.toml`：D1 绑定名 `DB`、R2 绑定名 `IMAGES`。
 - 改库结构：在 `worker/migrations/` 新增 `000N_xxx.sql` 增量迁移并 `wrangler d1 migrations apply`。`worker/schema.sql` 只是「完整表结构参考快照」，**不是**建库来源——改表时要同步更新它与 migrations，避免漂移。
 
 ## 架构要点
 
 ### 后端请求流（Hono）
-`worker/src/index.js` 是入口：注册 CORS（动态校验来源，含 Pages 预览子域名）+ 日志中间件 + `notFound`/`onError` 兜底，然后挂载子路由。**挂载顺序有讲究**：含公开路由的子应用（`posts` 的列表/详情、`images` 的 `GET /api/img`）必须挂在用 `use('*', authRequired)` 的鉴权子应用（`messages`/`reports`）**之前**，否则公开路由会被全局鉴权拦成 401。
+`worker/src/index.js` 是入口：注册 CORS（动态校验来源，含 Pages 预览子域名）+ 日志中间件 + `notFound`/`onError` 兜底，然后挂载子路由。**挂载顺序有讲究**：含公开路由的子应用（`posts` 的列表/详情、`images` 的 `GET /api/img`、`announcements` 的公开 list）必须挂在用 `use('*', authRequired)` 的鉴权子应用（`messages`/`reports`）**之前**，否则公开路由会被全局鉴权拦成 401。
 
 路由文件在 `worker/src/routes/`，每个是独立 Hono 子应用：
 - `auth.js` → `/auth/*`：注册、登录、微信登录
-- `posts.js` → `/api/*`：菜单、小区结构、首页公告、帖子 CRUD、评论、响应、采纳、个人资料/统计
+- `posts.js` → `/api/*`：菜单、小区结构、帖子 CRUD、评论、响应、采纳、个人资料/统计
+- `announcements.js` → `/api/*`：公开首页公告 list + 管理员公告 CRUD（须挂在 messages/reports 之前）
 - `images.js` → `/api/*`：图片上传（需登录）+ `GET /api/img/:key` 公开代理读图
 - `messages.js` → `/api/*`：私信 + 通知（整个子应用 `authRequired`）
 - `reports.js` → `/api/*`：举报（整个子应用 `authRequired`）
 
-运营配置集中在 `config.js` / `sensitive.js`：从 D1 表 `app_config` 读 JSON（带短时内存缓存），种子在迁移 `0008`/`0009`。改小区结构、敏感词、首页公告等一般 **UPDATE `app_config`**，无需改代码部署。
+运营配置集中在 `config.js` / `sensitive.js`：从 D1 表 `app_config` 读 JSON（带短时内存缓存），种子在迁移 `0008`/`0009`。改**小区结构、敏感词、安全提示（safetyTips）**一般 **UPDATE `app_config`**。首页**滚动公告（notices）**已改走 `announcements` 表，由管理员在 App 内管理（见下）。
 
 新增接口：在对应子应用里 `api.post('/xxx', authRequired?, handler)`。**几乎所有业务接口都是 `POST`**（含纯查询），靠动词后缀路径区分（如 `/api/posts/list`、`/api/posts/detail`）。读图是少数 `GET`。
 
@@ -73,26 +74,29 @@ Worker 有 vitest 单测；前端目前无自动化测试套件（以 `npm run l
 - **Token 吊销**：JWT 载荷带 `tv`（token_version），`verifyAuth` 比对 DB 中 `users.token_version`，不等即失效。改密码/退出登录调 `bumpTokenVersion` 使版本 +1，令所有旧 token 立即失效。
 - 主键 ID 用 `genId()`（去横杠 32 位 hex 的 UUID），不暴露递增规律。
 - 用户表同时支持用户名密码和微信 openid 两种身份（`users.username` 与 `users.openid` 均可空且唯一）。
+- `users.role`：`user` | `admin`（默认 `user`）。管理接口**每次查库**确认 admin，不以 JWT 载荷为准。种子可将 `username=admin` 升为 admin（见迁移 `0010`）。
 
 ### 数据模型（`schema.sql` + `migrations/`）
 主键全用 UUID(TEXT)，`created_at` 统一为毫秒时间戳(INTEGER)，与 JWT 口径一致。核心表：
-- `users`：用户名密码 + 微信双身份，`token_version` 用于吊销 token。
-- `posts`：`type` 区分四类业务（求助互助 `help`/闲置转让 `idle`/失物招领 `lost`/拼单拼团 `group`，菜单由后端 `MENUS` 常量统一下发）；`images` 存 R2 key 的 JSON 数组；`status` 为 `open`/`closed`；带 `contact`（隐私，仅登录详情返回）、`location`。
+- `users`：用户名密码 + 微信双身份，`token_version` 用于吊销 token，`role` 区分普通用户/管理员。
+- `posts`：`type` 区分四类业务（求助互助 `help`/闲置转让 `idle`/失物招领 `lost`/拼单拼团 `group`，菜单由后端 `MENUS` 常量统一下发）；`images` 存 R2 key 的 JSON 数组；`status` 为 `open`/`closed`；带 `contact`（隐私：详情仅作者或已响应者可见；配置 `CONTACT_ENC_KEY` 时 AES-GCM 落库）、`location`。
 - `comments`：帖子评论。
 - `messages`：点对点私信，`read` 标已读，`post_id` 记来源帖。
 - `notifications`：`type` 取 `comment`/`respond`/`adopt`/`thank`，聚合未读角标。
 - `post_responses`：帖子响应（我要帮忙/我想要/这是我的），`UNIQUE(post_id,user_id)` 保证幂等。
 - `post_helpers`：关帖时采纳的帮助者（可多人，`thanked` 区分是否额外感谢），个人页「帮助了/获得帮助」统计据此计算。
 - `reports`：举报沉淀（`status=pending`，**暂无管理后台**），`UNIQUE(reporter_id,target_type,target_id)` 防重复。
-- `app_config`：运营配置键值表（`key` + JSON `value`）。常用键：`community`（期数→楼栋→单元）、`sensitive_words`、`announcements`（首页滚动文案 + 安全提示）。
+- `announcements`：首页滚动公告（`content`/`sort`/`enabled`）；公开 list 只取启用行。
+- `app_config`：运营配置键值表。常用键：`community`、`sensitive_words`、`announcements`（其中 **safetyTips** 仍由此读；配置里旧 `notices` 字段导入表后不再作为读源）。
 - `rate_limits`：限流计数。
 
-小区结构由 `POST /api/community/structure` 下发（读 `app_config.community`）；首页公告由 `POST /api/announcements/list` 下发（读 `app_config.announcements`，配置缺失时用代码内兜底）。**均无应用内管理页**，改配置靠 D1 `UPDATE`。登录页「忘记密码」仅为引导，后端暂无自助重置接口。
+小区结构：`POST /api/community/structure`（读 `app_config.community`）。  
+首页公告：`POST /api/announcements/list` → `{ notices, safetyTips }`——`notices` 来自 `announcements` 表（无启用行时用代码 FALLBACK），`safetyTips` 来自 `app_config` / FALLBACK。管理员在「我的 → 公告管理」CRUD（`/announcements/manage`）。改小区/敏感词/安全提示仍靠 D1 `UPDATE app_config`。登录页「忘记密码」仅为引导，后端暂无自助重置接口。
 
 ### 前端
 - `src/api.js` 是唯一 HTTP 层：`request()` 自动附加 `Authorization: Bearer <token>`（token 存 localStorage），解析 `{code,message,data}`，非 200 默认 toast `message` 并抛 `Error`（`err.code` 带业务码）；401 清 token 并跳登录。`api` 对象集中所有接口方法，新增后端接口时在此加方法。图片上传 `uploadImage` 走 multipart，单独处理。
-- `src/hooks/useAuth.jsx`：`AuthProvider`/`useAuth`，挂载时用本地 token 调 `getMe()`（silentAuth）恢复登录态，失败则清 token。
-- 路由在 `App.jsx`（react-router）：公开 `/login`、`/`、`/discover`、`/post/:id`、以及公开 `*` 404；受保护（`RequireAuth`）`/create`、`/edit/:id`、`/profile`、`/messages`、`/messages/:peerId`。页面在 `src/pages/`，路由级 `lazy` 懒加载。外层包 `ThemeProvider`(MUI) + `QueryClientProvider`(React Query) + `ErrorBoundary` + `ToastProvider`。
+- `src/hooks/useAuth.jsx`：`AuthProvider`/`useAuth`，挂载时用本地 token 调 `getMe()`（silentAuth）恢复登录态，失败则清 token；用户对象含 `role`。
+- 路由在 `App.jsx`（react-router）：公开 `/login`、`/`、`/discover`、`/post/:id`、以及公开 `*` 404；受保护（`RequireAuth`）`/create`、`/edit/:id`、`/profile`、`/announcements/manage`、`/messages`、`/messages/:peerId`。页面在 `src/pages/`，路由级 `lazy` 懒加载。外层包 `ThemeProvider`(MUI) + `QueryClientProvider`(React Query) + `ErrorBoundary` + `ToastProvider`。
 - React Query 重试策略：后端给了明确 `code`（非 500）一律不重试，仅网络中断/500 重试最多 2 次。
 - 样式：**MUI 组件 + Tailwind v3 工具类并用**（Tailwind 经 `postcss.config.js` 接入，配置见 `tailwind.config.js`）。动效组件（如 `Orb`）用 `ogl`（WebGL）。
 

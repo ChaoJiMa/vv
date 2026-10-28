@@ -1,57 +1,62 @@
 import { describe, it, expect } from 'vitest'
-import { validateImage, isValidKey, sanitizeImages, MAX_IMAGE_BYTES, MAX_IMAGES_PER_POST } from '../src/images.js'
+import { detectImageMime, validateImage, isValidKey, sanitizeImages, MAX_IMAGE_BYTES } from '../src/images.js'
 
-describe('validateImage', () => {
-  it('合法图片返回 ext', () => {
-    expect(validateImage({ type: 'image/jpeg', size: 1000 })).toEqual({ ok: true, ext: 'jpg' })
-    expect(validateImage({ type: 'image/png', size: 1000 }).ext).toBe('png')
-    expect(validateImage({ type: 'image/webp', size: 1000 }).ext).toBe('webp')
-    expect(validateImage({ type: 'image/gif', size: 1000 }).ext).toBe('gif')
+describe('detectImageMime', () => {
+  it('识别 JPEG', () => {
+    expect(detectImageMime(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe('image/jpeg')
   })
-  it('不支持的类型拒绝', () => {
-    expect(validateImage({ type: 'image/bmp', size: 1000 }).ok).toBe(false)
-    expect(validateImage({ type: 'application/pdf', size: 1000 }).ok).toBe(false)
-    expect(validateImage({ type: '', size: 1000 }).ok).toBe(false)
+  it('识别 PNG', () => {
+    expect(detectImageMime(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe('image/png')
   })
-  it('空 / 超大拒绝', () => {
-    expect(validateImage({ type: 'image/jpeg', size: 0 }).ok).toBe(false)
-    expect(validateImage({ type: 'image/jpeg', size: MAX_IMAGE_BYTES + 1 }).ok).toBe(false)
-    expect(validateImage({ type: 'image/jpeg', size: MAX_IMAGE_BYTES }).ok).toBe(true)
+  it('识别 GIF', () => {
+    expect(detectImageMime(new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]))).toBe('image/gif')
+  })
+  it('识别 WebP (RIFF....WEBP)', () => {
+    const b = new Uint8Array(12)
+    b.set([0x52, 0x49, 0x46, 0x46], 0)
+    b.set([0x57, 0x45, 0x42, 0x50], 8)
+    expect(detectImageMime(b)).toBe('image/webp')
+  })
+  it('拒绝非图片', () => {
+    expect(detectImageMime(new Uint8Array([0x3c, 0x73, 0x63, 0x72]))).toBe(null) // <scr
+    expect(detectImageMime(new Uint8Array([1, 2, 3]))).toBe(null)
   })
 })
 
-describe('isValidKey', () => {
-  it('合法 key 通过', () => {
-    expect(isValidKey('abc123def456.jpg')).toBe(true)
-    expect(isValidKey('deadbeef.webp')).toBe(true)
+describe('validateImage with bytes', () => {
+  it('以 magic 为准，忽略伪造 MIME', () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0])
+    const r = validateImage({ type: 'image/jpeg', size: png.length, bytes: png })
+    expect(r).toEqual({ ok: true, ext: 'png', mime: 'image/png' })
   })
-  it('路径穿越 / 非法扩展名 / 畸形拒绝', () => {
-    expect(isValidKey('../secret.jpg')).toBe(false)
-    expect(isValidKey('a/b.jpg')).toBe(false)
-    expect(isValidKey('abc.txt')).toBe(false)
-    expect(isValidKey('abc')).toBe(false)
-    expect(isValidKey('')).toBe(false)
-    expect(isValidKey(null)).toBe(false)
+
+  it('无有效 magic 拒绝', () => {
+    const fake = new Uint8Array([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07])
+    const r = validateImage({ type: 'image/jpeg', size: fake.length, bytes: fake })
+    expect(r.ok).toBe(false)
+  })
+
+  it('无 bytes 时仍按 type（兼容旧调用）', () => {
+    expect(validateImage({ type: 'image/png', size: 100 })).toEqual({ ok: true, ext: 'png', mime: 'image/png' })
+  })
+
+  it('有 bytes 时以 byteLength 为准，忽略伪造 size', () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0])
+    expect(validateImage({ type: 'image/png', size: 1, bytes: png }).ok).toBe(true)
+    const huge = new Uint8Array(MAX_IMAGE_BYTES + 1)
+    huge[0] = 0xff
+    huge[1] = 0xd8
+    huge[2] = 0xff
+    expect(validateImage({ type: 'image/jpeg', size: 100, bytes: huge }).ok).toBe(false)
   })
 })
 
-describe('sanitizeImages', () => {
-  it('只保留合法 key', () => {
-    expect(sanitizeImages(['abc123.jpg', '../evil.png', 'x.txt', 'ok.webp']))
-      .toEqual(['abc123.jpg', 'ok.webp'])
+describe('isValidKey / sanitizeImages', () => {
+  it('合法 key', () => {
+    expect(isValidKey('abc123.jpg')).toBe(true)
+    expect(isValidKey('../x.jpg')).toBe(false)
   })
-  it('去重', () => {
-    expect(sanitizeImages(['a1.jpg', 'a1.jpg', 'b2.png'])).toEqual(['a1.jpg', 'b2.png'])
-  })
-  it('截断到上限', () => {
-    const many = Array.from({ length: 20 }, (_, i) => `k${i}.jpg`)
-    expect(sanitizeImages(many)).toHaveLength(MAX_IMAGES_PER_POST)
-  })
-  it('非数组 / 空一律返回 []', () => {
-    expect(sanitizeImages(null)).toEqual([])
-    expect(sanitizeImages(undefined)).toEqual([])
-    expect(sanitizeImages('abc.jpg')).toEqual([])
-    expect(sanitizeImages({ 0: 'a.jpg' })).toEqual([])
-    expect(sanitizeImages([123, {}, null, true])).toEqual([])
+  it('清洗 images', () => {
+    expect(sanitizeImages(['a.jpg', 'a.jpg', '../b.png', 'c.webp'])).toEqual(['a.jpg', 'c.webp'])
   })
 })

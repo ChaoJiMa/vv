@@ -49,7 +49,7 @@ export function describeRoute(method, pathname) {
 }
 
 // 敏感字段脱敏:绝不记录明文密码 / token
-const SENSITIVE_KEYS = ['password', 'oldPassword', 'newPassword', 'token', 'access_token']
+const SENSITIVE_KEYS = ['password', 'oldPassword', 'newPassword', 'token', 'access_token', 'contact']
 
 export function redact(obj) {
   if (!obj || typeof obj !== 'object') return obj

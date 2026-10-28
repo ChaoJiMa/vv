@@ -32,12 +32,14 @@ images.post('/upload', authRequired, async (c) => {
   if (!file || typeof file === 'string' || typeof file.arrayBuffer !== 'function') {
     return fail(CODE.IMAGE_INVALID, '未找到上传文件')
   }
-  const check = validateImage({ type: file.type, size: file.size })
+  const buf = await file.arrayBuffer()
+  const bytes = new Uint8Array(buf)
+  const check = validateImage({ type: file.type, size: bytes.byteLength, bytes })
   if (!check.ok) return fail(CODE.IMAGE_INVALID, check.message)
 
   const key = `${genId()}.${check.ext}`
-  await c.env.IMAGES.put(key, await file.arrayBuffer(), {
-    httpMetadata: { contentType: file.type },
+  await c.env.IMAGES.put(key, buf, {
+    httpMetadata: { contentType: check.mime },
   })
   return success({ key })
 })
@@ -56,6 +58,7 @@ images.get('/img/:key', async (c) => {
     headers: {
       'Content-Type': contentType,
       'Cache-Control': 'public, max-age=31536000, immutable',
+      'X-Content-Type-Options': 'nosniff',
     },
   })
 })
