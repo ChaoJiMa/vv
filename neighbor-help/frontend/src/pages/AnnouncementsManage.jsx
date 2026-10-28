@@ -1,22 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import AppBar from '@mui/material/AppBar'
-import Toolbar from '@mui/material/Toolbar'
-import Box from '@mui/material/Box'
-import Typography from '@mui/material/Typography'
-import Button from '@mui/material/Button'
-import IconButton from '@mui/material/IconButton'
-import TextField from '@mui/material/TextField'
-import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { toast } from '../toast'
-import BottomSheet from '../components/BottomSheet'
+import { AppShell, Button, EmptyState, Field, Sheet, Sticker } from '../components/ui'
 
-const WARM = '#EC6E33'
 const ADMIN_QK = ['announcements-admin']
 const PUBLIC_QK = ['announcements']
 
@@ -84,76 +74,88 @@ export default function AnnouncementsManage() {
 
   if (!isAdmin) {
     return (
-      <Box sx={{ textAlign: 'center', py: 10 }}>
-        <CircularProgress size={24} />
-      </Box>
+      <AppShell>
+        <div style={{ textAlign: 'center', padding: 48, color: 'var(--color-text-muted)' }}>加载中…</div>
+      </AppShell>
     )
   }
 
   return (
-    <Box sx={{ maxWidth: 480, mx: 'auto', minHeight: '100vh', bgcolor: 'grey.50' }}>
-      <AppBar position="sticky" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: 'grey.100' }}>
-        <Toolbar sx={{ gap: 1 }}>
-          <IconButton edge="start" onClick={() => navigate('/profile')} aria-label="返回我的">
-            <ArrowBackIcon />
-          </IconButton>
-          <Typography fontWeight={600} sx={{ flex: 1 }}>公告管理</Typography>
-          <Button size="small" onClick={() => { setEditing(null); setFormOpen(true) }} sx={{ color: WARM, fontWeight: 600, minWidth: 0 }}>
-            新增
-          </Button>
-        </Toolbar>
-      </AppBar>
+    <AppShell>
+      <header style={{
+        position: 'sticky', top: 0, zIndex: 20,
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '8px 12px', minHeight: 52,
+        background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)',
+        backdropFilter: 'blur(10px)',
+        borderBottom: '1px solid var(--color-border)',
+      }}>
+        <button type="button" aria-label="返回" onClick={() => navigate('/profile')} style={iconBtn}>
+          <ArrowBackIcon />
+        </button>
+        <h1 style={{ margin: 0, flex: 1, fontSize: 17, fontWeight: 700 }}>公告管理</h1>
+        <Button
+          type="button"
+          onClick={() => { setEditing(null); setFormOpen(true) }}
+          style={{ minHeight: 36, padding: '6px 14px' }}
+        >
+          新增
+        </Button>
+      </header>
 
-      {isLoading && (
-        <Box sx={{ textAlign: 'center', py: 6 }}><CircularProgress size={24} /></Box>
-      )}
+      <div style={{ padding: '8px 0 24px' }}>
+        {isLoading && <div style={{ textAlign: 'center', padding: 48, color: 'var(--color-text-muted)' }}>加载中…</div>}
+        {!isLoading && list.length === 0 && (
+          <EmptyState
+            emoji="📢"
+            title="还没有公告"
+            description="点右上角新增一条滚动公告"
+            actionLabel="新增公告"
+            onAction={() => { setEditing(null); setFormOpen(true) }}
+          />
+        )}
+        {!isLoading && list.map((row) => (
+          <article
+            key={row.id}
+            style={{
+              margin: '0 16px 12px',
+              padding: 14,
+              borderRadius: 'var(--radius-card)',
+              background: 'var(--color-surface)',
+              border: '1px solid var(--color-border)',
+              boxShadow: 'var(--shadow-card)',
+            }}
+          >
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 8 }}>
+              <p style={{ margin: 0, flex: 1, fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.5 }}>
+                {row.content}
+              </p>
+              <Sticker
+                active={!!row.enabled}
+                color="cream"
+                style={{ minHeight: 28, padding: '4px 10px', fontSize: 12, pointerEvents: 'none' }}
+              >
+                {row.enabled ? '启用' : '停用'}
+              </Sticker>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 10 }}>排序 {row.sort ?? 0}</div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button type="button" style={textAct} onClick={() => { setEditing(row); setFormOpen(true) }}>编辑</button>
+              <button
+                type="button"
+                style={textAct}
+                disabled={updateMut.isPending}
+                onClick={() => updateMut.mutate({ id: row.id, enabled: row.enabled ? 0 : 1 })}
+              >
+                {row.enabled ? '停用' : '启用'}
+              </button>
+              <button type="button" style={{ ...textAct, color: 'var(--color-danger)' }} onClick={() => setDeleteTarget(row)}>删除</button>
+            </div>
+          </article>
+        ))}
+      </div>
 
-      {!isLoading && list.length === 0 && (
-        <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 8 }}>
-          还没有公告，点右上角新增
-        </Typography>
-      )}
-
-      {!isLoading && list.map((row) => (
-        <Box key={row.id} sx={{ px: 2.5, py: 1.75, borderBottom: 1, borderColor: 'grey.100', bgcolor: 'background.paper' }}>
-          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 1 }}>
-            <Typography variant="body2" sx={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {row.content}
-            </Typography>
-            <Chip
-              label={row.enabled ? '启用' : '停用'}
-              size="small"
-              sx={{
-                height: 22, fontSize: 12, flexShrink: 0,
-                bgcolor: row.enabled ? 'rgba(236,110,51,0.08)' : 'grey.200',
-                color: row.enabled ? WARM : 'text.secondary',
-                fontWeight: 600,
-              }}
-            />
-          </Box>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-            排序 {row.sort ?? 0}
-          </Typography>
-          <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'flex-end' }}>
-            <Button size="small" onClick={() => { setEditing(row); setFormOpen(true) }} sx={{ minWidth: 0, px: 1, color: WARM }}>
-              编辑
-            </Button>
-            <Button
-              size="small"
-              disabled={updateMut.isPending}
-              onClick={() => updateMut.mutate({ id: row.id, enabled: row.enabled ? 0 : 1 })}
-              sx={{ minWidth: 0, px: 1, color: 'text.secondary' }}
-            >
-              {row.enabled ? '停用' : '启用'}
-            </Button>
-            <Button size="small" onClick={() => setDeleteTarget(row)} sx={{ minWidth: 0, px: 1, color: 'error.main' }}>
-              删除
-            </Button>
-          </Box>
-        </Box>
-      ))}
-
-      <BottomSheet
+      <Sheet
         open={formOpen}
         onClose={() => { setFormOpen(false); setEditing(null) }}
         title={editing ? '编辑公告' : '新增公告'}
@@ -168,25 +170,22 @@ export default function AnnouncementsManage() {
             else createMut.mutate(body)
           }}
         />
-      </BottomSheet>
+      </Sheet>
 
-      <BottomSheet open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="确定删除这条公告吗?" heightVh={28}>
-        <Box sx={{ display: 'flex', gap: 1.5, mt: 1 }}>
-          <Button fullWidth variant="outlined" color="inherit" onClick={() => setDeleteTarget(null)} sx={{ py: 1.2 }}>取消</Button>
+      <Sheet open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="确定删除这条公告吗?" heightVh={28}>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Button type="button" variant="secondary" style={{ flex: 1 }} onClick={() => setDeleteTarget(null)}>取消</Button>
           <Button
-            fullWidth
-            variant="contained"
-            color="error"
-            disableElevation
-            disabled={deleteMut.isPending}
+            type="button"
+            loading={deleteMut.isPending}
+            style={{ flex: 1, background: 'var(--color-danger)' }}
             onClick={() => deleteMut.mutate(deleteTarget.id)}
-            sx={{ py: 1.2 }}
           >
             删除
           </Button>
-        </Box>
-      </BottomSheet>
-    </Box>
+        </div>
+      </Sheet>
+    </AppShell>
   )
 }
 
@@ -218,27 +217,34 @@ function AnnouncementForm({ initial, pending, onSubmit }) {
   }
 
   return (
-    <Box component="form" onSubmit={submit} sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
-      <TextField
+    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 4 }}>
+      <Field
+        as="textarea"
         label="公告内容"
         value={content}
         onChange={(e) => setContent(e.target.value)}
-        multiline
-        minRows={3}
-        fullWidth
-        inputProps={{ maxLength: 200 }}
-        helperText={`${content.length}/200`}
+        maxLength={200}
       />
-      <TextField
+      <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: -8 }}>{content.length}/200</div>
+      <Field
         label="排序(可选,越大越靠前)"
         value={sort}
         onChange={(e) => setSort(e.target.value)}
-        fullWidth
         type="number"
       />
-      <Button type="submit" variant="contained" disableElevation disabled={pending} sx={{ py: 1.2, bgcolor: WARM, '&:hover': { bgcolor: '#D85F26' } }}>
-        {pending ? '提交中…' : (initial ? '保存' : '新增')}
+      <Button type="submit" loading={pending} style={{ width: '100%' }}>
+        {initial ? '保存' : '新增'}
       </Button>
-    </Box>
+    </form>
   )
+}
+
+const iconBtn = {
+  width: 44, height: 44, border: 'none', borderRadius: 22,
+  background: 'transparent', color: 'var(--color-text)', cursor: 'pointer',
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+}
+const textAct = {
+  border: 'none', background: 'transparent', color: 'var(--color-primary)',
+  fontSize: 13, fontWeight: 600, cursor: 'pointer', minHeight: 36, padding: '4px 8px',
 }

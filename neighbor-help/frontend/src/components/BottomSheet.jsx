@@ -5,8 +5,8 @@ import Typography from '@mui/material/Typography'
 import IconButton from '@mui/material/IconButton'
 import CloseIcon from '@mui/icons-material/Close'
 
-const WARM_FILL = '#F4EEE7'
-const WARM_FILL_HOVER = '#EDE4DA'
+const WARM_FILL = 'var(--color-bg-accent)'
+const WARM_FILL_HOVER = 'var(--color-bg-accent)'
 
 // 居中底部抽屉:从底部滑入,圆角顶 + 拖拽手柄 + 标题 + 圆形关闭按钮。
 // 手柄区支持指针拖拽:按住下滑跟手移动,松手超过阈值关闭,否则回弹。
@@ -71,10 +71,11 @@ export default function BottomSheet({ open, onClose, title, heightVh = 50, child
             // 底部内边距并入 iOS 安全区,避免按钮被 Home 指示条遮挡
             pb: 'calc(24px + env(safe-area-inset-bottom))',
             display: 'flex', flexDirection: 'column',
-            bgcolor: 'rgba(255,255,255,0.72)',
+            bgcolor: 'var(--color-surface)',
+            color: 'var(--color-text)',
             backdropFilter: 'blur(28px) saturate(180%)',
             WebkitBackdropFilter: 'blur(28px) saturate(180%)',
-            borderTop: '1px solid rgba(255,255,255,0.5)',
+            borderTop: '1px solid var(--color-border)',
             boxShadow: '0 -8px 40px rgba(0,0,0,0.18)',
             backgroundImage: 'none',
             transform: dragY ? `translateY(${dragY}px)` : 'none',
@@ -91,12 +92,12 @@ export default function BottomSheet({ open, onClose, title, heightVh = 50, child
         onPointerCancel={endDrag}
         sx={{ display: 'flex', justifyContent: 'center', pt: 1.5, pb: 1, flexShrink: 0, cursor: 'grab', touchAction: 'none', '&:active': { cursor: 'grabbing' } }}
       >
-        <Box sx={{ width: 36, height: 4, borderRadius: 2, bgcolor: 'rgba(31,38,48,0.3)' }} />
+        <Box sx={{ width: 36, height: 4, borderRadius: 2, bgcolor: 'var(--color-border)' }} />
       </Box>
       {/* 标题行 */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pt: 0.5, pb: 2.5, flexShrink: 0 }}>
-        <Typography sx={{ fontSize: 17, fontWeight: 600, color: '#1C1C1E', letterSpacing: '-0.01em' }}>{title}</Typography>
-        <IconButton onClick={onClose} sx={{ width: 28, height: 28, bgcolor: WARM_FILL, color: '#8E8E93', '&:hover': { bgcolor: WARM_FILL_HOVER } }}>
+        <Typography sx={{ fontSize: 17, fontWeight: 600, color: 'var(--color-text)', letterSpacing: '-0.01em' }}>{title}</Typography>
+        <IconButton onClick={onClose} sx={{ width: 28, height: 28, bgcolor: WARM_FILL, color: 'var(--color-text-muted)', '&:hover': { bgcolor: WARM_FILL_HOVER } }}>
           <CloseIcon sx={{ fontSize: 16 }} />
         </IconButton>
       </Box>

@@ -225,11 +225,11 @@ export default function Login() {
   // 注:字号 16px 是为防止 iOS Safari 聚焦输入框时强制放大页面(<16px 会触发缩放)
   // 文字深石板灰保证可读;聚焦标签/下划线用暖橙,与整页暖色主题统一
   const fieldSx = {
-    '& .MuiInput-root': { fontSize: 16, color: '#1f2630' },
-    '& label': { fontSize: 15, color: 'rgba(31,38,48,0.55)' },
+    '& .MuiInput-root': { fontSize: 16, color: 'var(--color-text)' },
+    '& label': { fontSize: 15, color: 'var(--color-text-muted)' },
     '& label.Mui-focused': { color: WARM },
-    '& .MuiInput-root:before': { borderBottomColor: 'rgba(31,38,48,0.28)' },
-    '& .MuiInput-root:hover:not(.Mui-disabled):before': { borderBottomColor: 'rgba(31,38,48,0.5)' },
+    '& .MuiInput-root:before': { borderBottomColor: 'var(--color-border)' },
+    '& .MuiInput-root:hover:not(.Mui-disabled):before': { borderBottomColor: 'var(--color-text-muted)' },
     '& .MuiInput-root::after': { borderBottomColor: WARM },
   }
 
@@ -259,14 +259,13 @@ export default function Login() {
   }
 
   return (
-    <Box sx={{ position: 'relative', minHeight: pageMinH, bgcolor: '#FBEFE3', overflow: 'hidden' }}>
-      {/* 暖橙淡彩呼吸背景:极淡暖白底 + 多团独立漂移脉动的暖色光斑(错峰不同周期,做出有机呼吸感) */}
+    <Box sx={{ position: 'relative', minHeight: pageMinH, bgcolor: 'var(--color-bg)', overflow: 'hidden', color: 'var(--color-text)' }}>
+      {/* 阳光小区呼吸背景：主橙 + 薄荷绿/天蓝辅色光斑 */}
       <Box
         sx={{
           position: 'absolute', inset: 0, zIndex: 0,
-          background: 'linear-gradient(180deg, #FFF6EC 0%, #FBEFE3 100%)',
+          background: 'linear-gradient(180deg, var(--color-bg-accent) 0%, var(--color-bg) 100%)',
           overflow: 'hidden',
-          // 每团光斑各自的脉动关键帧:位移 + 缩放 + 明暗,错峰;不透明度在 30-55%,呼吸明显
           '@keyframes blobA': {
             '0%, 100%': { transform: 'translate(0, 0) scale(0.95)', opacity: 0.34 },
             '50%': { transform: 'translate(6%, 7%) scale(1.18)', opacity: 0.55 },
@@ -283,25 +282,18 @@ export default function Login() {
             '0%, 100%': { transform: 'translate(0, 0) scale(1.12)', opacity: 0.55 },
             '50%': { transform: 'translate(7%, -6%) scale(0.9)', opacity: 0.32 },
           },
+          '@media (prefers-reduced-motion: reduce)': {
+            '& > span': { animation: 'none !important' },
+          },
           '& > span': { position: 'absolute', borderRadius: '50%', filter: 'blur(72px)' },
         }}
       >
-        {/* 暖橙 —— 左上角大光晕(主) */}
         <Box component="span" sx={{ width: '85%', height: '70%', top: '-30%', left: '-30%', bgcolor: '#FFB067', animation: 'blobA 6.3s ease-in-out infinite', animationDelay: '-1.2s' }} />
-        {/* 淡桃 —— 右上淡填充 */}
         <Box component="span" sx={{ width: '60%', height: '52%', top: '-18%', right: '-26%', bgcolor: '#FFCB8E', animation: 'blobB 7.7s ease-in-out infinite', animationDelay: '-3.5s' }} />
-        {/* 暖珊瑚 —— 中部淡填充 */}
-        <Box component="span" sx={{ width: '58%', height: '46%', top: '34%', left: '8%', bgcolor: '#FF9476', animation: 'blobC 5.4s ease-in-out infinite', animationDelay: '-4.6s' }} />
-        {/* 淡紫 —— 右下角大光晕(主) */}
-        <Box component="span" sx={{ width: '82%', height: '66%', bottom: '-30%', right: '-28%', bgcolor: '#C9A7F0', animation: 'blobD 8.5s ease-in-out infinite', animationDelay: '-2.1s' }} />
+        <Box component="span" sx={{ width: '58%', height: '46%', top: '34%', left: '8%', bgcolor: '#7BC9A6', animation: 'blobC 5.4s ease-in-out infinite', animationDelay: '-4.6s' }} />
+        <Box component="span" sx={{ width: '82%', height: '66%', bottom: '-30%', right: '-28%', bgcolor: '#6BB3E0', animation: 'blobD 8.5s ease-in-out infinite', animationDelay: '-2.1s' }} />
       </Box>
-      {/* 上层极轻暖白雾:统一调性、压一点光晕,不再用强模糊(光晕已大模糊+低透明,无需再均化) */}
-      <Box
-        sx={{
-          position: 'absolute', inset: 0, zIndex: 0,
-          bgcolor: 'rgba(253,244,236,0.08)',
-        }}
-      />
+      <Box sx={{ position: 'absolute', inset: 0, zIndex: 0, bgcolor: 'color-mix(in srgb, var(--color-bg) 8%, transparent)' }} />
 
       {/* 内容层:整体下沉,贴近底部 */}
       <Box
@@ -332,7 +324,7 @@ export default function Login() {
           delay={240}
           duration={1.1}
           start={ready}
-          sx={{ fontFamily: '"KaiXinTi", system-ui, sans-serif', color: '#1f2630', fontSize: 40, fontWeight: 400, letterSpacing: 4, mb: 1 }}
+          sx={{ fontFamily: '"KaiXinTi", system-ui, sans-serif', color: 'var(--color-text)', fontSize: 40, fontWeight: 400, letterSpacing: 4, mb: 1 }}
         />
         <SplitText
           text="邻里里 · 远亲不如近邻"
@@ -340,23 +332,23 @@ export default function Login() {
           duration={0.7}
           startDelay={1300}
           start={ready}
-          sx={{ fontFamily: '"KaiXinTi", system-ui, sans-serif', color: 'rgba(31,38,48,0.6)', fontSize: 14, letterSpacing: 2, mb: 4 }}
+          sx={{ fontFamily: '"KaiXinTi", system-ui, sans-serif', color: 'var(--color-text-muted)', fontSize: 14, letterSpacing: 2, mb: 4 }}
         />
 
-        {/* 表单卡片:精致白卡——高不透明白 + 细描边 + 柔和投影,在暖白光晕上清晰浮起 */}
+        {/* 表单贴纸卡 */}
         <AnimatedContent distance={28} duration={0.7} delay={1500} start={ready} sx={{ width: '100%' }}>
           <Box
             component="form"
             onSubmit={handleLogin}
             sx={{
               width: '100%',
-              bgcolor: 'rgba(255,255,255,0.72)',
+              bgcolor: 'color-mix(in srgb, var(--color-surface) 88%, transparent)',
               backdropFilter: 'blur(20px) saturate(180%)',
               WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-              borderRadius: '16px',
-              border: '1px solid rgba(255,255,255,0.9)',
+              borderRadius: 'var(--radius-card)',
+              border: '1px solid var(--color-border)',
               px: 2.5, py: 2,
-              boxShadow: '0 8px 32px rgba(180,120,60,0.12), 0 2px 8px rgba(0,0,0,0.04)',
+              boxShadow: 'var(--shadow-card)',
             }}
           >
           <TextField
@@ -410,17 +402,17 @@ export default function Login() {
 
         {/* 底部链接:一行居中,触发底部弹窗 */}
         <AnimatedContent distance={24} duration={0.7} delay={1680} start={ready}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mt: 3, color: 'rgba(31,38,48,0.65)', fontSize: 12 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mt: 3, color: 'var(--color-text-muted)', fontSize: 12 }}>
             <Box component="span" onClick={() => setSheet('register')} sx={{ cursor: 'pointer', '&:active': { opacity: 0.6 } }}>注册</Box>
-            <Box component="span" sx={{ color: 'rgba(31,38,48,0.3)' }}>·</Box>
+            <Box component="span" sx={{ opacity: 0.45 }}>·</Box>
             <Box component="span" onClick={() => setSheet('forgot')} sx={{ cursor: 'pointer', '&:active': { opacity: 0.6 } }}>忘记密码</Box>
-            <Box component="span" sx={{ color: 'rgba(31,38,48,0.3)' }}>·</Box>
+            <Box component="span" sx={{ opacity: 0.45 }}>·</Box>
             <Box component="span" onClick={() => setSheet('wechat')} sx={{ cursor: 'pointer', '&:active': { opacity: 0.6 } }}>微信登录</Box>
           </Box>
         </AnimatedContent>
 
         <AnimatedContent distance={24} duration={0.7} delay={1820} start={ready}>
-          <Typography sx={{ color: 'rgba(31,38,48,0.45)', fontSize: 9, mt: 2.5 }}>
+          <Typography sx={{ color: 'var(--color-text-muted)', fontSize: 9, mt: 2.5 }}>
             你的信息仅用于社区认证
           </Typography>
         </AnimatedContent>

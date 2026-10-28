@@ -1,16 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useInfiniteQuery } from '@tanstack/react-query'
-import AppBar from '@mui/material/AppBar'
-import Toolbar from '@mui/material/Toolbar'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import Avatar from '@mui/material/Avatar'
 import TextField from '@mui/material/TextField'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
-import Tabs from '@mui/material/Tabs'
-import Tab from '@mui/material/Tab'
 import CircularProgress from '@mui/material/CircularProgress'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import { api } from '../api'
@@ -19,9 +15,9 @@ import { useAppTheme } from '../theme/useAppTheme'
 import { toast } from '../toast'
 import BottomNav from '../components/BottomNav'
 import BottomSheet from '../components/BottomSheet'
-import { Sticker } from '../components/ui'
+import { AppShell, Button as UiButton, Sheet, Sticker } from '../components/ui'
 
-const WARM = '#EC6E33'
+const WARM = 'var(--color-primary)'
 
 export default function Profile() {
   const navigate = useNavigate()
@@ -40,128 +36,151 @@ export default function Profile() {
 
   if (!user) {
     return (
-      <Box sx={{ textAlign: 'center', py: 10, color: 'text.disabled' }}>
-        <Typography variant="body2" sx={{ mb: 2 }}>请先登录</Typography>
-        <Button variant="contained" onClick={() => navigate('/login')}>去登录</Button>
-      </Box>
+      <AppShell>
+        <div style={{ textAlign: 'center', padding: 64 }}>
+          <p style={{ color: 'var(--color-text-muted)', marginBottom: 16 }}>请先登录</p>
+          <UiButton type="button" onClick={() => navigate('/login')}>去登录</UiButton>
+        </div>
+      </AppShell>
     )
   }
 
   const location = [user.building, user.unit].filter(Boolean).join(' ')
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
-      <Box sx={{ maxWidth: 480, mx: 'auto', bgcolor: 'grey.50', minHeight: '100vh', pb: 'calc(72px + env(safe-area-inset-bottom))' }}>
-        {/* 顶部:仅标题 */}
-        <AppBar position="sticky" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: 'grey.100' }}>
-          <Toolbar>
-            <Typography fontWeight={600}>我的</Typography>
-          </Toolbar>
-        </AppBar>
+    <AppShell withNav>
+      <header style={{
+        position: 'sticky', top: 0, zIndex: 20, padding: '14px 16px',
+        background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)',
+        backdropFilter: 'blur(10px)',
+        borderBottom: '1px solid var(--color-border)',
+        fontSize: 17, fontWeight: 700,
+      }}>
+        我的
+      </header>
 
-        {/* 个人信息区:点击进入编辑资料 */}
-        <Box
-          onClick={() => setEditOpen(true)}
-          sx={{ display: 'flex', alignItems: 'center', gap: 2, px: 2.5, py: 3, bgcolor: 'background.paper', cursor: 'pointer', '&:active': { bgcolor: 'grey.50' } }}
-        >
-          <Avatar src={user.avatar || undefined} sx={{ width: 60, height: 60, bgcolor: WARM, fontSize: 26 }}>
-            {user.avatar ? null : (user.nickname?.[0] || user.username?.[0] || '邻')}
-          </Avatar>
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography variant="h6" fontWeight={600} sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {user.nickname || user.username || '邻居'}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {location || '未设置楼栋单元'}
-            </Typography>
-            <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: WARM, fontWeight: 500 }}>
-              帮助了 {stats?.helped ?? 0} 次 · 获得帮助 {stats?.received ?? 0} 次
-            </Typography>
-          </Box>
-          <ChevronRightIcon sx={{ color: 'text.disabled' }} />
-        </Box>
+      <button
+        type="button"
+        onClick={() => setEditOpen(true)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 14, width: '100%',
+          margin: '12px 16px 0', padding: 16, maxWidth: 'calc(100% - 32px)', boxSizing: 'border-box',
+          borderRadius: 'var(--radius-card)', border: '1px solid var(--color-border)',
+          background: 'linear-gradient(135deg, var(--color-bg-accent) 0%, var(--color-surface) 70%)',
+          color: 'var(--color-text)', cursor: 'pointer', textAlign: 'left',
+          boxShadow: 'var(--shadow-card)',
+        }}
+      >
+        <Avatar src={user.avatar || undefined} sx={{ width: 60, height: 60, bgcolor: 'var(--color-primary)', fontSize: 26, color: 'var(--color-on-primary)' }}>
+          {user.avatar ? null : (user.nickname?.[0] || user.username?.[0] || '邻')}
+        </Avatar>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: 18, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {user.nickname || user.username || '邻居'}
+          </span>
+          <span style={{ display: 'block', fontSize: 12, color: 'var(--color-text-muted)', marginTop: 2 }}>
+            {location || '未设置楼栋单元'}
+          </span>
+        </span>
+        <ChevronRightIcon sx={{ color: 'var(--color-text-muted)' }} />
+      </button>
 
-        {/* 外观：浅色 / 深色 / 跟随系统 */}
-        <Box sx={{ mt: 1.5, bgcolor: 'background.paper', px: 2.5, py: 2 }}>
-          <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary', mb: 1.25 }}>外观</Typography>
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-            {[
-              { id: 'system', label: '跟随系统' },
-              { id: 'light', label: '浅色' },
-              { id: 'dark', label: '深色' },
-            ].map((opt) => (
-              <Sticker
-                key={opt.id}
-                active={mode === opt.id}
-                color="cream"
-                onClick={() => setMode(opt.id)}
-              >
-                {opt.label}
-              </Sticker>
-            ))}
-          </Box>
-        </Box>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, margin: '12px 16px 0' }}>
+        <div style={statCard}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-primary)' }}>{stats?.helped ?? 0}</div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>帮助了</div>
+        </div>
+        <div style={statCard}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-primary)' }}>{stats?.received ?? 0}</div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>获得帮助</div>
+        </div>
+      </div>
 
-        {/* 功能菜单 */}
-        <Box sx={{ mt: 1.5, bgcolor: 'background.paper' }}>
-          <MenuRow label="编辑资料" onClick={() => setEditOpen(true)} />
-          {user.username && <MenuRow label="修改密码" onClick={() => setPwdOpen(true)} />}
-          {user.role === 'admin' && (
-            <MenuRow label="公告管理" onClick={() => navigate('/announcements/manage')} />
-          )}
-        </Box>
+      <section style={cardSection}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 10 }}>外观</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {[
+            { id: 'system', label: '跟随系统' },
+            { id: 'light', label: '浅色' },
+            { id: 'dark', label: '深色' },
+          ].map((opt) => (
+            <Sticker key={opt.id} active={mode === opt.id} color="cream" onClick={() => setMode(opt.id)}>
+              {opt.label}
+            </Sticker>
+          ))}
+        </div>
+      </section>
 
-        {/* 我的帖子 */}
-        <Box sx={{ mt: 1.5, bgcolor: 'background.paper' }}>
-          <MyPosts navigate={navigate} />
-        </Box>
+      <section style={{ ...cardSection, padding: 0, overflow: 'hidden' }}>
+        <MenuRow label="编辑资料" onClick={() => setEditOpen(true)} />
+        {user.username && <MenuRow label="修改密码" onClick={() => setPwdOpen(true)} />}
+        {user.role === 'admin' && (
+          <MenuRow label="公告管理" onClick={() => navigate('/announcements/manage')} />
+        )}
+      </section>
 
-        {/* 退出登录:红色居中,二次确认 */}
-        <Box sx={{ px: 2, py: 3 }}>
-          <Button
-            fullWidth
-            onClick={() => setLogoutOpen(true)}
-            sx={{ py: 1.2, color: 'error.main', fontWeight: 500 }}
-          >
-            退出登录
-          </Button>
-        </Box>
-      </Box>
+      <section style={cardSection}>
+        <MyPosts navigate={navigate} />
+      </section>
 
-      {/* 编辑资料:底部抽屉 */}
+      <div style={{ padding: '8px 16px 24px' }}>
+        <UiButton type="button" variant="ghost" style={{ width: '100%', color: 'var(--color-danger)' }} onClick={() => setLogoutOpen(true)}>
+          退出登录
+        </UiButton>
+      </div>
+
       <BottomSheet open={editOpen} onClose={() => setEditOpen(false)} title="编辑资料" heightVh={56}>
-        {/* key 保证每次打开用最新 user 初始化 */}
         <EditProfileForm key={user.id + String(editOpen)} user={user} setUser={setUser} onDone={() => setEditOpen(false)} />
       </BottomSheet>
 
-      {/* 修改密码:底部抽屉 */}
       <BottomSheet open={pwdOpen} onClose={() => setPwdOpen(false)} title="修改密码" heightVh={52}>
         <PasswordForm onDone={() => setPwdOpen(false)} />
       </BottomSheet>
 
-      {/* 退出二次确认:底部抽屉 */}
-      <BottomSheet open={logoutOpen} onClose={() => setLogoutOpen(false)} title="确定退出登录吗?" heightVh={28}>
-        <Box sx={{ display: 'flex', gap: 1.5, mt: 1 }}>
-          <Button fullWidth onClick={() => setLogoutOpen(false)} color="inherit" variant="outlined" sx={{ py: 1.2 }}>取消</Button>
-          <Button fullWidth onClick={() => { logout(); navigate('/login') }} color="error" variant="contained" disableElevation sx={{ py: 1.2 }}>退出</Button>
-        </Box>
-      </BottomSheet>
+      <Sheet open={logoutOpen} onClose={() => setLogoutOpen(false)} title="确定退出登录吗?" heightVh={28}>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <UiButton type="button" variant="secondary" style={{ flex: 1 }} onClick={() => setLogoutOpen(false)}>取消</UiButton>
+          <UiButton type="button" style={{ flex: 1, background: 'var(--color-danger)' }} onClick={() => { logout(); navigate('/login') }}>退出</UiButton>
+        </div>
+      </Sheet>
 
       <BottomNav />
-    </Box>
+    </AppShell>
   )
+}
+
+const cardSection = {
+  margin: '12px 16px 0',
+  padding: 16,
+  borderRadius: 'var(--radius-card)',
+  background: 'var(--color-surface)',
+  border: '1px solid var(--color-border)',
+  boxShadow: 'var(--shadow-card)',
+}
+const statCard = {
+  padding: 14,
+  borderRadius: 16,
+  background: 'var(--color-surface)',
+  border: '1px solid var(--color-border)',
+  textAlign: 'center',
+  boxShadow: 'var(--shadow-card)',
 }
 
 // ===== 功能菜单行 =====
 function MenuRow({ label, onClick }) {
   return (
-    <Box
+    <button
+      type="button"
       onClick={onClick}
-      sx={{ display: 'flex', alignItems: 'center', px: 2.5, py: 1.75, borderBottom: 1, borderColor: 'grey.100', cursor: 'pointer', '&:active': { bgcolor: 'grey.50' } }}
+      style={{
+        display: 'flex', alignItems: 'center', width: '100%',
+        padding: '14px 16px', border: 'none', borderBottom: '1px solid var(--color-border)',
+        background: 'transparent', color: 'var(--color-text)', cursor: 'pointer', textAlign: 'left', minHeight: 48,
+      }}
     >
-      <Typography variant="body2" sx={{ flex: 1 }}>{label}</Typography>
-      <ChevronRightIcon sx={{ color: 'text.disabled', fontSize: 20 }} />
-    </Box>
+      <span style={{ flex: 1, fontSize: 14 }}>{label}</span>
+      <ChevronRightIcon sx={{ color: 'var(--color-text-muted)', fontSize: 20 }} />
+    </button>
   )
 }
 
@@ -272,26 +291,22 @@ function MyPosts({ navigate }) {
   }, [hasNextPage, isFetchingNextPage, fetchNextPage, list.length])
 
   return (
-    <Box sx={{ px: 2.5, py: 2 }}>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+    <Box>
+      <Typography variant="body2" sx={{ mb: 1, color: 'var(--color-text-muted)' }}>
         我发布的{total ? `(${total})` : ''}
       </Typography>
 
-      {/* 状态筛选 */}
-      <Tabs
-        value={status}
-        onChange={(_, v) => setStatus(v)}
-        sx={{
-          minHeight: 36, mb: 1,
-          '& .MuiTab-root': { minHeight: 36, py: 0 },
-          '& .Mui-selected': { color: `${WARM} !important` },
-          '& .MuiTabs-indicator': { backgroundColor: WARM },
-        }}
-      >
-        <Tab label="全部" value="" />
-        <Tab label="进行中" value="open" />
-        <Tab label="已完成" value="closed" />
-      </Tabs>
+      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1.5 }}>
+        {[
+          { id: '', label: '全部' },
+          { id: 'open', label: '进行中' },
+          { id: 'closed', label: '已完成' },
+        ].map((opt) => (
+          <Sticker key={opt.id || 'all'} active={status === opt.id} onClick={() => setStatus(opt.id)}>
+            {opt.label}
+          </Sticker>
+        ))}
+      </Box>
 
       {isLoading && (
         <Box sx={{ textAlign: 'center', py: 2 }}><CircularProgress size={20} /></Box>
