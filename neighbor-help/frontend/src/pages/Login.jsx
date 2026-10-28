@@ -22,11 +22,10 @@ import { toast } from '../toast'
 const WX_APPID = import.meta.env.VITE_WX_APPID || ''
 const REDIRECT_URI = encodeURIComponent(window.location.origin + '/login')
 // 暖橙主操作色:与徽标/光晕同调,统一整页暖色情绪(替代原科技蓝)
-const WARM = '#EC6E33'
-const WARM_DARK = '#D85F26'
-// 弹窗/选择块的暖调灰底(原冷灰 #F2F2F7,微微往暖白偏,呼应整页暖橙)
-const WARM_FILL = '#F4EEE7'
-const WARM_FILL_HOVER = '#EDE4DA'
+const WARM = 'var(--color-primary)'
+const WARM_DARK = 'var(--color-primary-pressed)'
+const WARM_FILL = 'var(--color-bg-accent)'
+const WARM_FILL_HOVER = 'var(--color-bg-accent)'
 // 小区结构(期数 -> 楼栋 -> 单元)改由后端 /api/community/structure 返回,
 // 不再硬编码:改小区无需重新发版。接口未就绪时回退空对象。
 

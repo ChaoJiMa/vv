@@ -1,27 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import AppBar from '@mui/material/AppBar'
-import Toolbar from '@mui/material/Toolbar'
-import Box from '@mui/material/Box'
-import Typography from '@mui/material/Typography'
-import IconButton from '@mui/material/IconButton'
-import Button from '@mui/material/Button'
-import Chip from '@mui/material/Chip'
-import InputBase from '@mui/material/InputBase'
-import CircularProgress from '@mui/material/CircularProgress'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import OutlinedFlagIcon from '@mui/icons-material/OutlinedFlag'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { toast } from '../toast'
 import { safeParse } from '../utils/image'
-import BottomSheet from '../components/BottomSheet'
-import { AppShell, Button as UiButton, Sheet } from '../components/ui'
+import {
+  AppShell, Button, Field, IconBtn, Sheet, Sticker,
+} from '../components/ui'
 
-const WARM = 'var(--color-primary)'
-
-// 响应按钮文案随分类变化;拼单(group)不支持响应
 const RESPOND_LABEL = {
   help: '我要帮忙',
   idle: '我想要',
@@ -35,9 +24,12 @@ export default function PostDetail() {
   const { user } = useAuth()
   const qc = useQueryClient()
   const [comment, setComment] = useState('')
-  // 从个人页「完成」入口进来时带 state.openAdopt,加载后自动打开采纳抽屉(统一走采纳流程)
   const [adoptOpen, setAdoptOpen] = useState(false)
   const [adoptAuto, setAdoptAuto] = useState(false)
+  const [reportTarget, setReportTarget] = useState(null)
+  const [viewerIdx, setViewerIdx] = useState(null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleteCommentId, setDeleteCommentId] = useState(null)
 
   const { data: menus = [] } = useQuery({
     queryKey: ['menus'],
@@ -46,14 +38,13 @@ export default function PostDetail() {
   })
   const menuMap = Object.fromEntries(menus.map(m => [m.value, m]))
 
-  const { data: post, isLoading } = useQuery({
+  const { data: post, isLoading, isError, refetch } = useQuery({
     queryKey: ['post', id],
     queryFn: () => api.getPost(id),
   })
 
-  // 评论分页:独立 useInfiniteQuery,按时间正序,触底加载更多
   const {
-    data: commentData, fetchNextPage, hasNextPage, isFetchingNextPage,
+    data: commentData, fetchNextPage, hasNextPage, isFetchingNextPage, refetch: refetchComments,
   } = useInfiniteQuery({
     queryKey: ['comments', id],
     queryFn: ({ pageParam }) => api.getComments(id, pageParam),
@@ -64,19 +55,16 @@ export default function PostDetail() {
   const commentTotal = commentData?.pages?.[0]?.total ?? post?.comment_count ?? 0
 
   const commentMutation = useMutation({
-    // content 通过 variables 显式传入,不依赖闭包:onMutate 里会 setComment('') 清空输入,
-    // 若 mutationFn 读闭包的 comment,await 让出后会读到已清空的空串,导致提交空内容。
     mutationFn: (text) => api.addComment(id, text),
     onSuccess: () => {
       setComment('')
       qc.invalidateQueries({ queryKey: ['comments', id] })
-      qc.invalidateQueries({ queryKey: ['post', id] }) // 刷新 comment_count
+      qc.invalidateQueries({ queryKey: ['post', id] })
     },
     onError: (e) => toast.error(e.message || '发送失败'),
   })
 
   const closeMutation = useMutation({
-    // helpers: [{ helperId, thanked }] 采纳的帮助者,可为空(纯完成)
     mutationFn: (helpers) => api.closePost(id, helpers),
     onSuccess: () => {
       setAdoptOpen(false)
@@ -100,7 +88,6 @@ export default function PostDetail() {
     onError: (e) => toast.error(e.message || '删除失败'),
   })
 
-  // 响应帖子:记一条响应后跳到与发帖人的私信
   const respondMutation = useMutation({
     mutationFn: () => api.respondPost(id),
     onSuccess: () => {
@@ -110,7 +97,6 @@ export default function PostDetail() {
     onError: (e) => toast.error(e.message || '响应失败'),
   })
 
-  // 取消响应:从响应者列表移除自己(不跳转)
   const unrespondMutation = useMutation({
     mutationFn: () => api.unrespondPost(id),
     onSuccess: () => {
@@ -123,17 +109,13 @@ export default function PostDetail() {
   const deleteCommentMutation = useMutation({
     mutationFn: (commentId) => api.deleteComment(commentId),
     onSuccess: () => {
+      setDeleteCommentId(null)
       qc.invalidateQueries({ queryKey: ['comments', id] })
       qc.invalidateQueries({ queryKey: ['post', id] })
     },
     onError: (e) => toast.error(e.message || '删除失败'),
   })
 
-  // 举报:reportTarget = { type:'post'|'comment', id } | null,有值即打开举报抽屉
-  const [reportTarget, setReportTarget] = useState(null)
-  const [deleteOpen, setDeleteOpen] = useState(false)
-  // 图片灯箱:点击缩略图看大图,viewerIdx 为当前查看的图序号(null=关闭)
-  const [viewerIdx, setViewerIdx] = useState(null)
   const reportMutation = useMutation({
     mutationFn: ({ targetType, targetId, reason }) => api.reportContent(targetType, targetId, reason),
     onSuccess: () => {
@@ -146,7 +128,6 @@ export default function PostDetail() {
     },
   })
 
-  // 触底自动加载更多评论
   const sentinelRef = useRef(null)
   const observe = useCallback((node) => {
     if (!node) return
@@ -162,288 +143,234 @@ export default function PostDetail() {
   }, [observe])
 
   if (isLoading) {
-    return <AppShell><Box sx={{ display: 'flex', justifyContent: 'center', py: 10, color: 'var(--color-text-muted)' }}>加载中…</Box></AppShell>
+    return <AppShell><div style={{ textAlign: 'center', padding: 64, color: 'var(--color-text-muted)' }}>加载中…</div></AppShell>
   }
-  if (!post) {
-    return <AppShell><Box sx={{ textAlign: 'center', py: 10, color: 'var(--color-text-muted)' }}>帖子不存在</Box></AppShell>
+  if (isError || !post) {
+    return (
+      <AppShell>
+        <div style={{ textAlign: 'center', padding: 64 }}>
+          <p style={{ color: 'var(--color-text-muted)', marginBottom: 16 }}>{isError ? '加载失败' : '帖子不存在'}</p>
+          {isError ? <Button type="button" onClick={() => refetch()}>重试</Button> : <Button type="button" onClick={() => navigate('/')}>回首页</Button>}
+        </div>
+      </AppShell>
+    )
   }
 
   const menu = menuMap[post.type]
   const postImages = safeParse(post.images)
 
-  // 自动打开采纳抽屉:仅当来源带 openAdopt、本人帖、未完成,且只触发一次
   if (!adoptAuto && location.state?.openAdopt) {
-    if (user && user.id === post.user_id && post.status === 'open') {
-      setAdoptOpen(true)
-    }
+    if (user && user.id === post.user_id && post.status === 'open') setAdoptOpen(true)
     setAdoptAuto(true)
   }
 
+  const copyContact = async () => {
+    if (!post.contact) return
+    try {
+      await navigator.clipboard.writeText(post.contact)
+      toast.success('已复制联系方式')
+    } catch {
+      toast.info(post.contact)
+    }
+  }
+
   return (
-    <AppShell style={{ background: 'var(--color-bg)', paddingBottom: 96 }}>
-      <Box sx={{ bgcolor: 'var(--color-surface)', minHeight: '100vh', color: 'var(--color-text)' }}>
-        {/* 头部 */}
-        <AppBar position="sticky" color="inherit" elevation={0} sx={{ bgcolor: 'var(--color-surface)', color: 'var(--color-text)', borderBottom: 1, borderColor: 'var(--color-border)' }}>
-          <Toolbar sx={{ gap: 1 }}>
-            <IconButton edge="start" onClick={() => navigate(-1)} sx={{ color: 'var(--color-text)' }}><ArrowBackIcon /></IconButton>
-            <Typography fontWeight={500}>{menu?.label || post.type}</Typography>
-            {post.status === 'closed' && (
-              <Chip label="已完成" size="small" sx={{ ml: 'auto', height: 22 }} />
-            )}
-          </Toolbar>
-        </AppBar>
+    <AppShell style={{ paddingBottom: 88 }}>
+      <header style={headerBar}>
+        <IconBtn ariaLabel="返回" onClick={() => navigate(-1)}><ArrowBackIcon /></IconBtn>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>{menu?.label || post.type}</div>
+        </div>
+        {post.status === 'closed' && <Sticker active={false} color="cream" style={{ minHeight: 28, padding: '4px 10px', pointerEvents: 'none' }}>已完成</Sticker>}
+        <button type="button" onClick={() => { refetch(); refetchComments() }} style={linkBtn}>刷新</button>
+      </header>
 
-        {/* 帖子内容 */}
-        <Box sx={{ px: 2, py: 2, borderBottom: 1, borderColor: 'grey.100' }}>
-          <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>{post.title}</Typography>
-          {post.content && (
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>{post.content}</Typography>
-          )}
-          {/* 图片网格:点击看大图 */}
-          {postImages.length > 0 && (
-            <Box sx={{ display: 'grid', gridTemplateColumns: postImages.length === 1 ? '1fr' : 'repeat(3, 1fr)', gap: 0.75, mb: 1.5 }}>
-              {postImages.map((key, i) => (
-                <Box
-                  key={key}
-                  onClick={() => setViewerIdx(i)}
-                  sx={{
-                    position: 'relative', pt: postImages.length === 1 ? '56%' : '100%',
-                    borderRadius: 2, overflow: 'hidden', bgcolor: 'grey.100', cursor: 'pointer',
-                  }}
-                >
-                  <Box
-                    component="img"
-                    src={api.imgUrl(key)}
-                    alt=""
-                    loading="lazy"
-                    sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
-                </Box>
-              ))}
-            </Box>
-          )}
-          {/* 位置 / 联系方式（联系方式仅作者或已响应者可见） */}
-          {(post.location || post.contact || post.contactUnavailable || (user && user.id !== post.user_id && !post.myResponded && RESPOND_LABEL[post.type])) && (
-            <Box sx={{ mb: 1.5 }}>
-              {post.location && (
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>📍 {post.location}</Typography>
-              )}
-              {post.contact && (
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>📞 {post.contact}</Typography>
-              )}
-              {post.contactUnavailable && (
-                <Typography variant="caption" color="error" sx={{ display: 'block' }}>联系方式暂时无法显示</Typography>
-              )}
-              {user && user.id !== post.user_id && !post.myResponded && !post.contact && !post.contactUnavailable && RESPOND_LABEL[post.type] && post.status === 'open' && (
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                  响应后可查看联系方式
-                </Typography>
-              )}
-            </Box>
-          )}
-          {/* 已采纳的帮助者(完成帖) */}
-          {post.helpers?.length > 0 && (
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.5, mb: 1.5 }}>
-              <Typography variant="caption" color="text.secondary">感谢:</Typography>
-              {post.helpers.map(h => (
-                <Chip
-                  key={h.helper_id}
-                  label={`${h.thanked ? '🙏 ' : ''}${h.nickname || '邻居'}`}
-                  size="small"
-                  sx={{ height: 22, fontSize: 12, bgcolor: 'rgba(236,110,51,0.1)', color: WARM }}
-                />
-              ))}
-            </Box>
-          )}
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
-              <Typography variant="caption" color="text.secondary" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {post.building || ''}{post.unit || ''}邻居 · {post.nickname}
-              </Typography>
-              {/* 举报:登录的非本人用户可举报本帖 */}
-              {user && user.id !== post.user_id && (
-                <IconButton
-                  size="small"
-                  onClick={() => setReportTarget({ type: 'post', id })}
-                  sx={{ p: 0.25, color: 'text.disabled' }}
-                  aria-label="举报"
-                >
-                  <OutlinedFlagIcon sx={{ fontSize: 15 }} />
-                </IconButton>
-              )}
-            </Box>
-            {user && user.id === post.user_id && (
-              <Box sx={{ display: 'flex', gap: 0.5 }}>
-                {post.status === 'open' && (
-                  <>
-                    <Button size="small" color="primary" onClick={() => navigate(`/edit/${id}`)}>
-                      编辑
-                    </Button>
-                    <Button size="small" color="primary" onClick={() => setAdoptOpen(true)} disabled={closeMutation.isPending}>
-                      标记完成
-                    </Button>
-                  </>
-                )}
-                <Button
-                  size="small"
-                  color="error"
-                  onClick={() => setDeleteOpen(true)}
-                  disabled={deleteMutation.isPending}
-                >
-                  删除
-                </Button>
-              </Box>
-            )}
-            {/* 未登录:引导去登录后参与 */}
-            {!user && (
-              <Button
-                size="small"
-                variant="contained"
-                disableElevation
-                onClick={() => navigate('/login', { state: { from: location } })}
-                sx={{ bgcolor: WARM, '&:hover': { bgcolor: '#D85F26' } }}
-              >
-                登录后参与
-              </Button>
-            )}
-            {/* 非本人帖子 */}
-            {user && user.id !== post.user_id && (
-              RESPOND_LABEL[post.type] ? (
-                // 可响应类型:已响应显示态;未响应点击=记响应+跳私信
-                post.myResponded ? (
-                  <Box sx={{ display: 'flex', gap: 0.5 }}>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      color="inherit"
-                      onClick={() => navigate(`/messages/${post.user_id}`, { state: { postId: id } })}
-                      sx={{ color: 'text.secondary' }}
-                    >
-                      私信
-                    </Button>
-                    {post.status === 'open' && (
-                      <Button
-                        size="small"
-                        color="inherit"
-                        onClick={() => unrespondMutation.mutate()}
-                        disabled={unrespondMutation.isPending}
-                        sx={{ color: 'text.disabled', minWidth: 0 }}
-                      >
-                        取消响应
-                      </Button>
-                    )}
-                  </Box>
-                ) : (
-                  <Button
-                    size="small"
-                    variant="contained"
-                    disableElevation
-                    onClick={() => respondMutation.mutate()}
-                    disabled={respondMutation.isPending || post.status === 'closed'}
-                    sx={{ bgcolor: WARM, '&:hover': { bgcolor: '#D85F26' } }}
-                  >
-                    {RESPOND_LABEL[post.type]}
-                  </Button>
-                )
-              ) : (
-                // 其它类型(拼单):私信发帖人
-                <Button
-                  size="small"
-                  variant="outlined"
-                  color="primary"
-                  onClick={() => navigate(`/messages/${post.user_id}`, { state: { postId: id } })}
-                >
-                  私信 TA
-                </Button>
-              )
-            )}
-          </Box>
-        </Box>
+      {postImages.length > 0 ? (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: postImages.length === 1 ? '1fr' : 'repeat(3, 1fr)',
+          gap: 8, padding: '12px 16px 0',
+        }}>
+          {postImages.map((key, i) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setViewerIdx(i)}
+              style={{
+                position: 'relative', paddingTop: postImages.length === 1 ? '56%' : '100%',
+                border: 'none', borderRadius: 16, overflow: 'hidden', cursor: 'pointer',
+                background: 'var(--color-bg-accent)', padding: 0,
+              }}
+            >
+              <img src={api.imgUrl(key)} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div style={{
+          margin: '12px 16px 0', padding: 28, borderRadius: 'var(--radius-card)',
+          background: 'var(--color-bg-accent)', textAlign: 'center', fontSize: 40,
+        }}>
+          {menu?.icon || '🏠'}
+        </div>
+      )}
 
-        {/* 响应者列表(公开):可响应类型且有人响应时显示 */}
-        {RESPOND_LABEL[post.type] && post.responses?.length > 0 && (
-          <Box sx={{ px: 2, py: 1.5, borderBottom: 1, borderColor: 'grey.100', bgcolor: 'grey.50' }}>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              {post.responses.length} 位邻居已响应
-            </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
-              {post.responses.map(r => (
-                <Chip
-                  key={r.user_id}
-                  label={`${r.nickname || '邻居'}${r.building ? ` · ${r.building}` : ''}`}
-                  size="small"
-                  sx={{ height: 24, fontSize: 12 }}
-                />
-              ))}
-            </Box>
-          </Box>
+      <section style={{ padding: '16px 16px 12px' }}>
+        {menu?.label && (
+          <Sticker active={false} color="cream" style={{ minHeight: 28, padding: '4px 10px', marginBottom: 10, pointerEvents: 'none' }}>
+            {menu.icon ? `${menu.icon} ` : ''}{menu.label}
+          </Sticker>
+        )}
+        <h1 style={{ margin: '0 0 10px', fontSize: 20, fontWeight: 800, lineHeight: 1.35 }}>{post.title}</h1>
+        {post.content && (
+          <p style={{ margin: '0 0 14px', fontSize: 14, color: 'var(--color-text-muted)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{post.content}</p>
         )}
 
-        {/* 评论列表 */}
-        <Box sx={{ px: 2, py: 1.5 }}>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-            共 {commentTotal} 条回复
-          </Typography>
-          {comments.map(c => (
-            <Box key={c.id} sx={{ mb: 2 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                <Typography variant="caption" fontWeight={500} color="text.primary">{c.nickname}</Typography>
-                <Typography variant="caption" color="text.disabled">{c.building || ''}</Typography>
-                {user && user.id === c.user_id && (
-                  <Typography
-                    variant="caption"
-                    color="error"
-                    onClick={() => { if (window.confirm('删除这条评论?')) deleteCommentMutation.mutate(c.id) }}
-                    sx={{ ml: 'auto', cursor: 'pointer' }}
-                  >
-                    删除
-                  </Typography>
-                )}
-                {/* 非本人评论:登录后可举报 */}
-                {user && user.id !== c.user_id && (
-                  <Typography
-                    variant="caption"
-                    color="text.disabled"
-                    onClick={() => setReportTarget({ type: 'comment', id: c.id })}
-                    sx={{ ml: 'auto', cursor: 'pointer' }}
-                  >
-                    举报
-                  </Typography>
-                )}
-              </Box>
-              <Typography variant="body2" color="text.secondary">{c.content}</Typography>
-            </Box>
-          ))}
-          {/* 触底加载更多评论 */}
-          {comments.length > 0 && (
-            <Box ref={sentinelRef} sx={{ textAlign: 'center', py: 1, color: 'text.disabled' }}>
-              {isFetchingNextPage && <CircularProgress size={18} />}
-            </Box>
+        {(post.location || post.contact || post.contactUnavailable || (user && user.id !== post.user_id && !post.myResponded && RESPOND_LABEL[post.type])) && (
+          <div style={{
+            padding: 12, borderRadius: 14, marginBottom: 12,
+            background: 'var(--color-bg-accent)', border: '1px solid var(--color-border)',
+          }}>
+            {post.location && <div style={metaLine}>📍 {post.location}</div>}
+            {post.contact && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ ...metaLine, flex: 1 }}>📞 {post.contact}</span>
+                <button type="button" onClick={copyContact} style={linkBtn}>复制</button>
+              </div>
+            )}
+            {post.contactUnavailable && <div style={{ ...metaLine, color: 'var(--color-danger)' }}>联系方式暂时无法显示</div>}
+            {user && user.id !== post.user_id && !post.myResponded && !post.contact && !post.contactUnavailable && RESPOND_LABEL[post.type] && post.status === 'open' && (
+              <div style={metaLine}>响应后可查看联系方式</div>
+            )}
+            <div style={{ ...metaLine, marginTop: 4, fontSize: 11 }}>仅相关邻居可见联系方式</div>
+          </div>
+        )}
+
+        {post.helpers?.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12, alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>感谢:</span>
+            {post.helpers.map(h => (
+              <Sticker key={h.helper_id} active={false} color="mint" style={{ minHeight: 28, padding: '4px 10px', pointerEvents: 'none', fontSize: 12 }}>
+                {h.thanked ? '🙏 ' : ''}{h.nickname || '邻居'}
+              </Sticker>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, fontSize: 12, color: 'var(--color-text-muted)' }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {post.building || ''}{post.unit || ''}邻居 · {post.nickname}
+            </span>
+            {user && user.id !== post.user_id && (
+              <IconBtn ariaLabel="举报" onClick={() => setReportTarget({ type: 'post', id })} style={{ width: 32, height: 32, minWidth: 32, minHeight: 32 }}>
+                <OutlinedFlagIcon sx={{ fontSize: 16, color: 'var(--color-text-muted)' }} />
+              </IconBtn>
+            )}
+          </div>
+
+          {user && user.id === post.user_id && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              {post.status === 'open' && (
+                <>
+                  <Button type="button" variant="secondary" style={smBtn} onClick={() => navigate(`/edit/${id}`)}>编辑</Button>
+                  <Button type="button" style={smBtn} onClick={() => setAdoptOpen(true)} disabled={closeMutation.isPending}>标记完成</Button>
+                </>
+              )}
+              <Button type="button" variant="ghost" style={{ ...smBtn, color: 'var(--color-danger)' }} onClick={() => setDeleteOpen(true)} disabled={deleteMutation.isPending}>删除</Button>
+            </div>
           )}
-        </Box>
 
-        {/* 评论输入框 */}
-        <Box sx={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 480, bgcolor: 'background.paper', borderTop: 1, borderColor: 'grey.100', px: 2, py: 1.5, display: 'flex', gap: 1 }}>
-          <InputBase
-            value={comment}
-            onChange={e => setComment(e.target.value)}
-            placeholder={user ? '写下你的回复...' : '登录后才能回复'}
-            disabled={!user}
-            sx={{ flex: 1, bgcolor: 'grey.100', borderRadius: 5, px: 2, py: 0.5, fontSize: 14 }}
-          />
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={() => user ? commentMutation.mutate(comment.trim()) : navigate('/login')}
-            disabled={user && (!comment.trim() || commentMutation.isPending)}
-            sx={{ borderRadius: 5, minWidth: 64 }}
-          >
-            发送
-          </Button>
-        </Box>
-      </Box>
+          {!user && (
+            <Button type="button" style={smBtn} onClick={() => navigate('/login', { state: { from: location } })}>登录后参与</Button>
+          )}
 
-      {/* 完成 + 采纳帮助者抽屉 */}
+          {user && user.id !== post.user_id && (
+            RESPOND_LABEL[post.type] ? (
+              post.myResponded ? (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <Button type="button" variant="secondary" style={smBtn} onClick={() => navigate(`/messages/${post.user_id}`, { state: { postId: id } })}>私信</Button>
+                  {post.status === 'open' && (
+                    <Button type="button" variant="ghost" style={smBtn} onClick={() => unrespondMutation.mutate()} loading={unrespondMutation.isPending}>取消响应</Button>
+                  )}
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  style={smBtn}
+                  onClick={() => respondMutation.mutate()}
+                  loading={respondMutation.isPending}
+                  disabled={post.status === 'closed'}
+                >
+                  {RESPOND_LABEL[post.type]}
+                </Button>
+              )
+            ) : (
+              <Button type="button" variant="secondary" style={smBtn} onClick={() => navigate(`/messages/${post.user_id}`, { state: { postId: id } })}>私信 TA</Button>
+            )
+          )}
+        </div>
+      </section>
+
+      {RESPOND_LABEL[post.type] && post.responses?.length > 0 && (
+        <section style={{ padding: '12px 16px', borderTop: '1px solid var(--color-border)', background: 'var(--color-bg-accent)' }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 8 }}>{post.responses.length} 位邻居已响应</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {post.responses.map(r => (
+              <Sticker key={r.user_id} active={false} color="sky" style={{ minHeight: 28, padding: '4px 10px', pointerEvents: 'none', fontSize: 12 }}>
+                {r.nickname || '邻居'}{r.building ? ` · ${r.building}` : ''}
+              </Sticker>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section style={{ padding: '14px 16px 24px', borderTop: '1px solid var(--color-border)' }}>
+        <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 12 }}>共 {commentTotal} 条回复</div>
+        {comments.map(c => (
+          <div key={c.id} style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 12 }}>
+              <strong style={{ color: 'var(--color-text)' }}>{c.nickname}</strong>
+              <span style={{ color: 'var(--color-text-muted)' }}>{c.building || ''}</span>
+              {user && user.id === c.user_id && (
+                <button type="button" onClick={() => setDeleteCommentId(c.id)} style={{ ...linkBtn, marginLeft: 'auto', color: 'var(--color-danger)' }}>删除</button>
+              )}
+              {user && user.id !== c.user_id && (
+                <button type="button" onClick={() => setReportTarget({ type: 'comment', id: c.id })} style={{ ...linkBtn, marginLeft: 'auto' }}>举报</button>
+              )}
+            </div>
+            <p style={{ margin: 0, fontSize: 14, color: 'var(--color-text-muted)', lineHeight: 1.55 }}>{c.content}</p>
+          </div>
+        ))}
+        {comments.length > 0 && (
+          <div ref={sentinelRef} style={{ textAlign: 'center', padding: 8, color: 'var(--color-text-muted)', fontSize: 12 }}>
+            {isFetchingNextPage ? '加载中…' : ''}
+          </div>
+        )}
+      </section>
+
+      <div style={composerBar}>
+        <input
+          value={comment}
+          onChange={e => setComment(e.target.value)}
+          placeholder={user ? '写下你的回复...' : '登录后才能回复'}
+          disabled={!user}
+          style={{
+            flex: 1, minHeight: 44, borderRadius: 999, border: '1.5px solid var(--color-border)',
+            background: 'var(--color-bg)', color: 'var(--color-text)', padding: '0 16px', fontSize: 14, outline: 'none',
+          }}
+        />
+        <Button
+          type="button"
+          onClick={() => user ? commentMutation.mutate(comment.trim()) : navigate('/login')}
+          loading={commentMutation.isPending}
+          disabled={user && !comment.trim()}
+          style={{ borderRadius: 999, minWidth: 72 }}
+        >
+          发送
+        </Button>
+      </div>
+
       {adoptOpen && (
         <AdoptSheet
           open={adoptOpen}
@@ -455,7 +382,6 @@ export default function PostDetail() {
         />
       )}
 
-      {/* 举报理由抽屉 */}
       {reportTarget && (
         <ReportSheet
           open={!!reportTarget}
@@ -466,62 +392,55 @@ export default function PostDetail() {
         />
       )}
 
-      {/* 图片灯箱:全屏黑底看大图,点击任意处关闭 */}
       {viewerIdx !== null && postImages[viewerIdx] && (
-        <Box
+        <div
+          role="presentation"
           onClick={() => setViewerIdx(null)}
-          sx={{
-            position: 'fixed', inset: 0, zIndex: 1400, bgcolor: 'rgba(0,0,0,0.92)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2,
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1400, background: 'rgba(0,0,0,0.92)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
           }}
         >
-          <Box
-            component="img"
-            src={api.imgUrl(postImages[viewerIdx])}
-            alt=""
-            sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-          />
-          {/* 多图时显示序号 */}
+          <img src={api.imgUrl(postImages[viewerIdx])} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
           {postImages.length > 1 && (
-            <Typography sx={{ position: 'absolute', top: 'calc(16px + env(safe-area-inset-top))', left: 0, right: 0, textAlign: 'center', color: '#fff', fontSize: 13 }}>
+            <div style={{ position: 'absolute', top: 'calc(16px + env(safe-area-inset-top))', left: 0, right: 0, textAlign: 'center', color: '#fff', fontSize: 13 }}>
               {viewerIdx + 1} / {postImages.length}
-            </Typography>
+            </div>
           )}
-          <IconButton
-            onClick={(e) => { e.stopPropagation(); setViewerIdx(null) }}
-            sx={{ position: 'absolute', top: 'calc(8px + env(safe-area-inset-top))', right: 8, color: '#fff' }}
-          >
+          <IconBtn ariaLabel="关闭" onClick={(e) => { e.stopPropagation(); setViewerIdx(null) }} style={{ position: 'absolute', top: 'calc(8px + env(safe-area-inset-top))', right: 8, color: '#fff' }}>
             <ArrowBackIcon />
-          </IconButton>
-        </Box>
+          </IconBtn>
+        </div>
       )}
 
       <Sheet open={deleteOpen} onClose={() => setDeleteOpen(false)} title="确定删除这条帖子吗?" heightVh={28}>
         <p style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--color-text-muted)' }}>删除后不可恢复。</p>
         <div style={{ display: 'flex', gap: 10 }}>
-          <UiButton type="button" variant="secondary" style={{ flex: 1 }} onClick={() => setDeleteOpen(false)}>取消</UiButton>
-          <UiButton
+          <Button type="button" variant="secondary" style={{ flex: 1 }} onClick={() => setDeleteOpen(false)}>取消</Button>
+          <Button type="button" loading={deleteMutation.isPending} style={{ flex: 1, background: 'var(--color-danger)' }} onClick={() => deleteMutation.mutate()}>删除</Button>
+        </div>
+      </Sheet>
+
+      <Sheet open={!!deleteCommentId} onClose={() => setDeleteCommentId(null)} title="删除这条评论?" heightVh={28}>
+        <p style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--color-text-muted)' }}>删除后不可恢复。</p>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Button type="button" variant="secondary" style={{ flex: 1 }} onClick={() => setDeleteCommentId(null)}>取消</Button>
+          <Button
             type="button"
-            loading={deleteMutation.isPending}
+            loading={deleteCommentMutation.isPending}
             style={{ flex: 1, background: 'var(--color-danger)' }}
-            onClick={() => deleteMutation.mutate()}
+            onClick={() => deleteCommentMutation.mutate(deleteCommentId)}
           >
             删除
-          </UiButton>
+          </Button>
         </div>
       </Sheet>
     </AppShell>
   )
 }
 
-// ===== 完成并采纳帮助者 =====
-// 候选人 = 本帖响应者(点过"我要帮忙/我想要/这是我的"的人)∪ 评论过的邻居。
-// 求助(help):可多选,默认全选(采纳即默认感谢)。
-// 闲置/失物(idle/lost):单选一人,默认不选(物品/失物归属唯一)。
-// 也可谁都不选直接完成。
 function AdoptSheet({ open, onClose, postId, postType, onConfirm, submitting }) {
-  const multi = postType === 'help' // 求助多选,其余单选
-  // picks: { [helperId]: true(采纳) | 'thank'(采纳并感谢) }
+  const multi = postType === 'help'
   const [picks, setPicks] = useState({})
   const [inited, setInited] = useState(false)
 
@@ -532,8 +451,6 @@ function AdoptSheet({ open, onClose, postId, postType, onConfirm, submitting }) 
   })
   const candidates = data?.candidates ?? []
 
-  // 候选人到达后初始化默认选择(渲染期派生,避免 effect 内 setState):
-  // 求助默认全选并感谢;单选类默认不选。
   if (!inited && !isLoading) {
     if (multi && candidates.length > 0) {
       const all = {}
@@ -543,20 +460,17 @@ function AdoptSheet({ open, onClose, postId, postType, onConfirm, submitting }) 
     setInited(true)
   }
 
-  // 采纳开关:多选可任意切换;单选则点选某人时清掉其他人
   const toggleAdopt = (uid) => {
     setPicks(prev => {
       if (multi) {
         const next = { ...prev }
         if (next[uid]) delete next[uid]
-        else next[uid] = 'thank' // 采纳默认带感谢
+        else next[uid] = 'thank'
         return next
       }
-      // 单选:已选则取消,否则只选这一个
       return prev[uid] ? {} : { [uid]: 'thank' }
     })
   }
-  // 感谢开关:采纳后才可切;true(仅采纳) <-> 'thank'(采纳并感谢)
   const toggleThank = (uid) => {
     setPicks(prev => {
       if (!prev[uid]) return prev
@@ -564,146 +478,112 @@ function AdoptSheet({ open, onClose, postId, postType, onConfirm, submitting }) 
     })
   }
 
-  const submit = () => {
-    const helpers = Object.entries(picks).map(([helperId, v]) => ({ helperId, thanked: v === 'thank' }))
-    onConfirm(helpers)
-  }
-
   const pickedCount = Object.keys(picks).length
 
   return (
-    <BottomSheet open={open} onClose={onClose} title="完成并感谢帮助你的邻居" heightVh={62}>
-      {isLoading && (
-        <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress size={22} /></Box>
-      )}
-
+    <Sheet open={open} onClose={onClose} title="完成并感谢帮助你的邻居" heightVh={62}>
+      {isLoading && <div style={{ textAlign: 'center', padding: 32, color: 'var(--color-text-muted)' }}>加载中…</div>}
       {!isLoading && candidates.length === 0 && (
-        <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-          还没有邻居响应。可直接完成。
-        </Typography>
+        <p style={{ margin: '8px 0 16px', fontSize: 14, color: 'var(--color-text-muted)' }}>还没有邻居响应。可直接完成。</p>
       )}
-
       {!isLoading && candidates.length > 0 && (
-        <Typography variant="caption" color="text.disabled" sx={{ pb: 1, flexShrink: 0 }}>
+        <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--color-text-muted)' }}>
           {multi ? '可采纳多位帮你的邻居' : '只能采纳一位(物品/失物归属唯一)'}
-        </Typography>
+        </p>
       )}
-
-      {/* 候选人列表 */}
-      <Box sx={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1 }}>
         {candidates.map(p => {
-          const state = picks[p.id]   // undefined | true | 'thank'
+          const state = picks[p.id]
           const adopted = !!state
           return (
-            <Box key={p.id} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.25, borderBottom: 1, borderColor: 'grey.100' }}>
-              <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Typography variant="body2" fontWeight={500} sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {p.nickname}
-                  {p.building ? <Typography component="span" variant="caption" color="text.disabled"> · {p.building}</Typography> : null}
-                </Typography>
-              </Box>
-              {/* 感谢:仅采纳后可点 */}
+            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0', borderBottom: '1px solid var(--color-border)' }}>
+              <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600 }}>
+                {p.nickname}
+                {p.building ? <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', fontSize: 12 }}> · {p.building}</span> : null}
+              </div>
               {adopted && (
-                <Button
-                  size="small"
-                  onClick={() => toggleThank(p.id)}
-                  sx={{ minWidth: 0, px: 1, fontSize: 12, color: state === 'thank' ? WARM : 'text.disabled' }}
-                >
+                <button type="button" onClick={() => toggleThank(p.id)} style={{ ...linkBtn, color: state === 'thank' ? 'var(--color-primary)' : 'var(--color-text-muted)' }}>
                   {state === 'thank' ? '🙏 已感谢' : '🙏 感谢'}
-                </Button>
+                </button>
               )}
-              {/* 采纳开关 */}
               <Button
-                size="small"
-                variant={adopted ? 'contained' : 'outlined'}
-                disableElevation
+                type="button"
+                variant={adopted ? 'primary' : 'secondary'}
+                style={smBtn}
                 onClick={() => toggleAdopt(p.id)}
-                sx={adopted
-                  ? { minWidth: 64, bgcolor: WARM, '&:hover': { bgcolor: '#D85F26' } }
-                  : { minWidth: 64, borderColor: WARM, color: WARM, '&:hover': { borderColor: '#D85F26', bgcolor: 'transparent' } }}
               >
                 {adopted ? '已采纳' : '采纳'}
               </Button>
-            </Box>
+            </div>
           )
         })}
-      </Box>
-
-      {/* 底部:确认完成 */}
-      <Box sx={{ pt: 1.5, flexShrink: 0 }}>
-        <Button
-          fullWidth
-          variant="contained"
-          disableElevation
-          onClick={submit}
-          disabled={submitting}
-          sx={{ py: 1.3, bgcolor: WARM, '&:hover': { bgcolor: '#D85F26' } }}
-        >
-          {pickedCount > 0 ? `完成并采纳 ${pickedCount} 位邻居` : '直接完成(不采纳)'}
-        </Button>
-      </Box>
-    </BottomSheet>
+      </div>
+      <Button
+        type="button"
+        loading={submitting}
+        style={{ width: '100%', marginTop: 12 }}
+        onClick={() => onConfirm(Object.entries(picks).map(([helperId, v]) => ({ helperId, thanked: v === 'thank' })))}
+      >
+        {pickedCount > 0 ? `完成并采纳 ${pickedCount} 位邻居` : '直接完成(不采纳)'}
+      </Button>
+    </Sheet>
   )
 }
 
-// ===== 举报理由抽屉 =====
-// 预设理由 chip 可单选,选「其他」后填自由文本。理由可选,不填也能提交。
 const REPORT_REASONS = ['垃圾广告 / 引流', '欺诈 / 虚假信息', '色情低俗', '辱骂 / 人身攻击', '违法违禁', '其他']
 
 function ReportSheet({ open, onClose, targetType, onSubmit, submitting }) {
   const [reason, setReason] = useState('')
   const [custom, setCustom] = useState('')
   const isOther = reason === '其他'
-  // 选「其他」时优先用自由文本;留空则回退为「其他」,避免审核端看到空白理由。
   const finalReason = isOther ? (custom.trim() || '其他') : reason
   const label = targetType === 'post' ? '帖子' : '评论'
 
   return (
-    <BottomSheet open={open} onClose={onClose} title={`举报${label}`} heightVh={52}>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        请选择举报原因,我们会尽快核实处理。
-      </Typography>
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-        {REPORT_REASONS.map(r => {
-          const active = reason === r
-          return (
-            <Chip
-              key={r}
-              label={r}
-              onClick={() => setReason(r)}
-              sx={{
-                height: 34, fontSize: 13, borderRadius: '10px',
-                bgcolor: active ? WARM : 'grey.100',
-                color: active ? '#fff' : 'text.primary',
-                '&:hover': { bgcolor: active ? '#D85F26' : 'grey.200' },
-              }}
-            />
-          )
-        })}
-      </Box>
+    <Sheet open={open} onClose={onClose} title={`举报${label}`} heightVh={52}>
+      <p style={{ margin: '0 0 12px', fontSize: 14, color: 'var(--color-text-muted)' }}>请选择举报原因,我们会尽快核实处理。</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+        {REPORT_REASONS.map(r => (
+          <Sticker key={r} active={reason === r} color="cream" onClick={() => setReason(r)}>
+            {r}
+          </Sticker>
+        ))}
+      </div>
       {isOther && (
-        <InputBase
+        <Field
+          as="textarea"
           value={custom}
           onChange={e => setCustom(e.target.value)}
           placeholder="补充说明(可选)"
-          inputProps={{ maxLength: 200 }}
-          multiline
-          minRows={2}
-          sx={{ width: '100%', bgcolor: 'grey.100', borderRadius: 2, px: 1.5, py: 1, fontSize: 14, mb: 2 }}
+          maxLength={200}
+          style={{ marginBottom: 12 }}
         />
       )}
-      <Box sx={{ mt: 'auto', pt: 1 }}>
-        <Button
-          fullWidth
-          variant="contained"
-          disableElevation
-          onClick={() => onSubmit(finalReason)}
-          disabled={submitting || !reason}
-          sx={{ py: 1.3, bgcolor: WARM, '&:hover': { bgcolor: '#D85F26' } }}
-        >
-          提交举报
-        </Button>
-      </Box>
-    </BottomSheet>
+      <Button type="button" loading={submitting} disabled={!reason} style={{ width: '100%' }} onClick={() => onSubmit(finalReason)}>
+        提交举报
+      </Button>
+    </Sheet>
   )
 }
+
+const headerBar = {
+  position: 'sticky', top: 0, zIndex: 20,
+  display: 'flex', alignItems: 'center', gap: 4,
+  padding: '6px 8px', minHeight: 52,
+  background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)',
+  backdropFilter: 'blur(10px)',
+  borderBottom: '1px solid var(--color-border)',
+}
+const composerBar = {
+  position: 'fixed', left: '50%', transform: 'translateX(-50%)', bottom: 0,
+  width: '100%', maxWidth: 480, display: 'flex', gap: 8, alignItems: 'center',
+  padding: '10px 12px calc(10px + env(safe-area-inset-bottom))',
+  background: 'var(--color-surface)', borderTop: '1px solid var(--color-border)',
+  boxSizing: 'border-box', zIndex: 40,
+}
+const linkBtn = {
+  border: 'none', background: 'transparent', color: 'var(--color-text-muted)',
+  fontSize: 13, fontWeight: 600, cursor: 'pointer', minHeight: 36, padding: '4px 8px',
+}
+const smBtn = { minHeight: 36, padding: '6px 12px', fontSize: 13 }
+const metaLine = { fontSize: 13, color: 'var(--color-text-muted)', lineHeight: 1.5 }
