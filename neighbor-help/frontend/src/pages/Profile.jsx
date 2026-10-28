@@ -15,15 +15,18 @@ import CircularProgress from '@mui/material/CircularProgress'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
+import { useAppTheme } from '../theme/useAppTheme'
 import { toast } from '../toast'
 import BottomNav from '../components/BottomNav'
 import BottomSheet from '../components/BottomSheet'
+import { Sticker } from '../components/ui'
 
 const WARM = '#EC6E33'
 
 export default function Profile() {
   const navigate = useNavigate()
   const { user, setUser, logout } = useAuth()
+  const { mode, setMode } = useAppTheme()
   const [editOpen, setEditOpen] = useState(false)
   const [pwdOpen, setPwdOpen] = useState(false)
   const [logoutOpen, setLogoutOpen] = useState(false)
@@ -76,6 +79,27 @@ export default function Profile() {
             </Typography>
           </Box>
           <ChevronRightIcon sx={{ color: 'text.disabled' }} />
+        </Box>
+
+        {/* 外观：浅色 / 深色 / 跟随系统 */}
+        <Box sx={{ mt: 1.5, bgcolor: 'background.paper', px: 2.5, py: 2 }}>
+          <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary', mb: 1.25 }}>外观</Typography>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            {[
+              { id: 'system', label: '跟随系统' },
+              { id: 'light', label: '浅色' },
+              { id: 'dark', label: '深色' },
+            ].map((opt) => (
+              <Sticker
+                key={opt.id}
+                active={mode === opt.id}
+                color="cream"
+                onClick={() => setMode(opt.id)}
+              >
+                {opt.label}
+              </Sticker>
+            ))}
+          </Box>
         </Box>
 
         {/* 功能菜单 */}

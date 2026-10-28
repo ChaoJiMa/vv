@@ -1,39 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import AppBar from '@mui/material/AppBar'
-import Toolbar from '@mui/material/Toolbar'
-import Box from '@mui/material/Box'
-import Typography from '@mui/material/Typography'
-import Chip from '@mui/material/Chip'
-import Fab from '@mui/material/Fab'
-import Button from '@mui/material/Button'
-import Drawer from '@mui/material/Drawer'
-import AddIcon from '@mui/icons-material/Add'
-import CloseIcon from '@mui/icons-material/Close'
 import CampaignOutlinedIcon from '@mui/icons-material/CampaignOutlined'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutlineRounded'
-import IconButton from '@mui/material/IconButton'
-import CircularProgress from '@mui/material/CircularProgress'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
-import { safeParse } from '../utils/image'
 import BottomNav from '../components/BottomNav'
-import ListError from '../components/ListError'
+import {
+  AppShell, Button, EmptyState, Fab, ListError, PostCard, Sheet, Skeleton,
+} from '../components/ui'
 
-// 品牌暖橙(与登录页统一)
-const WARM = '#EC6E33'
-const WARM_DARK = '#D85F26'
-
-// 顶部滚动公告 / 新手必读默认文案(后端 app_config 未配置时的兜底)
 const NOTICES_FALLBACK = [
-  '欢迎来到邻里里,远亲不如近邻 🏠',
-  '文明互助,共建友善社区 🌱',
-  '交易注意安全,谨防诈骗 ⚠️',
+  '欢迎来到邻里里,远亲不如近邻',
+  '文明互助,共建友善社区',
+  '交易注意安全,谨防诈骗',
 ]
 
-// 新手必读 / 风险告知(悬浮帮助入口里展示)
 const SAFETY_TIPS_FALLBACK = [
   { icon: '🔒', text: '见面交易选在小区公共区域,结伴更安心' },
   { icon: '💰', text: '大额交易当面验货,警惕预付定金类骗局' },
@@ -41,12 +24,13 @@ const SAFETY_TIPS_FALLBACK = [
   { icon: '🤝', text: '文明互助、理性沟通,共建友善邻里关系' },
 ]
 
+const ENTRY_COLORS = ['mint', 'sky', 'cream', 'primary']
+
 export default function Home() {
-  const [helpOpen, setHelpOpen] = useState(false) // 悬浮帮助弹窗
+  const [helpOpen, setHelpOpen] = useState(false)
   const navigate = useNavigate()
   const { user } = useAuth()
 
-  // 菜单由后端返回(4 类服务,带 icon/label/desc/color)
   const { data: menus = [] } = useQuery({
     queryKey: ['menus'],
     queryFn: () => api.getMenus(),
@@ -54,7 +38,6 @@ export default function Home() {
   })
   const menuMap = Object.fromEntries(menus.map(m => [m.value, m]))
 
-  // 首页公告 / 安全提示(后端 app_config 下发,失败用内置兜底)
   const { data: ann } = useQuery({
     queryKey: ['announcements'],
     queryFn: () => api.getAnnouncements(),
@@ -63,7 +46,6 @@ export default function Home() {
   const notices = ann?.notices?.length ? ann.notices : NOTICES_FALLBACK
   const safetyTips = ann?.safetyTips?.length ? ann.safetyTips : SAFETY_TIPS_FALLBACK
 
-  // 首页动态:最新全部帖子流(不带筛选,筛选/搜索在发现页)
   const {
     data, isLoading, isError, refetch, fetchNextPage, hasNextPage, isFetchingNextPage,
   } = useInfiniteQuery({
@@ -76,11 +58,9 @@ export default function Home() {
   const total = data?.pages?.[0]?.total ?? 0
   const todayCount = posts.filter(p => isToday(p.created_at)).length
 
-  // 入口卡热度角标:直接从已加载的帖子流统计每类条数,复用主列表数据,不额外发请求。
   const hotByType = {}
   posts.forEach(p => { hotByType[p.type] = (hotByType[p.type] || 0) + 1 })
 
-  // 触底自动加载下一页
   const sentinelRef = useRef(null)
   const observe = useCallback((node) => {
     if (!node) return
@@ -95,292 +75,214 @@ export default function Home() {
     return () => io?.disconnect()
   }, [observe])
 
-  // 点击四功能入口:跳发现页并预选该分类
   const onPickCategory = (value) => navigate('/discover', { state: { type: value } })
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
-      <Box sx={{ maxWidth: 480, mx: 'auto', bgcolor: 'background.paper', minHeight: '100vh', position: 'relative', pb: 'calc(80px + env(safe-area-inset-bottom))' }}>
-        {/* 头部:品牌(消息/个人入口在底部菜单) */}
-        <AppBar position="sticky" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: 'grey.100' }}>
-          <Toolbar sx={{ py: 1 }}>
-            <Box>
-              <Typography variant="subtitle1" fontWeight={700}>邻里里</Typography>
-              <Typography variant="caption" color="text.secondary">远亲不如近邻</Typography>
-            </Box>
-            {/* 游客:右上角登录入口(已登录则隐藏,个人入口在底部菜单) */}
-            {!user && (
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={() => navigate('/login')}
-                sx={{ ml: 'auto', borderColor: WARM, color: WARM, '&:hover': { borderColor: WARM_DARK, bgcolor: 'transparent' } }}
-              >
-                登录
-              </Button>
-            )}
-          </Toolbar>
-        </AppBar>
-
-        {/* ===== 区域 1:滚动公告 + 今日动态卡 ===== */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1, bgcolor: '#FFF6EC', overflow: 'hidden' }}>
-          <CampaignOutlinedIcon sx={{ fontSize: 18, color: WARM, flexShrink: 0 }} />
-          <Box sx={{ flex: 1, overflow: 'hidden', whiteSpace: 'nowrap' }}>
-            <Box
-              sx={{
-                display: 'inline-block', whiteSpace: 'nowrap',
-                animation: 'noticeScroll 18s linear infinite',
-                '@keyframes noticeScroll': {
-                  '0%': { transform: 'translateX(0)' },
-                  '100%': { transform: 'translateX(-50%)' },
-                },
-                '&:hover': { animationPlayState: 'paused' },
-              }}
-            >
-              {[...notices, ...notices].map((n, i) => (
-                <Typography key={i} component="span" sx={{ fontSize: 12.5, color: 'text.secondary', mr: 5 }}>
-                  {n}
-                </Typography>
-              ))}
-            </Box>
-          </Box>
-        </Box>
-
-        {/* 今日动态卡:暖橙渐变 + 数据 + 行动引导 + 发布按钮 */}
-        <Box sx={{ px: 2, pt: 2 }}>
-          <Box
-            sx={{
-              position: 'relative', overflow: 'hidden',
-              borderRadius: '16px', p: 2.25, color: '#fff',
-              background: `linear-gradient(135deg, ${WARM} 0%, #FF8A6B 100%)`,
-              boxShadow: '0 8px 24px rgba(236,110,51,0.28)',
-            }}
-          >
-            <Box sx={{ position: 'absolute', top: -30, right: -20, width: 120, height: 120, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.16)' }} />
-            <Typography sx={{ fontSize: 13, opacity: 0.9, position: 'relative' }}>今日动态</Typography>
-            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mt: 0.5, position: 'relative' }}>
-              <Typography sx={{ fontSize: 32, fontWeight: 800, lineHeight: 1 }}>{todayCount}</Typography>
-              <Typography sx={{ fontSize: 14, opacity: 0.92 }}>条新发布 · 社区累计 {total} 条</Typography>
-            </Box>
-            <Typography sx={{ fontSize: 13.5, fontWeight: 600, mt: 1, position: 'relative' }}>
-              有需要别自己扛,发一条让邻居搭把手 👋
-            </Typography>
-            <Button
-              onClick={() => navigate('/create')}
-              endIcon={<ArrowForwardIcon sx={{ fontSize: 18 }} />}
-              sx={{
-                mt: 1.25, position: 'relative',
-                bgcolor: 'rgba(255,255,255,0.95)', color: WARM_DARK,
-                fontSize: 13.5, fontWeight: 700, borderRadius: '10px',
-                px: 2, py: 0.75, boxShadow: 'none',
-                '&:hover': { bgcolor: '#fff', boxShadow: 'none' },
-              }}
-            >
-              发布求助,让邻居帮你
-            </Button>
-          </Box>
-        </Box>
-
-        {/* ===== 区域 2:四功能入口 2×2 卡片 + 热度角标(点击跳发现页预选分类) ===== */}
-        <Box sx={{ px: 2, pt: 2.5 }}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.25 }}>
-            {menus.map(m => {
-              const hot = hotByType[m.value] || 0
-              return (
-                <Box
-                  key={m.value}
-                  onClick={() => onPickCategory(m.value)}
-                  sx={{
-                    position: 'relative',
-                    display: 'flex', alignItems: 'center', gap: 1.25,
-                    p: 1.5, borderRadius: '14px', cursor: 'pointer',
-                    border: '1.5px solid', borderColor: 'grey.200',
-                    bgcolor: 'background.paper',
-                    transition: 'border-color .15s, background-color .15s',
-                    '&:active': { bgcolor: 'rgba(236,110,51,0.08)' },
-                  }}
-                >
-                  {/* 热度角标:有近期活跃帖显示数字,否则灰点提示 */}
-                  {hot > 0 ? (
-                    <Box
-                      sx={{
-                        position: 'absolute', top: 8, right: 8,
-                        minWidth: 18, height: 18, px: 0.6, borderRadius: '9px',
-                        bgcolor: WARM, color: '#fff', fontSize: 10.5, fontWeight: 700,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}
-                    >
-                      {hot > 99 ? '99+' : hot}
-                    </Box>
-                  ) : (
-                    <Box sx={{ position: 'absolute', top: 11, right: 11, width: 6, height: 6, borderRadius: '50%', bgcolor: 'grey.300' }} />
-                  )}
-                  <Box
-                    sx={{
-                      width: 40, height: 40, borderRadius: '12px', flexShrink: 0,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 22,
-                      bgcolor: (theme) => `${theme.palette[m.color]?.main || theme.palette.primary.main}1A`,
-                    }}
-                  >
-                    {m.icon}
-                  </Box>
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography sx={{ fontSize: 14, fontWeight: 600, lineHeight: 1.2 }}>{m.label}</Typography>
-                    <Typography sx={{ fontSize: 11, color: hot > 0 ? WARM : 'text.secondary', mt: 0.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {hot > 0 ? `近期 ${hot} 条在求助` : m.desc}
-                    </Typography>
-                  </Box>
-                </Box>
-              )
-            })}
-          </Box>
-        </Box>
-
-        {/* ===== 区域 3:邻里动态(最新流) ===== */}
-        <Box sx={{ px: 2, pt: 3, pb: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Typography sx={{ fontSize: 16, fontWeight: 700 }}>邻里动态</Typography>
-            <Typography onClick={() => navigate('/discover')} sx={{ fontSize: 12.5, color: WARM, cursor: 'pointer' }}>
-              全部浏览
-            </Typography>
-          </Box>
-        </Box>
-
-        {isLoading && (
-          <Box sx={{ textAlign: 'center', py: 6 }}><CircularProgress size={24} /></Box>
-        )}
-        {!isLoading && isError && (
-          <ListError onRetry={() => refetch()} />
-        )}
-
-        {/* 空态:icon + 文案 + 发布按钮 */}
-        {!isLoading && !isError && posts.length === 0 && (
-          <Box sx={{ textAlign: 'center', py: 6, px: 3 }}>
-            <Typography sx={{ fontSize: 52, mb: 1.5 }}>📝</Typography>
-            <Typography sx={{ fontSize: 14, color: 'text.secondary', mb: 2.5 }}>
-              还没有帖子,发布第一个求助让邻居帮你!
-            </Typography>
-            <Button
-              variant="contained"
-              onClick={() => navigate('/create')}
-              startIcon={<AddIcon />}
-              sx={{ bgcolor: WARM, borderRadius: '10px', fontWeight: 700, boxShadow: 'none', px: 2.5, '&:hover': { bgcolor: WARM_DARK, boxShadow: 'none' } }}
-            >
-              发布求助
-            </Button>
-          </Box>
-        )}
-
-        {/* 列表:时间倒序 */}
-        {posts.map(post => {
-          const menu = menuMap[post.type]
-          const thumb = safeParse(post.images)[0]
-          return (
-            <Box
-              key={post.id}
-              onClick={() => navigate(`/post/${post.id}`)}
-              sx={{ px: 2, py: 1.75, borderBottom: 1, borderColor: 'grey.100', cursor: 'pointer', '&:active': { bgcolor: 'grey.50' } }}
-            >
-              <Box sx={{ display: 'flex', gap: 1.25 }}>
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                    <Chip label={menu?.label || post.type} color={menu?.color || 'default'} size="small" sx={{ height: 20, fontSize: 12 }} />
-                    {post.status === 'closed' && <Chip label="已完成" size="small" sx={{ height: 20, fontSize: 12 }} />}
-                  </Box>
-                  <Typography variant="body2" fontWeight={500} sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                    {post.title}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                    {post.building || ''}{post.unit || ''}邻居 · {formatTime(post.created_at)}
-                    {post.comment_count > 0 && ` · 💬 ${post.comment_count}`}
-                  </Typography>
-                </Box>
-                {thumb && (
-                  <Box
-                    component="img"
-                    src={api.imgUrl(thumb)}
-                    alt=""
-                    loading="lazy"
-                    sx={{ width: 72, height: 72, flexShrink: 0, borderRadius: 2, objectFit: 'cover', bgcolor: 'grey.100' }}
-                  />
-                )}
-              </Box>
-            </Box>
-          )
-        })}
-
-        {/* 触底加载哨兵 */}
-        {posts.length > 0 && (
-          <Box ref={sentinelRef} sx={{ textAlign: 'center', py: 2, color: 'text.disabled' }}>
-            {isFetchingNextPage && <CircularProgress size={20} />}
-            {!hasNextPage && <Typography variant="caption">没有更多了</Typography>}
-          </Box>
-        )}
-
-        {/* 区域 4:新手必读 → 悬浮帮助入口(置于底部菜单之上) */}
-        <Fab
-          size="small"
-          onClick={() => setHelpOpen(true)}
-          sx={{ position: 'fixed', bottom: 'calc(84px + env(safe-area-inset-bottom))', right: 16, bgcolor: '#fff', color: WARM, boxShadow: '0 4px 16px rgba(0,0,0,0.16)', '&:hover': { bgcolor: '#FFF6EC' } }}
+    <AppShell withNav>
+      <header style={{
+        position: 'sticky', top: 0, zIndex: 20,
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '12px 16px',
+        background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)',
+        backdropFilter: 'blur(10px)',
+        borderBottom: '1px solid var(--color-border)',
+      }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 400, color: 'var(--color-primary)' }}>邻里里</div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>远亲不如近邻</div>
+        </div>
+        <button
+          type="button"
+          aria-label="刷新"
+          onClick={() => refetch()}
+          style={ghostBtn}
         >
-          <HelpOutlineIcon />
-        </Fab>
+          刷新
+        </button>
+        {!user && (
+          <Button type="button" variant="secondary" onClick={() => navigate('/login')} style={{ minHeight: 36, padding: '6px 14px' }}>
+            登录
+          </Button>
+        )}
+      </header>
 
-        {/* 帮助弹窗:新手必读 / 安全提示 */}
-        <Drawer
-          anchor="bottom"
-          open={helpOpen}
-          onClose={() => setHelpOpen(false)}
-          slotProps={{
-            paper: {
-              sx: {
-                width: '100%', maxWidth: 480, mx: 'auto',
-                borderRadius: '20px 20px 0 0', px: 3, pt: 2.5,
-                pb: 'calc(24px + env(safe-area-inset-bottom))',
-              },
-            },
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        margin: '10px 16px 0', padding: '8px 12px',
+        borderRadius: 14,
+        background: 'var(--color-bg-accent)',
+        overflow: 'hidden',
+      }}>
+        <CampaignOutlinedIcon sx={{ fontSize: 18, color: 'var(--color-primary)', flexShrink: 0 }} />
+        <div style={{ flex: 1, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+          <div className="nh-notice-marquee" style={{ display: 'inline-block', whiteSpace: 'nowrap' }}>
+            {[...notices, ...notices].map((n, i) => (
+              <span key={i} style={{ fontSize: 12.5, color: 'var(--color-text-muted)', marginRight: 28 }}>{n}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <section style={{
+        margin: '14px 16px 0', padding: 18, borderRadius: 'var(--radius-card)', color: 'var(--color-on-primary)',
+        background: 'linear-gradient(135deg, var(--color-primary) 0%, #FF8A6B 100%)',
+        boxShadow: 'var(--shadow-card)', position: 'relative', overflow: 'hidden',
+      }}>
+        <div style={{ position: 'absolute', top: -30, right: -20, width: 120, height: 120, borderRadius: '50%', background: 'rgba(255,255,255,0.16)' }} />
+        <div style={{ fontSize: 13, opacity: 0.92, position: 'relative' }}>今日动态</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 4, position: 'relative' }}>
+          <span style={{ fontSize: 32, fontWeight: 800, lineHeight: 1 }}>{todayCount}</span>
+          <span style={{ fontSize: 14, opacity: 0.92 }}>条新发布 · 社区累计 {total} 条</span>
+        </div>
+        <p style={{ margin: '10px 0 0', fontSize: 13.5, fontWeight: 600, position: 'relative' }}>
+          有需要别自己扛,发一条让邻居搭把手
+        </p>
+        <Button
+          type="button"
+          onClick={() => navigate('/create')}
+          style={{
+            marginTop: 12, position: 'relative',
+            background: 'rgba(255,255,255,0.95)', color: 'var(--color-primary-pressed)',
+            boxShadow: 'none',
           }}
         >
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-            <Typography sx={{ fontSize: 17, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.75 }}>
-              📖 新手必读 · 安全提示
-            </Typography>
-            <IconButton onClick={() => setHelpOpen(false)} sx={{ width: 28, height: 28, bgcolor: '#F4EEE7', color: '#8E8E93' }}>
-              <CloseIcon sx={{ fontSize: 16 }} />
-            </IconButton>
-          </Box>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-            {safetyTips.map((t, i) => (
-              <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.25 }}>
-                <Typography sx={{ fontSize: 18, lineHeight: 1.4, flexShrink: 0 }}>{t.icon}</Typography>
-                <Typography sx={{ fontSize: 13.5, color: 'text.secondary', lineHeight: 1.5 }}>{t.text}</Typography>
-              </Box>
-            ))}
-          </Box>
-        </Drawer>
-      </Box>
+          发布求助,让邻居帮你 <ArrowForwardIcon sx={{ fontSize: 18 }} />
+        </Button>
+      </section>
 
-      {/* 全局底部菜单 */}
+      <section style={{ padding: '18px 16px 0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        {menus.map((m, i) => {
+          const hot = hotByType[m.value] || 0
+          const tint = ENTRY_COLORS[i % ENTRY_COLORS.length]
+          const bg = tint === 'primary' ? 'var(--color-bg-accent)' : `var(--color-accent-${tint})`
+          return (
+            <button
+              key={m.value}
+              type="button"
+              className="nh-float-entry"
+              onClick={() => onPickCategory(m.value)}
+              style={{
+                position: 'relative',
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: 14, borderRadius: 16, border: '1.5px solid var(--color-border)',
+                background: bg, color: 'var(--color-text)', cursor: 'pointer', textAlign: 'left',
+                minHeight: 72,
+              }}
+            >
+              {hot > 0 ? (
+                <span style={{
+                  position: 'absolute', top: 8, right: 8, minWidth: 18, height: 18, padding: '0 5px',
+                  borderRadius: 9, background: 'var(--color-primary)', color: 'var(--color-on-primary)',
+                  fontSize: 10.5, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>{hot > 99 ? '99+' : hot}</span>
+              ) : null}
+              <span style={{ fontSize: 22 }}>{m.icon}</span>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: 14, fontWeight: 700 }}>{m.label}</span>
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {hot > 0 ? `近期 ${hot} 条` : m.desc}
+                </span>
+              </span>
+            </button>
+          )
+        })}
+      </section>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '22px 16px 8px' }}>
+        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>邻里动态</h2>
+        <button type="button" onClick={() => navigate('/discover')} style={{ ...ghostBtn, color: 'var(--color-primary)' }}>全部浏览</button>
+      </div>
+
+      <div style={{ padding: '0 16px 24px' }}>
+        {isLoading && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Skeleton height={120} />
+            <Skeleton height={120} />
+            <Skeleton height={120} />
+          </div>
+        )}
+        {!isLoading && isError && <ListError onRetry={() => refetch()} />}
+        {!isLoading && !isError && posts.length === 0 && (
+          <EmptyState
+            title="还没有邻居动态"
+            description="发布第一个求助,让邻居帮你!"
+            actionLabel="发布求助"
+            onAction={() => navigate('/create')}
+            emoji="📝"
+          />
+        )}
+        {posts.map(post => (
+          <PostCard
+            key={post.id}
+            post={post}
+            menu={menuMap[post.type]}
+            onClick={() => navigate(`/post/${post.id}`)}
+          />
+        ))}
+        {posts.length > 0 && (
+          <div ref={sentinelRef} style={{ textAlign: 'center', padding: 16, color: 'var(--color-text-muted)', fontSize: 12 }}>
+            {isFetchingNextPage ? '加载中…' : !hasNextPage ? '没有更多了' : ''}
+          </div>
+        )}
+      </div>
+
+      <Fab
+        ariaLabel="新手必读"
+        onClick={() => setHelpOpen(true)}
+        style={{ background: 'var(--color-surface)', color: 'var(--color-primary)' }}
+      >
+        <HelpOutlineIcon />
+      </Fab>
+
+      <Sheet open={helpOpen} onClose={() => setHelpOpen(false)} title="新手必读 · 安全提示" heightVh={48}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {safetyTips.map((t, i) => (
+            <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <span style={{ fontSize: 18 }}>{t.icon}</span>
+              <span style={{ fontSize: 13.5, color: 'var(--color-text-muted)', lineHeight: 1.5 }}>{t.text}</span>
+            </div>
+          ))}
+        </div>
+      </Sheet>
+
       <BottomNav />
-    </Box>
+
+      <style>{`
+        .nh-notice-marquee { animation: nhNotice 18s linear infinite; }
+        .nh-notice-marquee:hover { animation-play-state: paused; }
+        @keyframes nhNotice {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        .nh-float-entry { animation: nhFloat 4.5s ease-in-out infinite; }
+        .nh-float-entry:nth-child(2) { animation-delay: 0.4s; }
+        .nh-float-entry:nth-child(3) { animation-delay: 0.8s; }
+        .nh-float-entry:nth-child(4) { animation-delay: 1.2s; }
+        @keyframes nhFloat {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-3px); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .nh-notice-marquee, .nh-float-entry { animation: none !important; }
+        }
+      `}</style>
+    </AppShell>
   )
 }
 
-// 判断时间戳是否在今天(本地时区)
+const ghostBtn = {
+  border: 'none',
+  background: 'transparent',
+  color: 'var(--color-text-muted)',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
+  minHeight: 36,
+  padding: '4px 8px',
+}
+
 function isToday(ts) {
   const d = new Date(ts)
   const now = new Date()
   return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
-}
-
-function formatTime(ts) {
-  const d = new Date(ts) // created_at 现为毫秒时间戳,无需 *1000
-  const now = new Date()
-  const diff = (now - d) / 1000
-  if (diff < 60) return '刚刚'
-  if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`
-  const md = `${d.getMonth() + 1}月${d.getDate()}日`
-  return d.getFullYear() === now.getFullYear() ? md : `${d.getFullYear()}年${md}`
 }
