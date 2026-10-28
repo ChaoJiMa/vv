@@ -1,0 +1,51 @@
+/* 邻里里设计 Token — 由 data-theme 切换明暗 */
+:root,
+[data-theme="light"] {
+  --color-primary: #ec6e33;
+  --color-primary-pressed: #d85f26;
+  --color-on-primary: #ffffff;
+  --color-accent-mint: #7bc9a6;
+  --color-accent-sky: #6bb3e0;
+  --color-accent-cream: #f0d9a8;
+  --color-bg: #fff8f2;
+  --color-bg-accent: #ffe8d6;
+  --color-surface: #ffffff;
+  --color-text: #1c1c1e;
+  --color-text-muted: #6c6c70;
+  --color-border: rgba(28, 28, 30, 0.08);
+  --color-danger: #e5484d;
+  --radius-card: 20px;
+  --radius-btn: 14px;
+  --nav-height: 72px;
+  --font-display: "KaiXinTi", system-ui, sans-serif;
+  --shadow-card: 0 4px 16px rgba(236, 110, 51, 0.08);
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --color-primary: #f08a52;
+  --color-primary-pressed: #ec6e33;
+  --color-on-primary: #1a1614;
+  --color-accent-mint: rgba(123, 201, 166, 0.35);
+  --color-accent-sky: rgba(107, 179, 224, 0.35);
+  --color-accent-cream: rgba(240, 217, 168, 0.28);
+  --color-bg: #1a1614;
+  --color-bg-accent: #2a211c;
+  --color-surface: #26201c;
+  --color-text: #f5f2ef;
+  --color-text-muted: #a89f97;
+  --color-border: rgba(245, 242, 239, 0.12);
+  --color-danger: #ff7369;
+  --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-duration: 0.01ms;
+  }
+}
+
+:root {
+  --motion-duration: 200ms;
+}

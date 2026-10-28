@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider, createTheme } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import { AuthProvider } from './hooks/useAuth'
+import { AppThemeProvider } from './theme/ThemeProvider'
 import ToastProvider from './components/ToastProvider'
 import ErrorBoundary from './components/ErrorBoundary'
 import RequireAuth from './components/RequireAuth'
@@ -36,44 +37,46 @@ const queryClient = new QueryClient({
   },
 })
 
-// 主题主色沿用原绿色调
+// MUI 仅作图标等残留控件配色；页面主视觉走 CSS token + AppThemeProvider
 const theme = createTheme({
-  palette: { primary: { main: '#22c55e' } },
+  palette: { primary: { main: '#EC6E33' } },
 })
 
 export default function App() {
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <ErrorBoundary>
-        <QueryClientProvider client={queryClient}>
-          <AuthProvider>
-            <BrowserRouter>
-              <Suspense fallback={<Loading />}>
-                <Routes>
-                  {/* 公开路由:无需登录即可浏览(帖子详情可看,但评论/响应等操作需登录) */}
-                  <Route path="/login" element={<Login />} />
-                  <Route path="/" element={<Home />} />
-                  <Route path="/discover" element={<Discover />} />
-                  <Route path="/post/:id" element={<PostDetail />} />
-                  {/* 受保护区:未登录一律跳 /login,登录后跳回原目标 */}
-                  <Route element={<RequireAuth />}>
-                    <Route path="/create" element={<CreatePost />} />
-                    <Route path="/edit/:id" element={<CreatePost />} />
-                    <Route path="/profile" element={<Profile />} />
-                    <Route path="/announcements/manage" element={<AnnouncementsManage />} />
-                    <Route path="/messages" element={<Messages />} />
-                    <Route path="/messages/:peerId" element={<Chat />} />
-                  </Route>
-                  {/* 未知路径:落到 404(公开,不强制登录) */}
-                  <Route path="*" element={<NotFound />} />
-                </Routes>
-              </Suspense>
-            </BrowserRouter>
-            <ToastProvider />
-          </AuthProvider>
-        </QueryClientProvider>
-      </ErrorBoundary>
-    </ThemeProvider>
+    <AppThemeProvider>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <ErrorBoundary>
+          <QueryClientProvider client={queryClient}>
+            <AuthProvider>
+              <BrowserRouter>
+                <Suspense fallback={<Loading />}>
+                  <Routes>
+                    {/* 公开路由:无需登录即可浏览(帖子详情可看,但评论/响应等操作需登录) */}
+                    <Route path="/login" element={<Login />} />
+                    <Route path="/" element={<Home />} />
+                    <Route path="/discover" element={<Discover />} />
+                    <Route path="/post/:id" element={<PostDetail />} />
+                    {/* 受保护区:未登录一律跳 /login,登录后跳回原目标 */}
+                    <Route element={<RequireAuth />}>
+                      <Route path="/create" element={<CreatePost />} />
+                      <Route path="/edit/:id" element={<CreatePost />} />
+                      <Route path="/profile" element={<Profile />} />
+                      <Route path="/announcements/manage" element={<AnnouncementsManage />} />
+                      <Route path="/messages" element={<Messages />} />
+                      <Route path="/messages/:peerId" element={<Chat />} />
+                    </Route>
+                    {/* 未知路径:落到 404(公开,不强制登录) */}
+                    <Route path="*" element={<NotFound />} />
+                  </Routes>
+                </Suspense>
+              </BrowserRouter>
+              <ToastProvider />
+            </AuthProvider>
+          </QueryClientProvider>
+        </ErrorBoundary>
+      </ThemeProvider>
+    </AppThemeProvider>
   )
 }
