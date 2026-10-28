@@ -78,21 +78,35 @@ export default function CreatePost() {
 
   // 详情到达后填充表单一次。用渲染期派生(记录已填充的 id),避免在 effect 里 setState。
   const [filledId, setFilledId] = useState(null)
+  const [contactUnavailable, setContactUnavailable] = useState(false)
   if (editing && filledId !== id) {
     setType(editing.type || '')
     setTitle(editing.title || '')
     setContent(editing.content || '')
-    setContact(editing.contact || '')
+    if (editing.contactUnavailable) {
+      setContact('')
+      setContactUnavailable(true)
+      setMoreOpen(true)
+      toast.error('联系方式暂时无法解密，请重新填写后再保存，勿直接保存空值')
+    } else {
+      setContact(editing.contact || '')
+      setContactUnavailable(false)
+      if (editing.contact) setMoreOpen(true)
+    }
     setPostLocation(editing.location || '')
     setImages(safeParse(editing.images))
-    if (editing.contact) setMoreOpen(true)
     setFilledId(id)
   }
 
   const mutation = useMutation({
-    mutationFn: () => isEdit
-      ? api.updatePost(id, { type, title, content, contact, location: postLocation, images })
-      : api.createPost({ type, title, content, contact, location: postLocation, images }),
+    mutationFn: () => {
+      if (isEdit && contactUnavailable && !contact.trim()) {
+        return Promise.reject(new Error('联系方式无法加载，请重新填写后再保存'))
+      }
+      return isEdit
+        ? api.updatePost(id, { type, title, content, contact, location: postLocation, images })
+        : api.createPost({ type, title, content, contact, location: postLocation, images })
+    },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['posts'] })
       qc.invalidateQueries({ queryKey: ['myPosts'] })

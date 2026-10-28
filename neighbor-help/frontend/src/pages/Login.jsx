@@ -485,7 +485,7 @@ export default function Login() {
           </Typography>
           <TextField value={resetAccount} onChange={e => setResetAccount(e.target.value)} label="用户名" fullWidth variant="filled" sx={sheetFieldSx} />
           <Box sx={{ mt: 'auto', pt: 2.5 }}>
-            <Button type="submit" disabled={!resetAccount.trim()} sx={sheetDarkBtn}>发送重置链接</Button>
+            <Button type="submit" disabled={!resetAccount.trim()} sx={sheetDarkBtn}>联系管理员重置</Button>
           </Box>
         </Box>
       </BottomSheet>

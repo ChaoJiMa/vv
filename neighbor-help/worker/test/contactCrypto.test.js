@@ -52,4 +52,10 @@ describe('encryptContact / decryptContact', () => {
     expect(await encryptContact('13800138000', '')).toBe('13800138000')
     expect(await encryptContact('13800138000', undefined)).toBe('13800138000')
   })
+
+  it('密文无法解密时返回 null（非空串）', async () => {
+    const enc = await encryptContact('13800138000', KEY)
+    expect(await decryptContact(enc, '')).toBe(null)
+    expect(await decryptContact(enc, 'b'.repeat(64))).toBe(null)
+  })
 })

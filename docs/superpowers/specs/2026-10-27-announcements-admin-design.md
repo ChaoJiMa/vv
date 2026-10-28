@@ -123,10 +123,9 @@ Worker：新建 `routes/announcements.js`（或从 `posts.js` 拆出公告相关
 - Worker 内存配置缓存：`safetyTips` 路径保留；公告改走表后勿误清错缓存键。  
 - 工作区另有未提交 `CLAUDE.md` 修正，可与本功能同 PR 或分开提交。
 
-## 后续：contact 加密（另案，不在此实现）
+## 后续：contact 加密（另案）
 
-- 目标：`posts.contact` AES-GCM 落库；密钥 `CONTACT_SECRET`（独立于 JWT）。  
-- 存储格式如 `v1:<iv>:<cipher>`；读详情解密；旧明文兼容读、写回加密。  
+- 已在 `2026-10-27-neighbor-help-contact-security-design.md` 实现：密钥名 **`CONTACT_ENC_KEY`**（64 hex），密文前缀 `enc:v1:`。
 - 单独规格 + 分支，避免与公告管理纠缠。
 
 ## 后续实现

@@ -114,6 +114,10 @@ api.post('/posts/detail', async (c) => {
     return success({ ...rest, helpers, responses, myResponded })
   }
   const contact = await decryptContact(storedContact, c.env.CONTACT_ENC_KEY)
+  if (contact === null) {
+    // 密文在库但密钥缺失/错误:不返回空 contact,避免编辑页预填空串后保存清空
+    return success({ ...rest, contactUnavailable: true, helpers, responses, myResponded })
+  }
   return success({ ...rest, contact, helpers, responses, myResponded })
 })
 

@@ -220,14 +220,22 @@ export default function PostDetail() {
               ))}
             </Box>
           )}
-          {/* 位置 / 联系方式 */}
-          {(post.location || post.contact) && (
+          {/* 位置 / 联系方式（联系方式仅作者或已响应者可见） */}
+          {(post.location || post.contact || post.contactUnavailable || (user && user.id !== post.user_id && !post.myResponded && RESPOND_LABEL[post.type])) && (
             <Box sx={{ mb: 1.5 }}>
               {post.location && (
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>📍 {post.location}</Typography>
               )}
               {post.contact && (
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>📞 {post.contact}</Typography>
+              )}
+              {post.contactUnavailable && (
+                <Typography variant="caption" color="error" sx={{ display: 'block' }}>联系方式暂时无法显示</Typography>
+              )}
+              {user && user.id !== post.user_id && !post.myResponded && !post.contact && !post.contactUnavailable && RESPOND_LABEL[post.type] && post.status === 'open' && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                  响应后可查看联系方式
+                </Typography>
               )}
             </Box>
           )}

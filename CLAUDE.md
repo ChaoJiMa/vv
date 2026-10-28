@@ -20,7 +20,7 @@ npx wrangler dev                                   # 本地开发，监听 local
 npx wrangler d1 migrations apply neighbor-help-db  # 应用增量迁移（远端加 --remote）
 npx wrangler d1 execute neighbor-help-db --command="SELECT * FROM users"  # 即席查询
 npx wrangler deploy                                # 部署
-npm test                                           # vitest：worker/test 下单元测（auth/validate/logger/images/helpers/sensitive）
+npm test                                           # vitest：worker/test 下单元测（auth/validate/logger/images/helpers/sensitive/contactCrypto）
 ```
 
 ### 前端 (frontend/)
@@ -100,5 +100,8 @@ Worker 有 vitest 单测；前端目前无自动化测试套件（以 `npm run l
 - React Query 重试策略：后端给了明确 `code`（非 500）一律不重试，仅网络中断/500 重试最多 2 次。
 - 样式：**MUI 组件 + Tailwind v3 工具类并用**（Tailwind 经 `postcss.config.js` 接入，配置见 `tailwind.config.js`）。动效组件（如 `Orb`）用 `ogl`（WebGL）。
 
+### 定时任务
+Worker `wrangler.toml` 配置 cron `17 4 * * *`（UTC），由 `reconcile.js` 对账 R2 图片孤儿（无帖子引用且超过宽限期的对象）。
+
 ### 部署拓扑
-前端 Pages 通过 `frontend/functions/{api,auth}/[[path]].js` 反向代理把 `/api`、`/auth` 转发到独立部署的 Worker（`*.workers.dev`）。目的：国内直连 workers.dev 常被墙，但可访问 Pages 主域，Pages→Worker 走 Cloudflare 内网。所以前端始终同源访问，跨域与可达性问题一并消除。
+前端 Pages 通过 `frontend/functions/{api,auth}/[[path]].js` 反向代理把 `/api`、`/auth` 转发到独立部署的 Worker（`*.workers.dev`）。目的：国内直连 workers.dev 常被墙，但可访问 Pages 主域，Pages→Worker 走 Cloudflare 内网。所以前端始终同源访问，跨域与可达性问题一并消除。生产发版需 **Worker 与 Pages 都部署**：仅发 Worker 时，新前端页面（如公告管理）不会上线。

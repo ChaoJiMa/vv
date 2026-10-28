@@ -30,23 +30,31 @@ export async function encryptContact(plain, keyHex) {
   return `${PREFIX}${b64url(iv)}:${b64url(new Uint8Array(ct))}`
 }
 
-/** 授权后解密；非 enc 前缀视为历史明文 */
+/** 是否为字段级密文 */
+export function isEncryptedContact(stored) {
+  return typeof stored === 'string' && stored.startsWith(PREFIX)
+}
+
+/**
+ * 授权后解密；非 enc 前缀视为历史明文。
+ * 密文但无法解密时返回 null（勿当空串，避免编辑页静默清空后写回）。
+ */
 export async function decryptContact(stored, keyHex) {
   if (stored == null || stored === '') return ''
   const s = String(stored)
   if (!s.startsWith(PREFIX)) return s
   const rest = s.slice(PREFIX.length)
   const i = rest.indexOf(':')
-  if (i < 0) return ''
+  if (i < 0) return null
   const key = await importKey(keyHex)
-  if (!key) return '' // 有密文无密钥时不泄露密文
+  if (!key) return null
   try {
     const iv = fromB64url(rest.slice(0, i))
     const data = fromB64url(rest.slice(i + 1))
     const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data)
     return new TextDecoder().decode(pt)
   } catch {
-    return ''
+    return null
   }
 }
 
