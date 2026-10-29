@@ -1,7 +1,7 @@
 # 邻里里 API 字段标准化与兼容迁移 Design
 
 日期：2026-10-28  
-状态：草案（待确认后实施）
+状态：已落地（阶段 A）— images 只出数组；author/stats/viewer 嵌套 + 双写；cover 宽高 + 上传/落库
 
 ## 目标
 
@@ -171,8 +171,8 @@
 - `images` 为数组；瀑布流仍可用  
 - lint / worker test / frontend build 通过  
 
-## 待你确认
+## 已确认（A A B）
 
-1. `images`：**只出数组**（推荐）还是额外保留字符串副本？  
-2. `viewer` / `stats` / `author` 嵌套是否一次上齐，还是先只做 camelCase 扁平双写？  
-3. 是否本轮就加 `cover.width/height`（要动上传）？
+1. `images`：出口**只出数组**（无 imagesRaw 字符串副本）  
+2. `viewer` / `stats` / `author` 嵌套一次上齐，并双写旧扁平字段  
+3. 本轮加 `cover: { key, width?, height? }`；上传返回宽高，落库 `images` 为 `[{key,width?,height?}]`
