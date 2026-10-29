@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { requireText, optionalText, LIMITS, escapeLike } from '../src/validate.js'
+import { requireText, optionalText, optionalDigits, LIMITS, escapeLike, parseAvatarUpdate, staleAvatarKey } from '../src/validate.js'
 
 describe('requireText', () => {
   it('正常文本 trim 后通过', () => {
@@ -42,6 +42,52 @@ describe('LIMITS', () => {
   it('requireText rejects announcement over 200 chars', () => {
     const r = requireText('字'.repeat(201), LIMITS.announcement, '公告内容')
     expect(r.ok).toBe(false)
+  })
+})
+
+describe('optionalDigits', () => {
+  it('空放行，纯数字通过', () => {
+    expect(optionalDigits('', 10, '楼栋')).toEqual({ ok: true, value: '' })
+    expect(optionalDigits(null, 10, '楼栋')).toEqual({ ok: true, value: '' })
+    expect(optionalDigits(' 3 ', 10, '楼栋')).toEqual({ ok: true, value: '3' })
+  })
+  it('含非数字拒绝', () => {
+    expect(optionalDigits('3栋', 10, '楼栋').ok).toBe(false)
+    expect(optionalDigits('a1', 10, '房号').ok).toBe(false)
+  })
+})
+
+describe('parseAvatarUpdate', () => {
+  it('省略字段不改头像', () => {
+    expect(parseAvatarUpdate(undefined)).toEqual({ ok: true, change: false })
+  })
+  it('null / 空串清空头像', () => {
+    expect(parseAvatarUpdate(null)).toEqual({ ok: true, change: true, value: null })
+    expect(parseAvatarUpdate('')).toEqual({ ok: true, change: true, value: null })
+  })
+  it('合法 R2 key 通过', () => {
+    const key = 'abcdef0123456789abcdef0123456789.jpg'
+    expect(parseAvatarUpdate(key)).toEqual({ ok: true, change: true, value: key })
+  })
+  it('非法 key / 外链 / 非字符串拒绝', () => {
+    expect(parseAvatarUpdate('../x.jpg').ok).toBe(false)
+    expect(parseAvatarUpdate('https://example.com/a.jpg').ok).toBe(false)
+    expect(parseAvatarUpdate(123).ok).toBe(false)
+  })
+})
+
+describe('staleAvatarKey', () => {
+  const keyA = 'abcdef0123456789abcdef0123456789.jpg'
+  const keyB = 'fedcba9876543210fedcba9876543210.png'
+  it('旧 R2 key 被替换或清空时返回旧 key', () => {
+    expect(staleAvatarKey(keyA, keyB)).toBe(keyA)
+    expect(staleAvatarKey(keyA, null)).toBe(keyA)
+  })
+  it('未变化 / 外链旧值 / 空旧值不删', () => {
+    expect(staleAvatarKey(keyA, keyA)).toBe(null)
+    expect(staleAvatarKey('https://wx.example/a.jpg', keyB)).toBe(null)
+    expect(staleAvatarKey(null, keyB)).toBe(null)
+    expect(staleAvatarKey('', null)).toBe(null)
   })
 })
 

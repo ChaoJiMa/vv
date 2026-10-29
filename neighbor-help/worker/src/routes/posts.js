@@ -3,14 +3,15 @@
 import { Hono } from 'hono'
 import { hashPassword, verifyPassword, signJWT, genId, bumpTokenVersion, verifyAuth } from '../auth.js'
 import { success, fail, CODE } from '../response.js'
-import { LIMITS, requireText, optionalText, escapeLike } from '../validate.js'
+import { LIMITS, requireText, optionalText, optionalDigits, escapeLike, parseAvatarUpdate, staleAvatarKey } from '../validate.js'
 import { authRequired } from '../middleware.js'
 import { rateLimit } from '../ratelimit.js'
 import { findSensitive } from '../sensitive.js'
-import { sanitizeImages } from '../images.js'
+import { sanitizeImages, imageKeys, parseStoredImages } from '../images.js'
 import { getCommunity } from '../config.js'
 import { pickValidHelpers } from './helpers.js'
 import { canSeeContact, encryptContact, decryptContact, omitContact } from '../contactCrypto.js'
+import { serializePost, serializeHelper, serializeResponse } from '../dto/post.js'
 
 // 服务类型菜单:前端 Home 的 Tab 与 CreatePost 的类型卡片都从这里取,
 // 保证菜单由后端统一维护(增删服务类型无需改前端)。
@@ -64,78 +65,204 @@ api.post('/posts/list', async (c) => {
   }
   const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : ''
 
-  // comment_count / last_reply_at:用一次 LEFT JOIN comments + GROUP BY 聚合得出,
-  // 避免每行跑两个相关子查询(各扫一遍 comments)。无评论时 COUNT=0、MAX=NULL。
-  // 按 p.id 分组,u.* 随 p.user_id 函数依赖,取值确定。
-  const listSql = `SELECT p.*, u.nickname, u.building, u.unit,
-      COUNT(c.id) AS comment_count, MAX(c.created_at) AS last_reply_at
+  // 可选登录:用于标记 my_liked
+  const auth = await verifyAuth(c.req.raw, c.env)
+  const myId = auth?.userId || null
+
+  // comment_count / like_count / last_reply_at 用相关子查询,避免多表 JOIN 膨胀计数。
+  const likedSelect = myId
+    ? ', EXISTS(SELECT 1 FROM post_likes pl WHERE pl.post_id=p.id AND pl.user_id=?) AS my_liked'
+    : ', 0 AS my_liked'
+  const listSql = `SELECT p.*, u.nickname, u.building, u.unit, u.avatar,
+      ${SQL_COMMENT_COUNT} AS comment_count,
+      ${SQL_LAST_REPLY_AT} AS last_reply_at,
+      (SELECT COUNT(*) FROM post_likes WHERE post_id=p.id) AS like_count
+      ${likedSelect}
     FROM posts p
     JOIN users u ON p.user_id = u.id
-    LEFT JOIN comments c ON c.post_id = p.id
     ${whereSql}
-    GROUP BY p.id
     ORDER BY p.created_at DESC LIMIT ? OFFSET ?`
   const countSql = `SELECT COUNT(*) AS n FROM posts p ${whereSql}`
 
+  // ? 按 SQL 出现顺序绑定:先 EXISTS 的 user_id,再 WHERE 参数,再 LIMIT/OFFSET
+  const listBind = myId ? [myId, ...args, limit, offset] : [...args, limit, offset]
   const [{ results: list }, countRow] = await Promise.all([
-    c.env.DB.prepare(listSql).bind(...args, limit, offset).all(),
+    c.env.DB.prepare(listSql).bind(...listBind).all(),
     c.env.DB.prepare(countSql).bind(...args).first(),
   ])
 
   // contact 属隐私:公开列表一律剔除;明文仅在 detail 且作者/已响应时返回。
-  const safeList = (list || []).map(omitContact)
+  const safeList = (list || []).map((row) => serializePost(omitContact(row), {
+    liked: !!row.my_liked,
+  }))
   const total = countRow?.n ?? 0
-  return success({ list: safeList, total, page, hasMore: offset + safeList.length < total })
+  return success({
+    list: safeList,
+    total,
+    page,
+    hasMore: offset + safeList.length < total,
+    meta: { pageSize: limit },
+  })
 })
 
-// POST /api/posts/detail —— 帖子详情,参数 { id } 走 body
-// 评论改由 /api/posts/comments 分页拉取,这里只带 comment_count(总数)。
+const COMMENTS_PAGE_SIZE = 20
+const REPLIES_PREVIEW = 2
+const REPLIES_PAGE_SIZE = 20
+
+/** 顶评数 + 二级回复数 */
+const SQL_COMMENT_COUNT = `(
+  (SELECT COUNT(*) FROM comments WHERE post_id=p.id) +
+  (SELECT COUNT(*) FROM comment_replies WHERE post_id=p.id)
+)`
+/** 顶评与回复中较新的时间 */
+const SQL_LAST_REPLY_AT = `(
+  SELECT MAX(t) FROM (
+    SELECT MAX(created_at) AS t FROM comments WHERE post_id=p.id
+    UNION ALL
+    SELECT MAX(created_at) AS t FROM comment_replies WHERE post_id=p.id
+  )
+)`
+
+function serializeReply(row) {
+  return {
+    id: row.id,
+    commentId: row.comment_id,
+    comment_id: row.comment_id,
+    postId: row.post_id,
+    post_id: row.post_id,
+    userId: row.user_id,
+    user_id: row.user_id,
+    content: row.content,
+    createdAt: row.created_at,
+    created_at: row.created_at,
+    nickname: row.nickname || '邻居',
+    building: row.building || '',
+  }
+}
+
+function serializeTopComment(row, replies) {
+  const pinned = !!row.pinned_at
+  return {
+    id: row.id,
+    post_id: row.post_id,
+    user_id: row.user_id,
+    content: row.content,
+    created_at: row.created_at,
+    createdAt: row.created_at,
+    nickname: row.nickname || '邻居',
+    building: row.building || '',
+    pinned,
+    pinnedAt: row.pinned_at ?? null,
+    pinned_at: row.pinned_at ?? null,
+    replies,
+  }
+}
+
+async function loadRepliesPage(db, commentId, page = 1, pageSize = REPLIES_PAGE_SIZE) {
+  const p = Math.max(1, parseInt(page, 10) || 1)
+  const limit = pageSize
+  const offset = (p - 1) * limit
+  const [{ results: list }, countRow] = await Promise.all([
+    db.prepare(
+      `SELECT r.*, u.nickname, u.building FROM comment_replies r
+       JOIN users u ON r.user_id=u.id
+       WHERE r.comment_id=? ORDER BY r.created_at ASC LIMIT ? OFFSET ?`
+    ).bind(commentId, limit, offset).all(),
+    db.prepare('SELECT COUNT(*) AS n FROM comment_replies WHERE comment_id=?').bind(commentId).first(),
+  ])
+  const rows = list || []
+  const total = countRow?.n ?? 0
+  return {
+    list: rows.map(serializeReply),
+    total,
+    page: p,
+    hasMore: offset + rows.length < total,
+  }
+}
+
+/** 顶评分页（置顶优先 + 时间正序）；每条附带前 2 条回复预览 */
+async function loadCommentsPage(db, postId, page = 1) {
+  const p = Math.max(1, parseInt(page, 10) || 1)
+  const offset = (p - 1) * COMMENTS_PAGE_SIZE
+  const [{ results: list }, countRow] = await Promise.all([
+    db.prepare(
+      `SELECT c.*, u.nickname, u.building FROM comments c
+       JOIN users u ON c.user_id=u.id
+       WHERE c.post_id=?
+       ORDER BY CASE WHEN c.pinned_at IS NULL THEN 1 ELSE 0 END, c.created_at ASC
+       LIMIT ? OFFSET ?`
+    ).bind(postId, COMMENTS_PAGE_SIZE, offset).all(),
+    db.prepare('SELECT COUNT(*) AS n FROM comments WHERE post_id=?').bind(postId).first(),
+  ])
+  const rows = list || []
+  const enriched = []
+  for (const row of rows) {
+    const replies = await loadRepliesPage(db, row.id, 1, REPLIES_PREVIEW)
+    enriched.push(serializeTopComment(row, replies))
+  }
+  const total = countRow?.n ?? 0
+  return { list: enriched, total, page: p, hasMore: offset + rows.length < total }
+}
+
+// POST /api/posts/detail —— 帖子详情,参数 { id }；附带首页评论 comments（同 /posts/comments 形态）
 api.post('/posts/detail', async (c) => {
   const { id } = await bodyOf(c)
   const post = await c.env.DB.prepare(
-    'SELECT p.*, u.nickname, u.building, u.unit, (SELECT COUNT(*) FROM comments WHERE post_id=p.id) AS comment_count FROM posts p JOIN users u ON p.user_id=u.id WHERE p.id=?'
+    `SELECT p.*, u.nickname, u.building, u.unit, u.avatar,
+      ${SQL_COMMENT_COUNT} AS comment_count,
+      (SELECT COUNT(*) FROM post_likes WHERE post_id=p.id) AS like_count
+     FROM posts p JOIN users u ON p.user_id=u.id WHERE p.id=?`
   ).bind(id).first()
   if (!post) return fail(CODE.POST_NOT_FOUND, '帖子不存在')
-  // 已采纳的帮助者(完成帖会有)
-  const { results: helpers } = await c.env.DB.prepare(
-    'SELECT h.helper_id, h.thanked, u.nickname, u.building FROM post_helpers h JOIN users u ON u.id=h.helper_id WHERE h.post_id=? ORDER BY h.created_at ASC'
-  ).bind(id).all()
-  // 响应者(公开展示)+ 当前用户是否已响应
-  const { results: responses } = await c.env.DB.prepare(
-    'SELECT r.user_id, u.nickname, u.building FROM post_responses r JOIN users u ON u.id=r.user_id WHERE r.post_id=? ORDER BY r.created_at ASC'
-  ).bind(id).all()
-  // 可选鉴权:解析当前用户(未登录则为 null),用于标记 myResponded
+  const [{ results: helpers }, { results: responses }, comments] = await Promise.all([
+    c.env.DB.prepare(
+      'SELECT h.helper_id, h.thanked, u.nickname, u.building FROM post_helpers h JOIN users u ON u.id=h.helper_id WHERE h.post_id=? ORDER BY h.created_at ASC'
+    ).bind(id).all(),
+    c.env.DB.prepare(
+      'SELECT r.user_id, u.nickname, u.building FROM post_responses r JOIN users u ON u.id=r.user_id WHERE r.post_id=? ORDER BY r.created_at ASC'
+    ).bind(id).all(),
+    loadCommentsPage(c.env.DB, id, 1),
+  ])
+  // 可选鉴权:解析当前用户(未登录则为 null),用于标记 myResponded / myLiked
   const auth = await verifyAuth(c.req.raw, c.env)
   const myId = auth?.userId || null
   const myResponded = myId ? (responses || []).some(r => r.user_id === myId) : false
+  const myLiked = myId
+    ? !!(await c.env.DB.prepare('SELECT 1 AS x FROM post_likes WHERE post_id=? AND user_id=?').bind(id, myId).first())
+    : false
+  const helpersDto = (helpers || []).map(serializeHelper)
+  const responsesDto = (responses || []).map(serializeResponse)
+  const baseOpts = {
+    liked: myLiked,
+    responded: myResponded,
+    helpers: helpersDto,
+    responses: responsesDto,
+    comments,
+  }
   // contact 仅作者或已响应者可见;授权后再解密,避免登录即可批量采集。
   const { contact: storedContact, ...rest } = post
   if (!canSeeContact(myId, post.user_id, myResponded)) {
-    return success({ ...rest, helpers, responses, myResponded })
+    return success(serializePost(omitContact(rest), baseOpts))
   }
   const contact = await decryptContact(storedContact, c.env.CONTACT_ENC_KEY)
   if (contact === null) {
     // 密文在库但密钥缺失/错误:不返回空 contact,避免编辑页预填空串后保存清空
-    return success({ ...rest, contactUnavailable: true, helpers, responses, myResponded })
+    return success(serializePost(omitContact(rest), {
+      ...baseOpts,
+      contactUnavailable: true,
+    }))
   }
-  return success({ ...rest, contact, helpers, responses, myResponded })
+  return success(serializePost(omitContact(rest), {
+    ...baseOpts,
+    contact,
+  }))
 })
 
 // POST /api/posts/comments —— 帖子评论列表(分页),参数 { id, page }。按时间正序(最早在上)。
 api.post('/posts/comments', async (c) => {
   const { id, page: rawPage } = await bodyOf(c)
   const page = Math.max(1, parseInt(rawPage || '1') || 1)
-  const limit = 20
-  const offset = (page - 1) * limit
-
-  const [{ results: list }, countRow] = await Promise.all([
-    c.env.DB.prepare(
-      'SELECT c.*, u.nickname, u.building FROM comments c JOIN users u ON c.user_id=u.id WHERE c.post_id=? ORDER BY c.created_at ASC LIMIT ? OFFSET ?'
-    ).bind(id, limit, offset).all(),
-    c.env.DB.prepare('SELECT COUNT(*) AS n FROM comments WHERE post_id=?').bind(id).first(),
-  ])
-  const total = countRow?.n ?? 0
-  return success({ list, total, page, hasMore: offset + list.length < total })
+  return success(await loadCommentsPage(c.env.DB, id, page))
 })
 
 // ===== 需登录接口(authRequired 中间件)=====
@@ -147,18 +274,31 @@ api.post('/me/get', authRequired, async (c) => {
   return success(user)
 })
 
-// POST /api/me/update —— 更新个人资料
+// POST /api/me/update —— 更新个人资料（可选 avatar：省略不改 / 空清空 / R2 key）
 api.post('/me/update', authRequired, async (c) => {
   const userId = c.get('userId')
-  const { building, unit, nickname } = await bodyOf(c)
+  const { building, unit, nickname, avatar } = await bodyOf(c)
   const nick = optionalText(nickname, LIMITS.nickname, '昵称')
   if (!nick.ok) return fail(CODE.INVALID_INPUT, nick.message)
-  const bld = optionalText(building, LIMITS.building, '楼栋')
+  const bld = optionalDigits(building, LIMITS.building, '楼栋')
   if (!bld.ok) return fail(CODE.INVALID_INPUT, bld.message)
-  const ut = optionalText(unit, LIMITS.unit, '单元/门牌')
+  const ut = optionalDigits(unit, LIMITS.unit, '房号')
   if (!ut.ok) return fail(CODE.INVALID_INPUT, ut.message)
-  await c.env.DB.prepare('UPDATE users SET building=?, unit=?, nickname=? WHERE id=?')
-    .bind(bld.value, ut.value, nick.value, userId).run()
+  const av = parseAvatarUpdate(avatar)
+  if (!av.ok) return fail(CODE.INVALID_INPUT, av.message)
+  if (av.change) {
+    const prev = await c.env.DB.prepare('SELECT avatar FROM users WHERE id=?').bind(userId).first()
+    await c.env.DB.prepare('UPDATE users SET building=?, unit=?, nickname=?, avatar=? WHERE id=?')
+      .bind(bld.value, ut.value, nick.value, av.value, userId).run()
+    // 旧头像是 R2 key 且已更换/清空 → 尽力删对象，失败不阻断资料更新
+    const stale = staleAvatarKey(prev?.avatar, av.value)
+    if (stale && c.env.IMAGES) {
+      try { await c.env.IMAGES.delete(stale) } catch { /* ignore */ }
+    }
+  } else {
+    await c.env.DB.prepare('UPDATE users SET building=?, unit=?, nickname=? WHERE id=?')
+      .bind(bld.value, ut.value, nick.value, userId).run()
+  }
   return success({ success: true })
 })
 
@@ -214,15 +354,25 @@ api.post('/me/posts', authRequired, async (c) => {
 
   const [{ results: list }, countRow] = await Promise.all([
     c.env.DB.prepare(
-      `SELECT p.*, (SELECT COUNT(*) FROM comments WHERE post_id=p.id) AS comment_count FROM posts p ${whereSql} ORDER BY p.created_at DESC LIMIT ? OFFSET ?`
+      `SELECT p.*, u.nickname, u.building, u.unit, u.avatar,
+        ${SQL_COMMENT_COUNT} AS comment_count,
+        (SELECT COUNT(*) FROM post_likes WHERE post_id=p.id) AS like_count
+       FROM posts p JOIN users u ON p.user_id = u.id
+       ${whereSql} ORDER BY p.created_at DESC LIMIT ? OFFSET ?`
     ).bind(...args, limit, offset).all(),
     c.env.DB.prepare(`SELECT COUNT(*) AS n FROM posts p ${whereSql}`).bind(...args).first(),
   ])
 
   // 与公开列表一致剔除 contact,避免密文/明文经「我的帖子」外泄;编辑走 detail 解密。
-  const safeList = (list || []).map(omitContact)
+  const safeList = (list || []).map((row) => serializePost(omitContact(row)))
   const total = countRow?.n ?? 0
-  return success({ list: safeList, total, page, hasMore: offset + safeList.length < total })
+  return success({
+    list: safeList,
+    total,
+    page,
+    hasMore: offset + safeList.length < total,
+    meta: { pageSize: limit },
+  })
 })
 
 // POST /api/me/stats —— 个人页数据统计(基于采纳记录 post_helpers)
@@ -265,7 +415,13 @@ api.post('/posts/create', authRequired, async (c) => {
   let locValue = loc.value
   if (!locValue) {
     const me = await c.env.DB.prepare('SELECT building, unit FROM users WHERE id=?').bind(userId).first()
-    locValue = [me?.building, me?.unit].filter(Boolean).join(' ')
+    const b = String(me?.building || '').trim()
+    const u = String(me?.unit || '').trim()
+    // 与前端 formatResidence 一致：纯数字拼「栋」「号」
+    if (/^\d+$/.test(b) && /^\d+$/.test(u)) locValue = `${b}栋${u}号`
+    else if (/^\d+$/.test(b) && !u) locValue = `${b}栋`
+    else if (!b && /^\d+$/.test(u)) locValue = `${u}号`
+    else locValue = [b, u].filter(Boolean).join(' ')
   }
   const id = genId()
   const contactStored = await encryptContact(cont.value, c.env.CONTACT_ENC_KEY)
@@ -275,7 +431,7 @@ api.post('/posts/create', authRequired, async (c) => {
   return success({ id })
 })
 
-// POST /api/posts/update —— 编辑帖子(仅作者、仅 open 状态),参数 { id, type, title, content, images }
+// POST /api/posts/update —— 编辑帖子(仅作者、仅 open 状态),参数 { id, type, title, content, images, contact, location }
 api.post('/posts/update', authRequired, async (c) => {
   const userId = c.get('userId')
   const { id, type, title, content, images, contact, location } = await bodyOf(c)
@@ -298,16 +454,16 @@ api.post('/posts/update', authRequired, async (c) => {
   const bad = await findSensitive(c.env, `${t.value} ${ct.value}`)
   if (bad) return fail(CODE.CONTENT_BLOCKED, `内容含违规词「${bad}」,请修改后再保存`)
   const newImages = sanitizeImages(images)
+  const newKeys = imageKeys(newImages)
   const contactStored = await encryptContact(cont.value, c.env.CONTACT_ENC_KEY)
   await c.env.DB.prepare('UPDATE posts SET type=?, title=?, content=?, images=?, contact=?, location=? WHERE id=? AND user_id=?')
     .bind(type, t.value, ct.value, JSON.stringify(newImages), contactStored, loc.value, id, userId).run()
   // 清理被移除的旧图(编辑时删掉的图片),避免 R2 孤儿对象累积。
-  // best-effort:解析失败或 R2 异常都忽略,不影响编辑结果。复刻 posts/delete 的清理写法。
   try {
-    const oldImages = JSON.parse(post.images || '[]')
-    if (Array.isArray(oldImages) && oldImages.length && c.env.IMAGES) {
-      const kept = new Set(newImages)
-      const removed = oldImages.filter(k => !kept.has(k))
+    const oldKeys = imageKeys(parseStoredImages(post.images))
+    if (oldKeys.length && c.env.IMAGES) {
+      const kept = new Set(newKeys)
+      const removed = oldKeys.filter(k => !kept.has(k))
       if (removed.length) await c.env.IMAGES.delete(removed)
     }
   } catch { /* 解析失败或 R2 异常都忽略,不阻断编辑 */ }
@@ -361,6 +517,8 @@ api.post('/posts/helpers/candidates', authRequired, async (c) => {
        SELECT user_id AS uid, created_at AS ts FROM post_responses WHERE post_id = ?1
        UNION ALL
        SELECT user_id AS uid, created_at AS ts FROM comments WHERE post_id = ?1
+       UNION ALL
+       SELECT user_id AS uid, created_at AS ts FROM comment_replies WHERE post_id = ?1
      ) x
      JOIN users u ON u.id = x.uid
      WHERE x.uid != ?2
@@ -406,6 +564,42 @@ api.post('/posts/unrespond', authRequired, async (c) => {
   return success({ success: true })
 })
 
+// POST /api/posts/like —— 点赞,参数 { id }。幂等。
+api.post('/posts/like', authRequired, async (c) => {
+  const userId = c.get('userId')
+  const { id } = await bodyOf(c)
+  const rl = await rateLimit(c.env, `like:${userId}`, 30, 60 * 1000)
+  if (rl.limited) return fail(CODE.TOO_MANY_REQUESTS, `操作过于频繁,请${rl.retryAfter}秒后再试`)
+  const post = await c.env.DB.prepare('SELECT id, user_id, title FROM posts WHERE id = ?').bind(id).first()
+  if (!post) return fail(CODE.POST_NOT_FOUND, '帖子不存在')
+  const now = Date.now()
+  const { meta } = await c.env.DB.prepare(
+    'INSERT OR IGNORE INTO post_likes (post_id, user_id, created_at) VALUES (?, ?, ?)'
+  ).bind(id, userId, now).run()
+  // 首次点赞且非作者本人 → 通知帖主（取消再赞会再通知，可接受）
+  if (meta.changes && post.user_id !== userId) {
+    await c.env.DB.prepare(
+      'INSERT INTO notifications (id, user_id, type, post_id, actor_id, content, read, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)'
+    ).bind(genId(), post.user_id, 'like', id, userId, post.title || '', now).run()
+  }
+  const row = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM post_likes WHERE post_id=?').bind(id).first()
+  const likeCount = row?.n ?? 0
+  return success({ liked: true, likeCount, like_count: likeCount })
+})
+
+// POST /api/posts/unlike —— 取消点赞,参数 { id }。幂等。
+api.post('/posts/unlike', authRequired, async (c) => {
+  const userId = c.get('userId')
+  const { id } = await bodyOf(c)
+  const rl = await rateLimit(c.env, `like:${userId}`, 30, 60 * 1000)
+  if (rl.limited) return fail(CODE.TOO_MANY_REQUESTS, `操作过于频繁,请${rl.retryAfter}秒后再试`)
+  await c.env.DB.prepare('DELETE FROM post_likes WHERE post_id = ? AND user_id = ?')
+    .bind(id, userId).run()
+  const row = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM post_likes WHERE post_id=?').bind(id).first()
+  const likeCount = row?.n ?? 0
+  return success({ liked: false, likeCount, like_count: likeCount })
+})
+
 // POST /api/posts/close —— 标记帖子完成,参数 { id, helpers? }
 // helpers: [{ helperId, thanked }] 采纳的帮助者(可空=纯关帖)。thanked=1 额外发感谢通知。
 api.post('/posts/close', authRequired, async (c) => {
@@ -425,6 +619,7 @@ api.post('/posts/close', authRequired, async (c) => {
       `SELECT DISTINCT uid FROM (
          SELECT user_id AS uid FROM post_responses WHERE post_id = ?1
          UNION SELECT user_id AS uid FROM comments WHERE post_id = ?1
+         UNION SELECT user_id AS uid FROM comment_replies WHERE post_id = ?1
        ) WHERE uid != ?2`
     ).bind(id, userId).all()
     const allow = new Set((cand || []).map(r => r.uid))
@@ -456,8 +651,8 @@ api.post('/posts/close', authRequired, async (c) => {
 })
 
 // POST /api/posts/delete —— 删除帖子(仅本人),参数 { id } 走 body
-// D1 外键不保证级联,这里应用层原子删除帖子及其所有关联数据(评论、响应、采纳、通知、来源私信),
-// 避免遗留孤儿记录持续累积。
+// D1 外键不保证级联,这里应用层原子删除帖子及其关联数据(评论、响应、采纳、通知等)。
+// 私信会话按帖保留,不在此删除。
 api.post('/posts/delete', authRequired, async (c) => {
   const userId = c.get('userId')
   const { id } = await bodyOf(c)
@@ -465,33 +660,118 @@ api.post('/posts/delete', authRequired, async (c) => {
   const post = await c.env.DB.prepare('SELECT user_id, images FROM posts WHERE id = ?').bind(id).first()
   if (!post || post.user_id !== userId) return fail(CODE.POST_NOT_FOUND, '帖子不存在或无权操作')
   await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM comment_replies WHERE post_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM comments WHERE post_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM post_responses WHERE post_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM post_helpers WHERE post_id=?').bind(id),
+    c.env.DB.prepare('DELETE FROM post_likes WHERE post_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM notifications WHERE post_id=?').bind(id),
-    // 私信只解除来源帖关联(post_id 仅标记"从哪条帖发起"),不删消息本身,
-    // 否则会在双向会话里挖空开头几条、与后续 post_id=null 的消息错乱。
-    c.env.DB.prepare('UPDATE messages SET post_id=NULL WHERE post_id=?').bind(id),
+    // 按帖会话:删帖不删私信/conversations,保留 post_id 与标题快照,UI 显示「原帖已删除」。
     c.env.DB.prepare('DELETE FROM posts WHERE id=? AND user_id=?').bind(id, userId),
   ])
   // 帖子已删,best-effort 清理其图片对象(失败不影响删帖结果)。
-  // 注:编辑帖子替换图片产生的旧图不在此清理范围,会留少量孤儿对象(已知限制)。
   try {
-    const keys = JSON.parse(post.images || '[]')
-    if (Array.isArray(keys) && keys.length && c.env.IMAGES) {
+    const keys = imageKeys(parseStoredImages(post.images))
+    if (keys.length && c.env.IMAGES) {
       await c.env.IMAGES.delete(keys)
     }
   } catch { /* 解析失败或 R2 异常都忽略,不阻断删帖 */ }
   return success({ success: true })
 })
 
-// POST /api/posts/comment/delete —— 删除评论(仅本人),参数 { id } 走 body(评论 id)
+// POST /api/posts/comment/replies —— 某顶评下回复分页 { commentId, page }
+api.post('/posts/comment/replies', async (c) => {
+  const { commentId, page: rawPage } = await bodyOf(c)
+  if (!commentId) return fail(CODE.INVALID_INPUT, '缺少评论 id')
+  const top = await c.env.DB.prepare('SELECT id FROM comments WHERE id=?').bind(commentId).first()
+  if (!top) return fail(CODE.COMMENT_NOT_FOUND, '评论不存在')
+  const page = Math.max(1, parseInt(rawPage || '1') || 1)
+  return success(await loadRepliesPage(c.env.DB, commentId, page, REPLIES_PAGE_SIZE))
+})
+
+// POST /api/posts/comment/reply —— 回复顶评 { commentId, content }
+api.post('/posts/comment/reply', authRequired, async (c) => {
+  const userId = c.get('userId')
+  const rl = await rateLimit(c.env, `comment:${userId}`, POST_RL_LIMIT, POST_RL_WINDOW_MS)
+  if (rl.limited) return fail(CODE.TOO_MANY_REQUESTS, `评论过于频繁,请${rl.retryAfter}秒后再试`)
+  const { commentId, content } = await bodyOf(c)
+  const ct = requireText(content, LIMITS.comment, '评论内容')
+  if (!ct.ok) return fail(CODE.COMMENT_EMPTY, ct.message)
+  const bad = await findSensitive(c.env, ct.value)
+  if (bad) return fail(CODE.CONTENT_BLOCKED, `评论含违规词「${bad}」,请修改后再发`)
+  const top = await c.env.DB.prepare(
+    'SELECT c.id, c.post_id, c.user_id AS comment_user_id, p.user_id AS post_user_id FROM comments c JOIN posts p ON p.id=c.post_id WHERE c.id=?'
+  ).bind(commentId).first()
+  if (!top) return fail(CODE.COMMENT_NOT_FOUND, '评论不存在')
+  const now = Date.now()
+  const replyId = genId()
+  const stmts = [
+    c.env.DB.prepare(
+      'INSERT INTO comment_replies (id, comment_id, post_id, user_id, content, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(replyId, commentId, top.post_id, userId, ct.value, now),
+  ]
+  // 通知顶评作者（自己回自己不通知）
+  if (top.comment_user_id !== userId) {
+    stmts.push(
+      c.env.DB.prepare(
+        'INSERT INTO notifications (id, user_id, type, post_id, actor_id, content, read, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)'
+      ).bind(genId(), top.comment_user_id, 'comment', top.post_id, userId, ct.value, now)
+    )
+  }
+  await c.env.DB.batch(stmts)
+  return success({ success: true, id: replyId })
+})
+
+// POST /api/posts/comment/reply/delete —— 删除二级回复 { id }
+api.post('/posts/comment/reply/delete', authRequired, async (c) => {
+  const userId = c.get('userId')
+  const { id } = await bodyOf(c)
+  const { meta } = await c.env.DB.prepare('DELETE FROM comment_replies WHERE id=? AND user_id=?')
+    .bind(id, userId).run()
+  if (!meta.changes) return fail(CODE.COMMENT_NOT_FOUND, '回复不存在或无权操作')
+  return success({ success: true })
+})
+
+// POST /api/posts/comment/pin —— 帖作者置顶一条顶评 { id }
+api.post('/posts/comment/pin', authRequired, async (c) => {
+  const userId = c.get('userId')
+  const { id } = await bodyOf(c)
+  const row = await c.env.DB.prepare(
+    'SELECT c.id, c.post_id, p.user_id AS post_user_id FROM comments c JOIN posts p ON p.id=c.post_id WHERE c.id=?'
+  ).bind(id).first()
+  if (!row) return fail(CODE.COMMENT_NOT_FOUND, '评论不存在')
+  if (row.post_user_id !== userId) return fail(CODE.FORBIDDEN, '仅发帖作者可置顶')
+  const now = Date.now()
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE comments SET pinned_at=NULL WHERE post_id=?').bind(row.post_id),
+    c.env.DB.prepare('UPDATE comments SET pinned_at=? WHERE id=?').bind(now, id),
+  ])
+  return success({ success: true, pinnedAt: now })
+})
+
+// POST /api/posts/comment/unpin —— 取消置顶 { id }
+api.post('/posts/comment/unpin', authRequired, async (c) => {
+  const userId = c.get('userId')
+  const { id } = await bodyOf(c)
+  const row = await c.env.DB.prepare(
+    'SELECT c.id, p.user_id AS post_user_id FROM comments c JOIN posts p ON p.id=c.post_id WHERE c.id=?'
+  ).bind(id).first()
+  if (!row) return fail(CODE.COMMENT_NOT_FOUND, '评论不存在')
+  if (row.post_user_id !== userId) return fail(CODE.FORBIDDEN, '仅发帖作者可取消置顶')
+  await c.env.DB.prepare('UPDATE comments SET pinned_at=NULL WHERE id=?').bind(id).run()
+  return success({ success: true })
+})
+
+// POST /api/posts/comment/delete —— 删除顶评(仅本人),参数 { id }；级联删其下回复
 api.post('/posts/comment/delete', authRequired, async (c) => {
   const userId = c.get('userId')
   const { id } = await bodyOf(c)
-  const { meta } = await c.env.DB.prepare('DELETE FROM comments WHERE id=? AND user_id=?')
-    .bind(id, userId).run()
-  if (!meta.changes) return fail(CODE.COMMENT_NOT_FOUND, '评论不存在或无权操作')
+  const row = await c.env.DB.prepare('SELECT id FROM comments WHERE id=? AND user_id=?').bind(id, userId).first()
+  if (!row) return fail(CODE.COMMENT_NOT_FOUND, '评论不存在或无权操作')
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM comment_replies WHERE comment_id=?').bind(id),
+    c.env.DB.prepare('DELETE FROM comments WHERE id=? AND user_id=?').bind(id, userId),
+  ])
   return success({ success: true })
 })
 

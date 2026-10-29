@@ -11,11 +11,13 @@ import imageRoutes from './routes/images.js'
 import announcementRoutes from './routes/announcements.js'
 import { reconcileImages } from './reconcile.js'
 
-// 允许的来源:本地开发 + Pages 域名(含每次部署的预览子域名)
+// 允许的来源:本地开发(含局域网 IP) + Pages 域名(含每次部署的预览子域名)
 function resolveCorsOrigin(origin) {
   const ok =
     origin === 'http://localhost:5173' ||
     origin === 'http://127.0.0.1:5173' ||
+    // 同网段手机/其它设备用本机 IP 访问 Vite（如 http://192.168.x.x:5173）
+    /^http:\/\/(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}):5173$/.test(origin) ||
     origin === 'https://neighbor-help.pages.dev' ||
     /^https:\/\/[a-z0-9-]+\.neighbor-help\.pages\.dev$/.test(origin)
   return ok ? origin : 'https://neighbor-help.pages.dev'

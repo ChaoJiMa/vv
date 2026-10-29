@@ -24,14 +24,14 @@ reports.post('/reports/create', async (c) => {
   if (rl.limited) return fail(CODE.TOO_MANY_REQUESTS, `操作过于频繁,请${rl.retryAfter}秒后再试`)
 
   const { targetType, targetId, reason } = await bodyOf(c)
-  if ((targetType !== 'post' && targetType !== 'comment') || !targetId) {
+  if ((targetType !== 'post' && targetType !== 'comment' && targetType !== 'reply') || !targetId) {
     return fail(CODE.REPORT_BAD_TARGET, '举报对象无效')
   }
   const rs = optionalText(reason, LIMITS.reportReason, '举报理由')
   if (!rs.ok) return fail(CODE.REPORT_BAD_TARGET, rs.message)
 
   // 校验目标存在,避免对不存在的 id 留下孤儿举报
-  const table = targetType === 'post' ? 'posts' : 'comments'
+  const table = targetType === 'post' ? 'posts' : targetType === 'reply' ? 'comment_replies' : 'comments'
   const target = await c.env.DB.prepare(`SELECT id FROM ${table} WHERE id = ?`).bind(targetId).first()
   if (!target) return fail(CODE.REPORT_BAD_TARGET, '举报对象不存在')
 

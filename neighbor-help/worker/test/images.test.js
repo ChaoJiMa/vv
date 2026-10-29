@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { detectImageMime, validateImage, isValidKey, sanitizeImages, MAX_IMAGE_BYTES } from '../src/images.js'
+import {
+  detectImageMime, validateImage, isValidKey, sanitizeImages, parseStoredImages,
+  imageKeys, readImageSize, MAX_IMAGE_BYTES,
+} from '../src/images.js'
 
 describe('detectImageMime', () => {
   it('识别 JPEG', () => {
@@ -56,7 +59,30 @@ describe('isValidKey / sanitizeImages', () => {
     expect(isValidKey('abc123.jpg')).toBe(true)
     expect(isValidKey('../x.jpg')).toBe(false)
   })
-  it('清洗 images', () => {
-    expect(sanitizeImages(['a.jpg', 'a.jpg', '../b.png', 'c.webp'])).toEqual(['a.jpg', 'c.webp'])
+  it('清洗 images 为带 key 的对象并去重', () => {
+    expect(sanitizeImages(['a.jpg', 'a.jpg', '../b.png', 'c.webp'])).toEqual([
+      { key: 'a.jpg' },
+      { key: 'c.webp' },
+    ])
+  })
+  it('保留合法宽高', () => {
+    expect(sanitizeImages([{ key: 'a.jpg', width: 100, height: 200 }])).toEqual([
+      { key: 'a.jpg', width: 100, height: 200 },
+    ])
+  })
+  it('parseStoredImages 兼容旧纯 key 数组', () => {
+    expect(parseStoredImages('["a.jpg"]')).toEqual([{ key: 'a.jpg' }])
+    expect(imageKeys('[{"key":"a.jpg","width":10,"height":20}]')).toEqual(['a.jpg'])
+  })
+})
+
+describe('readImageSize', () => {
+  it('读 PNG IHDR', () => {
+    const b = new Uint8Array(24)
+    b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
+    // width=2 height=3 at offset 16
+    b[16] = 0; b[17] = 0; b[18] = 0; b[19] = 2
+    b[20] = 0; b[21] = 0; b[22] = 0; b[23] = 3
+    expect(readImageSize(b)).toEqual({ width: 2, height: 3 })
   })
 })

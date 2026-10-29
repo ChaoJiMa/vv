@@ -2,7 +2,7 @@
 import { Hono } from 'hono'
 import { hashPassword, verifyPassword, signJWT, genId } from '../auth.js'
 import { success, fail, CODE } from '../response.js'
-import { LIMITS, optionalText } from '../validate.js'
+import { LIMITS, optionalText, optionalDigits } from '../validate.js'
 import { rateLimit, resetRateLimit } from '../ratelimit.js'
 
 // 登录/注册限流参数:同一 IP 10 分钟内最多 10 次尝试
@@ -23,14 +23,16 @@ auth.post('/register', async (c) => {
     return fail(CODE.TOO_MANY_REQUESTS, `操作过于频繁,请${rl.retryAfter}秒后再试`)
   }
 
-  const { username, password, nickname, building, unit } = await bodyOf(c)
+  const { username: rawUsername, password, nickname, building, unit } = await bodyOf(c)
+  const username = typeof rawUsername === 'string' ? rawUsername.trim() : ''
   if (!username || !password) {
     return fail(CODE.INVALID_INPUT, '用户名和密码不能为空')
   }
-  // 用户名:4-20 位字母或数字
+  // 用户名:4-20 位字母或数字（统一小写落库，避免 Admin/admin 各占一条）
   if (!/^[a-zA-Z0-9]{4,20}$/.test(username)) {
     return fail(CODE.INVALID_INPUT, '用户名需为4-20位字母或数字')
   }
+  const usernameKey = username.toLowerCase()
   // 密码:至少 8 位
   if (password.length < 8) {
     return fail(CODE.INVALID_INPUT, '密码至少8位')
@@ -40,21 +42,33 @@ auth.post('/register', async (c) => {
   }
   const nick = optionalText(nickname, LIMITS.nickname, '昵称')
   if (!nick.ok) return fail(CODE.INVALID_INPUT, nick.message)
-  const bld = optionalText(building, LIMITS.building, '楼栋')
+  const bld = optionalDigits(building, LIMITS.building, '楼栋')
   if (!bld.ok) return fail(CODE.INVALID_INPUT, bld.message)
-  const ut = optionalText(unit, LIMITS.unit, '单元')
+  const ut = optionalDigits(unit, LIMITS.unit, '房号')
   if (!ut.ok) return fail(CODE.INVALID_INPUT, ut.message)
 
-  const exists = await env.DB.prepare('SELECT id FROM users WHERE username = ?').bind(username).first()
+  // 大小写不敏感查重 + UNIQUE 兜底（并发双插）
+  const exists = await env.DB.prepare(
+    'SELECT id FROM users WHERE username = ? COLLATE NOCASE'
+  ).bind(usernameKey).first()
   if (exists) {
     return fail(CODE.USERNAME_TAKEN, '用户名已被注册')
   }
 
   const hashed = await hashPassword(password)
   const id = genId()
-  await env.DB.prepare(
-    'INSERT INTO users (id, username, password, nickname, building, unit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).bind(id, username, hashed, nick.value || username, bld.value, ut.value, Date.now()).run()
+  try {
+    await env.DB.prepare(
+      'INSERT INTO users (id, username, password, nickname, building, unit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      // 昵称缺省用「邻居」，不要用登录用户名（用户名不对他人展示）
+    ).bind(id, usernameKey, hashed, nick.value || '邻居', bld.value, ut.value, Date.now()).run()
+  } catch (err) {
+    const msg = String(err?.message || err)
+    if (/UNIQUE|constraint/i.test(msg)) {
+      return fail(CODE.USERNAME_TAKEN, '用户名已被注册')
+    }
+    throw err
+  }
 
   const user = await env.DB.prepare('SELECT id, username, nickname, avatar, building, unit, role FROM users WHERE id = ?')
     .bind(id).first()
@@ -72,12 +86,16 @@ auth.post('/login', async (c) => {
     return fail(CODE.TOO_MANY_REQUESTS, `登录尝试过于频繁,请${rl.retryAfter}秒后再试`)
   }
 
-  const { username, password } = await bodyOf(c)
+  const { username: rawUsername, password } = await bodyOf(c)
+  const username = typeof rawUsername === 'string' ? rawUsername.trim() : ''
   if (!username || !password) {
     return fail(CODE.INVALID_INPUT, '用户名和密码不能为空')
   }
 
-  const user = await env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(username).first()
+  // COLLATE NOCASE：兼容历史大小写混用账号与新注册小写账号
+  const user = await env.DB.prepare(
+    'SELECT * FROM users WHERE username = ? COLLATE NOCASE'
+  ).bind(username).first()
   if (!user || !user.password) {
     return fail(CODE.INVALID_CREDENTIALS, '用户名或密码错误')
   }

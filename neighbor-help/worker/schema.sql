@@ -38,6 +38,20 @@ CREATE TABLE IF NOT EXISTS comments (
   user_id TEXT NOT NULL,
   content TEXT NOT NULL,
   created_at INTEGER,          -- 毫秒时间戳
+  pinned_at INTEGER,           -- 非空=作者置顶时间；同帖应用层保证最多一条
+  FOREIGN KEY (post_id) REFERENCES posts(id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- 顶评下的二级回复（不可再嵌套）
+CREATE TABLE IF NOT EXISTS comment_replies (
+  id TEXT PRIMARY KEY,
+  comment_id TEXT NOT NULL,
+  post_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (comment_id) REFERENCES comments(id),
   FOREIGN KEY (post_id) REFERENCES posts(id),
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
@@ -47,6 +61,8 @@ CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_posts_type_created_at ON posts(type, created_at DESC);
 -- 详情页加载某帖的评论
 CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);
+CREATE INDEX IF NOT EXISTS idx_comment_replies_comment ON comment_replies(comment_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_comment_replies_post ON comment_replies(post_id);
 
 -- 限流计数(固定窗口):登录/注册防暴力破解
 CREATE TABLE IF NOT EXISTS rate_limits (
@@ -55,20 +71,38 @@ CREATE TABLE IF NOT EXISTS rate_limits (
   count INTEGER DEFAULT 0
 );
 
--- 私信:两用户之间的点对点消息。post_id 记录从哪条帖子发起的私信(可空)。
+-- 按帖会话:同一对用户 + 同一帖 = 一条会话。删帖后行保留(post_title 快照)。
+CREATE TABLE IF NOT EXISTS conversations (
+  id TEXT PRIMARY KEY,
+  user_a TEXT NOT NULL,           -- 双方 id 字典序较小者
+  user_b TEXT NOT NULL,           -- 双方 id 字典序较大者
+  post_id TEXT NOT NULL,          -- 来源帖;删帖后仍保留
+  post_title TEXT NOT NULL DEFAULT '', -- 创建时标题快照
+  last_message_at INTEGER,
+  created_at INTEGER,
+  UNIQUE (user_a, user_b, post_id),
+  FOREIGN KEY (user_a) REFERENCES users(id),
+  FOREIGN KEY (user_b) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_a_last ON conversations(user_a, last_message_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_b_last ON conversations(user_b, last_message_at DESC);
+
+-- 私信:挂在 conversation 下。post_id 冗余写入便于排查。
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,           -- UUID
+  conversation_id TEXT NOT NULL,
   sender_id TEXT NOT NULL,
   receiver_id TEXT NOT NULL,
-  post_id TEXT,                  -- 来源帖子(从「私信 TA」进来时记录),可空
+  post_id TEXT,
   content TEXT NOT NULL,
   read INTEGER DEFAULT 0,        -- 0 未读 / 1 已读(接收方拉取会话时置 1)
   created_at INTEGER,            -- 毫秒时间戳
+  FOREIGN KEY (conversation_id) REFERENCES conversations(id),
   FOREIGN KEY (sender_id) REFERENCES users(id),
   FOREIGN KEY (receiver_id) REFERENCES users(id)
 );
 
--- 通知:type 取 'comment'(评论回复)/ 'respond'(有人响应)/ 'adopt'(被采纳)/ 'thank'(被采纳并感谢)。
+-- 通知:type 取 'comment'(评论回复)/ 'respond'(有人响应)/ 'adopt'(被采纳)/ 'thank'(被采纳并感谢)/ 'like'(点赞)。
 -- actor_id 为触发者(评论人/响应人/帖主),user_id 为接收者。content 冗余:评论为评论内容,其余为帖子标题。
 CREATE TABLE IF NOT EXISTS notifications (
   id TEXT PRIMARY KEY,           -- UUID
@@ -82,8 +116,8 @@ CREATE TABLE IF NOT EXISTS notifications (
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- 会话拉取:两人之间按时间取消息
-CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(sender_id, receiver_id, created_at);
+-- 会话内消息按时间
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at);
 -- 未读私信计数(首页角标)
 CREATE INDEX IF NOT EXISTS idx_messages_receiver_read ON messages(receiver_id, read);
 -- 消息列表 / 未读通知计数
@@ -119,6 +153,18 @@ CREATE TABLE IF NOT EXISTS post_responses (
 );
 -- 列某帖的响应者 / 判断我是否已响应
 CREATE INDEX IF NOT EXISTS idx_post_responses_post ON post_responses(post_id);
+
+-- 帖子点赞：同一用户对同一帖只能赞一次
+CREATE TABLE IF NOT EXISTS post_likes (
+  post_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (post_id, user_id),
+  FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_post_likes_user ON post_likes(user_id);
+CREATE INDEX IF NOT EXISTS idx_post_likes_post ON post_likes(post_id);
 
 -- 举报:用户对帖子或评论发起举报,沉淀待人工复核(本期无管理后台,先存表)。
 -- target_type 取 'post' / 'comment';同一用户对同一目标只记一次(UNIQUE)。

@@ -69,18 +69,124 @@ export function isValidKey(key) {
 // 每帖图片数量上限(与前端 MAX_IMAGES 一致)
 export const MAX_IMAGES_PER_POST = 6
 
-// 清洗发帖/编辑传入的 images:后端是信任边界,不能直接存客户端数据。
-// 只保留合法 key、去重、截断到上限;非数组一律视为空。始终返回数组。
+function positiveInt(n) {
+  const v = Number(n)
+  if (!Number.isFinite(v) || v < 1 || v > 20000) return null
+  return Math.round(v)
+}
+
+/**
+ * 从图片字节读取宽高（失败返回 null）。
+ * 支持 PNG / JPEG / GIF / WebP(VP8/VP8L/VP8X)。
+ */
+export function readImageSize(bytes) {
+  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || [])
+  if (b.length < 24) return null
+  const mime = detectImageMime(b)
+  try {
+    if (mime === 'image/png') {
+      // IHDR: 长宽在偏移 16
+      const width = (b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19]
+      const height = (b[20] << 24) | (b[21] << 16) | (b[22] << 8) | b[23]
+      return width > 0 && height > 0 ? { width, height } : null
+    }
+    if (mime === 'image/gif') {
+      const width = b[6] | (b[7] << 8)
+      const height = b[8] | (b[9] << 8)
+      return width > 0 && height > 0 ? { width, height } : null
+    }
+    if (mime === 'image/jpeg') {
+      let i = 2
+      while (i < b.length - 8) {
+        if (b[i] !== 0xff) { i += 1; continue }
+        const marker = b[i + 1]
+        if (marker === 0xd9 || marker === 0xda) break
+        const len = (b[i + 2] << 8) | b[i + 3]
+        // SOF0 / SOF2
+        if (marker >= 0xc0 && marker <= 0xc3) {
+          const height = (b[i + 5] << 8) | b[i + 6]
+          const width = (b[i + 7] << 8) | b[i + 8]
+          return width > 0 && height > 0 ? { width, height } : null
+        }
+        i += 2 + len
+      }
+      return null
+    }
+    if (mime === 'image/webp' && b.length >= 30) {
+      // RIFF....WEBP then chunk
+      const chunk = String.fromCharCode(b[12], b[13], b[14], b[15])
+      if (chunk === 'VP8X' && b.length >= 30) {
+        const width = 1 + (b[24] | (b[25] << 8) | (b[26] << 16))
+        const height = 1 + (b[27] | (b[28] << 8) | (b[29] << 16))
+        return { width, height }
+      }
+      if (chunk === 'VP8 ' && b.length >= 30) {
+        const width = b[26] | (b[27] << 8)
+        const height = b[28] | (b[29] << 8)
+        return { width: width & 0x3fff, height: height & 0x3fff }
+      }
+      if (chunk === 'VP8L' && b.length >= 25) {
+        const bits = b[21] | (b[22] << 8) | (b[23] << 16) | (b[24] << 24)
+        return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 }
+      }
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+/**
+ * 清洗发帖 images：元素可为 key 字符串或 { key, width?, height? }。
+ * 落库形态统一为 [{ key, width?, height? }, ...]。
+ */
 export function sanitizeImages(images) {
   if (!Array.isArray(images)) return []
   const seen = new Set()
   const out = []
-  for (const k of images) {
-    if (isValidKey(k) && !seen.has(k)) {
-      seen.add(k)
-      out.push(k)
-      if (out.length >= MAX_IMAGES_PER_POST) break
+  for (const item of images) {
+    let key
+    let width = null
+    let height = null
+    if (typeof item === 'string') {
+      key = item
+    } else if (item && typeof item === 'object') {
+      key = item.key
+      width = positiveInt(item.width)
+      height = positiveInt(item.height)
+    } else {
+      continue
     }
+    if (!isValidKey(key) || seen.has(key)) continue
+    seen.add(key)
+    const row = { key }
+    if (width && height) {
+      row.width = width
+      row.height = height
+    }
+    out.push(row)
+    if (out.length >= MAX_IMAGES_PER_POST) break
   }
   return out
+}
+
+/** DB 中 images JSON → [{key,width?,height?}]（兼容旧版纯 key 数组） */
+export function parseStoredImages(raw) {
+  let arr = raw
+  if (typeof raw === 'string') {
+    try { arr = JSON.parse(raw || '[]') } catch { arr = [] }
+  }
+  if (!Array.isArray(arr)) return []
+  return sanitizeImages(arr.map((item) => {
+    if (typeof item === 'string') return item
+    if (item && typeof item === 'object' && item.key) return item
+    return null
+  }).filter(Boolean))
+}
+
+export function imageKeys(storedOrSanitized) {
+  const list = Array.isArray(storedOrSanitized) && storedOrSanitized[0] && typeof storedOrSanitized[0] === 'object'
+    ? storedOrSanitized
+    : parseStoredImages(storedOrSanitized)
+  return list.map((i) => i.key).filter(Boolean)
 }

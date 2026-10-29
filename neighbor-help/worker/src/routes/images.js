@@ -6,7 +6,7 @@ import { genId } from '../auth.js'
 import { success, fail, CODE } from '../response.js'
 import { authRequired } from '../middleware.js'
 import { rateLimit } from '../ratelimit.js'
-import { validateImage, isValidKey, MIME_EXT } from '../images.js'
+import { validateImage, isValidKey, MIME_EXT, readImageSize } from '../images.js'
 
 // 上传限流:同一用户 1 分钟最多 20 张
 const UPLOAD_RL_LIMIT = 20
@@ -15,7 +15,7 @@ const UPLOAD_RL_WINDOW_MS = 60 * 1000
 const images = new Hono()
 
 // POST /api/upload —— 上传单张图片(multipart/form-data,字段名 file)。需登录。
-// 返回 { key };前端把 key 收进帖子的 images 数组。
+// 返回 { key, width?, height? };前端把对象收进帖子的 images 数组。
 images.post('/upload', authRequired, async (c) => {
   const userId = c.get('userId')
   const rl = await rateLimit(c.env, `upload:${userId}`, UPLOAD_RL_LIMIT, UPLOAD_RL_WINDOW_MS)
@@ -37,11 +37,24 @@ images.post('/upload', authRequired, async (c) => {
   const check = validateImage({ type: file.type, size: bytes.byteLength, bytes })
   if (!check.ok) return fail(CODE.IMAGE_INVALID, check.message)
 
+  // 优先服务端解析尺寸;表单 width/height 仅作兜底(须为正整数)
+  const parsed = readImageSize(bytes)
+  const formW = Number(body?.width)
+  const formH = Number(body?.height)
+  const width = parsed?.width || (Number.isFinite(formW) && formW > 0 ? Math.round(formW) : null)
+  const height = parsed?.height || (Number.isFinite(formH) && formH > 0 ? Math.round(formH) : null)
+
   const key = `${genId()}.${check.ext}`
   await c.env.IMAGES.put(key, buf, {
     httpMetadata: { contentType: check.mime },
+    customMetadata: {
+      ...(width && height ? { width: String(width), height: String(height) } : {}),
+    },
   })
-  return success({ key })
+  return success({
+    key,
+    ...(width && height ? { width, height } : {}),
+  })
 })
 
 // GET /api/img/:key —— 公开读图代理。key 唯一且内容不可变,强缓存一年。
