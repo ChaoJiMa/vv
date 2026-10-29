@@ -1,48 +1,54 @@
 import Svg from './svg'
+import MenuSticker from './MenuSticker'
+
+export { MenuSticker }
 
 const stroke = {
   stroke: 'currentColor',
-  strokeWidth: 1.75,
+  strokeWidth: 2.25,
   strokeLinecap: 'round',
   strokeLinejoin: 'round',
 }
 
+/** 太阳线稿 — 与贴纸同题材 */
 export function HelpIcon(props) {
   return (
     <Svg {...props}>
-      <circle cx="12" cy="12" r="9" {...stroke} />
-      <path d="M9.5 9.5a2.5 2.5 0 1 1 3.6 2.25c-.7.4-1.1.9-1.1 1.75" {...stroke} />
-      <circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="4.2" {...stroke} />
+      <path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6.2 6.2l1.5 1.5M16.3 16.3l1.5 1.5M6.2 17.8l1.5-1.5M16.3 7.7l1.5-1.5" {...stroke} />
     </Svg>
   )
 }
 
+/** 纸箱线稿 */
 export function IdleIcon(props) {
   return (
     <Svg {...props}>
-      <path d="M4 9.5 12 4l8 5.5V20a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9.5Z" {...stroke} />
-      <path d="M9 21V12h6v9" {...stroke} />
+      <path d="M4.5 9.5 12 5l7.5 4.5V19a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1V9.5Z" {...stroke} />
+      <path d="M4.5 9.5 12 13.5l7.5-4" {...stroke} />
+      <path d="M12 13.5V20" {...stroke} />
     </Svg>
   )
 }
 
+/** 钥匙线稿 */
 export function LostIcon(props) {
   return (
     <Svg {...props}>
-      <circle cx="11" cy="11" r="6.5" {...stroke} />
-      <path d="m16 16 4 4" {...stroke} />
-      <path d="M9 11h4M11 9v4" {...stroke} />
+      <circle cx="10" cy="10" r="4.5" {...stroke} />
+      <circle cx="10" cy="10" r="1.6" {...stroke} />
+      <path d="M13.2 13.2 19 19" {...stroke} />
+      <path d="M16.2 16.2h3.2M17.5 18.8h2.2" {...stroke} />
     </Svg>
   )
 }
 
+/** 购物袋线稿 */
 export function GroupIcon(props) {
   return (
     <Svg {...props}>
-      <circle cx="9" cy="9" r="3" {...stroke} />
-      <circle cx="16.5" cy="10" r="2.5" {...stroke} />
-      <path d="M3.5 19c.6-2.8 2.7-4.5 5.5-4.5s4.9 1.7 5.5 4.5" {...stroke} />
-      <path d="M13.2 14.6c.9-.7 2-1.1 3.3-1.1 2.2 0 3.9 1.2 4.5 3.5" {...stroke} />
+      <path d="M7 8.5h10l-1 11.5H8L7 8.5Z" {...stroke} />
+      <path d="M9.5 8.5c0-3 5-3 5 0" {...stroke} />
     </Svg>
   )
 }
@@ -66,8 +72,8 @@ export function NavDiscoverIcon({ filled, ...props }) {
   return (
     <Svg {...props}>
       <circle cx="11" cy="11" r="6.5" {...stroke} />
-      <path d="m16.2 16.2 3.3 3.3" {...stroke} />
-      {filled ? <circle cx="11" cy="11" r="2.2" fill="currentColor" stroke="none" /> : null}
+      <path d="m16.2 16.2 3.5 3.5" {...stroke} />
+      {filled ? <circle cx="11" cy="11" r="2.4" fill="currentColor" stroke="none" /> : null}
     </Svg>
   )
 }
@@ -96,7 +102,7 @@ export function NavMeIcon({ filled, ...props }) {
 export function NavAddIcon(props) {
   return (
     <Svg {...props}>
-      <path d="M12 6.5v11M6.5 12h11" {...stroke} strokeWidth={2} />
+      <path d="M12 6v12M6 12h12" {...stroke} strokeWidth={2.5} />
     </Svg>
   )
 }
@@ -113,6 +119,45 @@ export function CloseIcon(props) {
   return (
     <Svg {...props}>
       <path d="m7 7 10 10M17 7 7 17" {...stroke} />
+    </Svg>
+  )
+}
+
+export function MoreIcon(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="6" cy="12" r="1.4" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+      <circle cx="18" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    </Svg>
+  )
+}
+
+/** 浅色主题 */
+export function ThemeSunIcon(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="3.6" {...stroke} />
+      <path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M5.8 5.8l1.6 1.6M16.6 16.6l1.6 1.6M5.8 18.2l1.6-1.6M16.6 7.4l1.6-1.6" {...stroke} />
+    </Svg>
+  )
+}
+
+/** 深色主题 */
+export function ThemeMoonIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M16.2 4.2A8.2 8.2 0 1 0 19.8 14a6.4 6.4 0 0 1-3.6-9.8Z" {...stroke} />
+    </Svg>
+  )
+}
+
+/** 跟随系统 */
+export function ThemeSystemIcon(props) {
+  return (
+    <Svg {...props}>
+      <rect x="4" y="5" width="16" height="11.5" rx="1.8" {...stroke} />
+      <path d="M9 19.5h6M12 16.5v3" {...stroke} />
     </Svg>
   )
 }
@@ -203,6 +248,18 @@ export function NotiThankIcon(props) {
   return (
     <Svg {...props}>
       <path d="M12 19s-6.5-3.8-6.5-8.2A3.3 3.3 0 0 1 12 8a3.3 3.3 0 0 1 6.5 2.8C18.5 15.2 12 19 12 19Z" {...stroke} />
+    </Svg>
+  )
+}
+
+export function HeartIcon({ filled, ...props }) {
+  return (
+    <Svg {...props}>
+      <path
+        d="M12 19s-6.5-3.8-6.5-8.2A3.3 3.3 0 0 1 12 8a3.3 3.3 0 0 1 6.5 2.8C18.5 15.2 12 19 12 19Z"
+        {...stroke}
+        fill={filled ? 'currentColor' : 'none'}
+      />
     </Svg>
   )
 }

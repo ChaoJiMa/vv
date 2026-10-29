@@ -53,11 +53,15 @@ function post(path, body, options = {}) {
 
 // 图片上传:走 multipart/form-data,不能用 post()(它强制 application/json)。
 // 不手动设 Content-Type —— 让浏览器自动带上 multipart boundary。
-// 解析同样遵循 { code, message, data } 协议,失败抛 Error(message)。
-async function uploadImage(file) {
+// 可选 dims 作服务端解析失败时的宽高兜底。返回 { key, width?, height? }。
+async function uploadImage(file, dims = {}) {
   const token = getToken()
   const form = new FormData()
   form.append('file', file)
+  if (dims.width > 0 && dims.height > 0) {
+    form.append('width', String(Math.round(dims.width)))
+    form.append('height', String(Math.round(dims.height)))
+  }
   const res = await fetch(BASE + '/api/upload', {
     method: 'POST',
     headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -78,7 +82,7 @@ async function uploadImage(file) {
     err.code = body.code
     throw err
   }
-  return body.data // { key }
+  return body.data // { key, width?, height? }
 }
 
 export const api = {
@@ -91,9 +95,16 @@ export const api = {
   deletePost: (id) => post('/api/posts/delete', { id }),
   addComment: (id, content) => post('/api/posts/comment', { id, content }),
   deleteComment: (id) => post('/api/posts/comment/delete', { id }),
+  getCommentReplies: (commentId, page = 1) => post('/api/posts/comment/replies', { commentId, page }),
+  addCommentReply: (commentId, content) => post('/api/posts/comment/reply', { commentId, content }),
+  deleteCommentReply: (id) => post('/api/posts/comment/reply/delete', { id }),
+  pinComment: (id) => post('/api/posts/comment/pin', { id }),
+  unpinComment: (id) => post('/api/posts/comment/unpin', { id }),
   closePost: (id, helpers) => post('/api/posts/close', { id, helpers }),
   respondPost: (id) => post('/api/posts/respond', { id }),
   unrespondPost: (id) => post('/api/posts/unrespond', { id }),
+  likePost: (id) => post('/api/posts/like', { id }),
+  unlikePost: (id) => post('/api/posts/unlike', { id }),
   getHelperCandidates: (id) => post('/api/posts/helpers/candidates', { id }),
   getMe: () => post('/api/me/get', {}, { silentAuth: true, silentError: true }),
   getMyPosts: (page = 1, status = '') => post('/api/me/posts', { page, status }),
@@ -101,14 +112,15 @@ export const api = {
   updateMe: (body) => post('/api/me/update', body),
   changePassword: (body) => post('/api/me/password', body),
   logout: () => post('/api/me/logout', {}, { silentError: true }),
-  // 私信 / 通知
-  sendMessage: (receiverId, content, postId, options) => post('/api/messages/send', { receiverId, content, postId }, options),
-  getThread: (peerId, page = 1) => post('/api/messages/thread', { peerId, page }),
+  // 私信 / 通知（会话按对方+帖子）
+  ensureConversation: (receiverId, postId) => post('/api/messages/ensure', { receiverId, postId }),
+  sendMessage: (conversationId, content, options) => post('/api/messages/send', { conversationId, content }, options),
+  getThread: (conversationId, page = 1) => post('/api/messages/thread', { conversationId, page }),
   getConversations: (page = 1) => post('/api/messages/conversations', { page }),
   getNotifications: (page = 1) => post('/api/notifications/list', { page }),
   getUnread: () => post('/api/messages/unread', {}, { silentAuth: true, silentError: true }),
   readNotification: (id) => post('/api/notifications/read', { id }),
-  // 举报帖子/评论:targetType 取 'post' | 'comment'
+  // 举报:targetType 取 'post' | 'comment' | 'reply'
   reportContent: (targetType, targetId, reason) => post('/api/reports/create', { targetType, targetId, reason }),
   // 小区结构(注册/发帖位置选择用),公开接口
   getCommunity: () => post('/api/community/structure'),
@@ -118,7 +130,7 @@ export const api = {
   adminCreateAnnouncement: (body) => post('/api/announcements/admin/create', body),
   adminUpdateAnnouncement: (body) => post('/api/announcements/admin/update', body),
   adminDeleteAnnouncement: (id) => post('/api/announcements/admin/delete', { id }),
-  // 图片:上传单张返回 { key };imgUrl 把 key 拼成可访问的代理 URL
+  // 图片:上传单张返回 { key, width?, height? };imgUrl 把 key 拼成可访问的代理 URL
   uploadImage,
   imgUrl: (key) => `${BASE}/api/img/${key}`,
   register: (body) => post('/auth/register', body),

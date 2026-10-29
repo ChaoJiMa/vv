@@ -1,16 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import TextField from '@mui/material/TextField'
-import IconButton from '@mui/material/IconButton'
-import InputAdornment from '@mui/material/InputAdornment'
 import Button from '@mui/material/Button'
-import Chip from '@mui/material/Chip'
-import Link from '@mui/material/Link'
 import CircularProgress from '@mui/material/CircularProgress'
-import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import { NavHomeIcon } from '../components/icons'
 import SplitText from '../components/SplitText'
 import AnimatedContent from '../components/AnimatedContent'
@@ -18,25 +12,26 @@ import BottomSheet from '../components/BottomSheet'
 import { useAuth } from '../hooks/useAuth'
 import { api } from '../api'
 import { toast } from '../toast'
+import { digitsOnly } from '../utils/residence'
 
 const WX_APPID = import.meta.env.VITE_WX_APPID || ''
 const REDIRECT_URI = encodeURIComponent(window.location.origin + '/login')
-// 暖橙主操作色:与徽标/光晕同调,统一整页暖色情绪(替代原科技蓝)
 const WARM = 'var(--color-primary)'
 const WARM_DARK = 'var(--color-primary-pressed)'
 const WARM_FILL = 'var(--color-bg-accent)'
-const WARM_FILL_HOVER = 'var(--color-bg-accent)'
-// 小区结构(期数 -> 楼栋 -> 单元)改由后端 /api/community/structure 返回,
-// 不再硬编码:改小区无需重新发版。接口未就绪时回退空对象。
 
-// 位置选择弹窗内的 chip 样式:选中暖橙、未选暖灰
-const regChipSx = (active) => ({
-  height: 36, borderRadius: '10px', fontSize: 14, px: 0.5,
-  bgcolor: active ? WARM : WARM_FILL,
-  color: active ? '#fff' : '#1C1C1E',
-  fontWeight: active ? 600 : 400,
-  '&:hover': { bgcolor: active ? WARM_DARK : WARM_FILL_HOVER },
-})
+const footLinkSx = {
+  border: 'none',
+  background: 'transparent',
+  padding: 0,
+  margin: 0,
+  font: 'inherit',
+  fontSize: 12,
+  color: 'var(--color-text-muted)',
+  cursor: 'pointer',
+  '&:active': { opacity: 0.6 },
+  '&:disabled': { opacity: 0.4, cursor: 'not-allowed' },
+}
 
 export default function Login() {
   const [params] = useSearchParams()
@@ -45,79 +40,65 @@ export default function Login() {
   const { login, user } = useAuth()
   const code = params.get('code')
 
-  // 小区结构从后端拉取(公开接口),缓存 5 分钟。未就绪时回退空对象不报错。
-  const { data: community = {} } = useQuery({
-    queryKey: ['community'],
-    queryFn: () => api.getCommunity(),
-    staleTime: 5 * 60 * 1000,
-  })
-  const phases = Object.keys(community)
-
-  // 登录成功后的去向:来自 RequireAuth 重定向时带 state.from(原目标);
-  // 直接进登录页(非重定向)则默认回首页。pathname+search 一起带,保留查询串。
   const from = location.state?.from
     ? location.state.from.pathname + (location.state.from.search || '')
     : '/'
   const goAfterAuth = () => navigate(from, { replace: true })
 
-  // 已登录用户访问 /login(如手动输入地址/返回):直接送去目标页,不停留在登录页
   useEffect(() => {
     if (user) goAfterAuth()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
-  // 登录态
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  // 底部弹窗:null | 'register' | 'forgot' | 'wechat'
   const [sheet, setSheet] = useState(null)
   const closeSheet = () => setSheet(null)
 
-  // 注册态
-  const [reg, setReg] = useState({ username: '', password: '', confirm: '', phase: '', building: '', unit: '' })
+  const [reg, setReg] = useState({ username: '', password: '', confirm: '', nickname: '', building: '', unit: '' })
   const [regSubmitting, setRegSubmitting] = useState(false)
   const setRegField = (k) => (e) => setReg(r => ({ ...r, [k]: e.target.value }))
-  // 位置级联选择弹窗开关(期数/楼栋/单元)
-  const [regionOpen, setRegionOpen] = useState(false)
-  const regionText = [reg.phase, reg.building, reg.unit].filter(Boolean).join(' / ')
+  const setRegDigits = (k) => (e) => setReg(r => ({ ...r, [k]: digitsOnly(e.target.value) }))
 
-  // 锁定首帧视口高度:微信 X5 进页面时工具栏/地址栏高度在首帧会变一次,
-  // 用 100dvh + 贴底布局会随之被整体上顶 ——「弹跳」的真正来源(与动画无关)。
-  // 惰性初始化在首次渲染就读 innerHeight(纯 px,不经 dvh),之后不随工具栏变化,布局不重排。
-  const [lockedH] = useState(() =>
+  // 首帧锁定高度；仅横竖屏切换时更新，避免工具栏伸缩把布局顶飞
+  const [lockedH, setLockedH] = useState(() =>
     typeof window !== 'undefined' ? window.innerHeight : 0
   )
-  // 有锁定值就用纯 px,否则回退 100dvh(SSR/极端环境)
+  useEffect(() => {
+    // iOS 在 orientationchange 当下 innerHeight 常仍是旧值，稍后再读
+    let t
+    const onOrient = () => {
+      clearTimeout(t)
+      t = setTimeout(() => setLockedH(window.innerHeight), 280)
+    }
+    window.addEventListener('orientationchange', onOrient)
+    return () => {
+      clearTimeout(t)
+      window.removeEventListener('orientationchange', onOrient)
+    }
+  }, [])
   const pageMinH = lockedH ? `${lockedH}px` : '100dvh'
 
-  // 入场门控 + 字体就绪:必须等标题字体「真正加载完」后,元素仍处于 opacity:0(不可见)时
-  // 让浏览器完成字体换帧的 reflow,再揭示入场。否则会出现可见的位移弹跳。
-  //
-  // 病根:贴底布局(justify-end)下,标题字体从回退 system-ui 换成更紧凑的 KaiXinTi 后标题变矮 →
-  // 总内容变矮 → 顶部空白变大 → 最顶的 icon 被推「向下」。
-  // 之前用 document.fonts.ready 会「假就绪」(CSS 尚未引用该字体时立即 resolve),导致元素先以
-  // system-ui 可见、字体后到才 reflow → 可见弹跳。改用 fonts.load(指定字号)等具体字体真就绪。
   const [ready, setReady] = useState(false)
   useEffect(() => {
     let cancelled = false
     let raf1, raf2, timer
     const reveal = () => {
       if (cancelled) return
-      // 字体已就绪后再过两帧:确保浏览器先完成(不可见的)reflow,再揭示,彻底无跳变
       raf1 = requestAnimationFrame(() => {
         raf2 = requestAnimationFrame(() => { if (!cancelled) setReady(true) })
       })
     }
     if (document.fonts && document.fonts.load) {
-      // 显式按标题/小标题用到的字号加载 KaiXinTi,Promise resolve 即该字体真正可用
+      const cached = document.fonts.check?.('40px "KaiXinTi"')
       Promise.all([
         document.fonts.load('40px "KaiXinTi"'),
         document.fonts.load('14px "KaiXinTi"'),
       ]).then(reveal, reveal)
-      // 兜底:字体异常/加载超时,1s 后也放行,避免页面一直不显示
-      timer = setTimeout(reveal, 1000)
+      // 字体已缓存：更快放行；否则最多等 1s
+      timer = setTimeout(reveal, cached ? 280 : 1000)
     } else {
       reveal()
     }
@@ -129,7 +110,6 @@ export default function Login() {
     }
   }, [])
 
-  // 微信回调:带 code 时自动换取登录态(仅执行一次,避免 StrictMode/重渲染重复请求)
   const exchanged = useRef(false)
   useEffect(() => {
     if (code && !exchanged.current) {
@@ -137,15 +117,11 @@ export default function Login() {
       api.loginWithCode(code).then(({ token, user }) => {
         login(token, user)
         goAfterAuth()
-      }).catch(() => navigate('/login'))
+      }).catch(() => navigate('/login', { replace: true }))
     }
-    // goAfterAuth 每渲染新建,且本回调由 exchanged ref 保证只跑一次,不纳入依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code, login, navigate])
 
-  // 登录页为暖白主题:把 body 背景临时设为同款暖白,避免 iOS 橡皮筋过度滚动时露出黑底;
-  // 卸载时恢复,不影响 Home 等浅色页面。
-  // 注:必须设 backgroundColor(纯色),橡皮筋区只填充纯色,用 background 简写会把色重置为透明 → 露黑。
   useEffect(() => {
     const prevBgColor = document.body.style.backgroundColor
     const prevOverscroll = document.body.style.overscrollBehavior
@@ -175,8 +151,8 @@ export default function Login() {
   const handleRegister = async (e) => {
     e?.preventDefault()
     if (regSubmitting) return
-    // 前置校验,与后端规则一致:用户名 4-20 位字母/数字、密码至少 8 位、两次一致
-    if (!/^[a-zA-Z0-9]{4,20}$/.test(reg.username.trim())) {
+    const regName = reg.username.trim()
+    if (!/^[a-zA-Z0-9]{4,20}$/.test(regName)) {
       toast.error('用户名需为4-20位字母或数字')
       return
     }
@@ -191,13 +167,14 @@ export default function Login() {
     setRegSubmitting(true)
     try {
       const { token, user } = await api.register({
-        username: reg.username.trim(),
+        username: regName,
         password: reg.password,
-        // 期数 + 楼栋合并存入 building(后端无单独 phase 列),如「一期1号楼」
-        building: [reg.phase, reg.building].filter(Boolean).join(''),
-        unit: reg.unit.trim(),
+        nickname: reg.nickname.trim(),
+        building: digitsOnly(reg.building),
+        unit: digitsOnly(reg.unit),
       })
       login(token, user)
+      toast.success('注册成功，欢迎加入邻里里')
       goAfterAuth()
     } catch {
       // 错误已 toast
@@ -212,17 +189,25 @@ export default function Login() {
       `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${WX_APPID}&redirect_uri=${REDIRECT_URI}&response_type=code&scope=snsapi_userinfo&state=login#wechat_redirect`
   }
 
+  const openProtocol = (name) => {
+    toast.info(`${name}即将上线`)
+  }
+
   if (code) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100dvh', gap: 1, bgcolor: '#000', color: 'grey.500' }}>
-        <CircularProgress size={20} /> 登录中...
+      <Box
+        sx={{
+          display: 'flex', justifyContent: 'center', alignItems: 'center',
+          minHeight: '100dvh', gap: 1.25,
+          bgcolor: 'var(--color-bg)', color: 'var(--color-text-muted)',
+        }}
+      >
+        <CircularProgress size={20} sx={{ color: WARM }} />
+        登录中…
       </Box>
     )
   }
 
-  // 登录卡片内输入框:浮动标签 + 毛玻璃浅底上的深色文字
-  // 注:字号 16px 是为防止 iOS Safari 聚焦输入框时强制放大页面(<16px 会触发缩放)
-  // 文字深石板灰保证可读;聚焦标签/下划线用暖橙,与整页暖色主题统一
   const fieldSx = {
     '& .MuiInput-root': { fontSize: 16, color: 'var(--color-text)' },
     '& label': { fontSize: 15, color: 'var(--color-text-muted)' },
@@ -232,34 +217,28 @@ export default function Login() {
     '& .MuiInput-root::after': { borderBottomColor: WARM },
   }
 
-  // 弹窗内输入块容器:多个 filled 块垂直堆叠,块间小间距
   const fieldGroupSx = { display: 'flex', flexDirection: 'column', gap: 1.25 }
-  // 弹窗内 filled 输入:灰底圆角块 + 浮动标签(嵌入块内顶部,紧凑),无下划线
-  // 字号 16px 防 iOS 聚焦放大;label 聚焦科技蓝
-  // 固定 56px 高;收起态 label 用 translate 垂直居中,聚焦/有值时回到默认上移
   const sheetFieldSx = {
     '& .MuiFilledInput-root': {
-      bgcolor: WARM_FILL, borderRadius: '10px', fontSize: 16, color: '#1C1C1E', overflow: 'hidden',
-      '&:hover': { bgcolor: WARM_FILL_HOVER },
-      '&.Mui-focused': { bgcolor: WARM_FILL_HOVER },
-      '&::before, &::after': { display: 'none' }, // 去掉 filled 默认下划线
+      bgcolor: WARM_FILL, borderRadius: '10px', fontSize: 16, color: 'var(--color-text)', overflow: 'hidden',
+      '&:hover': { bgcolor: WARM_FILL },
+      '&.Mui-focused': { bgcolor: WARM_FILL },
+      '&::before, &::after': { display: 'none' },
     },
     '& .MuiFilledInput-input': { pt: '22px', pb: '7px', height: 27 },
-    '& label': { fontSize: 14, color: '#9CA3AF', transform: 'translate(12px, 20px) scale(1)' },
+    '& label': { fontSize: 14, color: 'var(--color-text-muted)', transform: 'translate(12px, 20px) scale(1)' },
     '& label.MuiInputLabel-shrink': { transform: 'translate(12px, 7px) scale(0.82)' },
     '& label.Mui-focused': { color: WARM },
   }
-  // 弹窗主按钮:深黑全宽(参考稿 #1C1C1E / 50px / 12px / 16px-600)
-  const sheetDarkBtn = {
+  const sheetPrimaryBtn = {
     width: '100%', height: 50, borderRadius: '12px', fontSize: 16, fontWeight: 600,
-    bgcolor: '#1C1C1E', color: '#fff', boxShadow: 'none',
-    '&:hover': { bgcolor: '#000', boxShadow: 'none' },
-    '&.Mui-disabled': { bgcolor: 'grey.300', color: '#fff' },
+    bgcolor: WARM, color: 'var(--color-on-primary)', boxShadow: 'none',
+    '&:hover': { bgcolor: WARM_DARK, boxShadow: 'none' },
+    '&.Mui-disabled': { bgcolor: 'color-mix(in srgb, var(--color-primary) 28%, transparent)', color: 'var(--color-on-primary)' },
   }
 
   return (
     <Box sx={{ position: 'relative', minHeight: pageMinH, bgcolor: 'var(--color-bg)', overflow: 'hidden', color: 'var(--color-text)' }}>
-      {/* 阳光小区呼吸背景：主橙 + 薄荷绿/天蓝辅色光斑 */}
       <Box
         sx={{
           position: 'absolute', inset: 0, zIndex: 0,
@@ -277,34 +256,27 @@ export default function Login() {
             '0%, 100%': { transform: 'translate(0, 0) scale(0.92)', opacity: 0.3 },
             '50%': { transform: 'translate(-5%, -8%) scale(1.16)', opacity: 0.5 },
           },
-          '@keyframes blobD': {
-            '0%, 100%': { transform: 'translate(0, 0) scale(1.12)', opacity: 0.55 },
-            '50%': { transform: 'translate(7%, -6%) scale(0.9)', opacity: 0.32 },
-          },
           '@media (prefers-reduced-motion: reduce)': {
-            '& > span': { animation: 'none !important' },
+            '& > span': { animation: 'none !important', opacity: 0.4 },
           },
-          '& > span': { position: 'absolute', borderRadius: '50%', filter: 'blur(72px)' },
+          '& > span': { position: 'absolute', borderRadius: '50%', filter: 'blur(48px)' },
         }}
       >
-        <Box component="span" sx={{ width: '85%', height: '70%', top: '-30%', left: '-30%', bgcolor: '#FFB067', animation: 'blobA 6.3s ease-in-out infinite', animationDelay: '-1.2s' }} />
-        <Box component="span" sx={{ width: '60%', height: '52%', top: '-18%', right: '-26%', bgcolor: '#FFCB8E', animation: 'blobB 7.7s ease-in-out infinite', animationDelay: '-3.5s' }} />
-        <Box component="span" sx={{ width: '58%', height: '46%', top: '34%', left: '8%', bgcolor: '#7BC9A6', animation: 'blobC 5.4s ease-in-out infinite', animationDelay: '-4.6s' }} />
-        <Box component="span" sx={{ width: '82%', height: '66%', bottom: '-30%', right: '-28%', bgcolor: '#6BB3E0', animation: 'blobD 8.5s ease-in-out infinite', animationDelay: '-2.1s' }} />
+        <Box component="span" sx={{ width: '80%', height: '65%', top: '-28%', left: '-28%', bgcolor: 'color-mix(in srgb, var(--color-primary) 55%, transparent)', animation: 'blobA 6.3s ease-in-out infinite', animationDelay: '-1.2s' }} />
+        <Box component="span" sx={{ width: '55%', height: '48%', top: '-16%', right: '-24%', bgcolor: 'color-mix(in srgb, var(--color-accent-cream, #F0D9A8) 70%, transparent)', animation: 'blobB 7.7s ease-in-out infinite', animationDelay: '-3.5s' }} />
+        <Box component="span" sx={{ width: '70%', height: '55%', bottom: '-28%', right: '-26%', bgcolor: 'color-mix(in srgb, var(--color-accent-mint, #7BC9A6) 45%, transparent)', animation: 'blobC 5.4s ease-in-out infinite', animationDelay: '-4.6s' }} />
       </Box>
       <Box sx={{ position: 'absolute', inset: 0, zIndex: 0, bgcolor: 'color-mix(in srgb, var(--color-bg) 8%, transparent)' }} />
 
-      {/* 内容层:整体下沉,贴近底部 */}
       <Box
         sx={{
           position: 'relative', zIndex: 1,
           minHeight: pageMinH, maxWidth: 480, mx: 'auto',
           display: 'flex', flexDirection: 'column', alignItems: 'center',
           justifyContent: 'flex-end', px: 3,
-          pb: 'calc(20px + env(safe-area-inset-bottom))',
+          pb: 'calc(20px + var(--safe-bottom))',
         }}
       >
-        {/* 品牌区:圆形徽标 + 标题 + 小标题 */}
         <AnimatedContent distance={24} duration={0.7} delay={0} start={ready}>
           <Box
             sx={{
@@ -317,7 +289,6 @@ export default function Login() {
             <NavHomeIcon size={34} style={{ color: '#fff' }} filled />
           </Box>
         </AnimatedContent>
-        {/* 标题用 Split Text 逐字入场 */}
         <SplitText
           text="邻里里"
           delay={240}
@@ -329,13 +300,12 @@ export default function Login() {
           text="邻里里 · 远亲不如近邻"
           delay={45}
           duration={0.7}
-          startDelay={1300}
+          startDelay={1100}
           start={ready}
           sx={{ fontFamily: '"KaiXinTi", system-ui, sans-serif', color: 'var(--color-text-muted)', fontSize: 14, letterSpacing: 2, mb: 4 }}
         />
 
-        {/* 表单贴纸卡 */}
-        <AnimatedContent distance={28} duration={0.7} delay={1500} start={ready} sx={{ width: '100%' }}>
+        <AnimatedContent distance={28} duration={0.7} delay={1280} start={ready} sx={{ width: '100%' }}>
           <Box
             component="form"
             onSubmit={handleLogin}
@@ -346,199 +316,178 @@ export default function Login() {
               WebkitBackdropFilter: 'blur(20px) saturate(180%)',
               borderRadius: 'var(--radius-card)',
               border: '1px solid var(--color-border)',
-              px: 2.5, py: 2,
+              px: 2.25, py: 1.75,
               boxShadow: 'var(--shadow-card)',
             }}
           >
-          <TextField
-            value={username}
-            onChange={e => setUsername(e.target.value)}
-            label="用户名"
-            variant="standard"
-            fullWidth
-            autoComplete="username"
-            sx={{ ...fieldSx, mb: 1 }}
-          />
-          <TextField
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            label="密码"
-            variant="standard"
-            fullWidth
-            autoComplete="current-password"
-            sx={fieldSx}
-            slotProps={{
-              input: {
-                endAdornment: (
-                <InputAdornment position="end">
-                  <IconButton
-                    type="submit"
-                    edge="end"
-                    disabled={submitting || !username.trim() || !password}
-                    sx={{
-                      width: 32, height: 32,
-                      // 抬离下划线:standard 变体下划线在底部,圆按钮垂直居中会压到线上
-                      mb: '6px',
-                      // 暖橙实心主操作按钮,呼应徽标渐变,在浅毛玻璃卡上是清晰的 CTA
-                      bgcolor: WARM,
-                      color: '#fff',
-                      boxShadow: '0 4px 12px rgba(236,110,51,0.32)',
-                      '&:hover': { bgcolor: WARM_DARK, boxShadow: '0 4px 12px rgba(236,110,51,0.32)' },
-                      // 禁用态(初始空表单):暖色淡底,提示但不喧宾夺主
-                      '&.Mui-disabled': { bgcolor: 'rgba(236,110,51,0.16)', color: 'rgba(255,255,255,0.85)', boxShadow: 'none' },
-                    }}
-                  >
-                    {submitting ? <CircularProgress size={16} sx={{ color: '#fff' }} /> : <ArrowForwardIcon sx={{ fontSize: 18 }} />}
-                  </IconButton>
-                </InputAdornment>
-              ),
-              },
-            }}
-          />
+            <TextField
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              label="用户名"
+              variant="standard"
+              fullWidth
+              autoComplete="username"
+              sx={{ ...fieldSx, mb: 0.75 }}
+            />
+            <TextField
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              label="密码"
+              variant="standard"
+              fullWidth
+              autoComplete="current-password"
+              sx={{ ...fieldSx, mb: 1.5 }}
+            />
+            <Button
+              type="submit"
+              disabled={submitting || !username.trim() || !password}
+              sx={{
+                ...sheetPrimaryBtn,
+                height: 44,
+                minHeight: 44,
+                fontSize: 15,
+                fontWeight: 600,
+                borderRadius: '12px',
+                boxShadow: '0 4px 12px rgba(236,110,51,0.25)',
+                '&:hover': { bgcolor: WARM_DARK, boxShadow: '0 4px 12px rgba(236,110,51,0.25)' },
+              }}
+            >
+              {submitting ? (
+                <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+                  <CircularProgress size={16} sx={{ color: 'var(--color-on-primary)' }} />
+                  登录中
+                </Box>
+              ) : '登录'}
+            </Button>
           </Box>
         </AnimatedContent>
 
-        {/* 底部链接:一行居中,触发底部弹窗 */}
-        <AnimatedContent distance={24} duration={0.7} delay={1680} start={ready}>
+        <AnimatedContent distance={24} duration={0.7} delay={1450} start={ready}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mt: 3, color: 'var(--color-text-muted)', fontSize: 12 }}>
-            <Box component="span" onClick={() => setSheet('register')} sx={{ cursor: 'pointer', '&:active': { opacity: 0.6 } }}>注册</Box>
-            <Box component="span" sx={{ opacity: 0.45 }}>·</Box>
-            <Box component="span" onClick={() => setSheet('forgot')} sx={{ cursor: 'pointer', '&:active': { opacity: 0.6 } }}>忘记密码</Box>
-            <Box component="span" sx={{ opacity: 0.45 }}>·</Box>
-            <Box component="span" onClick={() => setSheet('wechat')} sx={{ cursor: 'pointer', '&:active': { opacity: 0.6 } }}>微信登录</Box>
+            <Box component="button" type="button" onClick={() => setSheet('register')} sx={footLinkSx}>注册</Box>
+            <Box component="span" sx={{ opacity: 0.45 }} aria-hidden>·</Box>
+            <Box component="button" type="button" onClick={() => setSheet('forgot')} sx={footLinkSx}>忘记密码</Box>
+            <Box component="span" sx={{ opacity: 0.45 }} aria-hidden>·</Box>
+            {WX_APPID ? (
+              <Box component="button" type="button" onClick={() => setSheet('wechat')} sx={footLinkSx}>微信登录</Box>
+            ) : (
+              <Box
+                component="button"
+                type="button"
+                disabled
+                title="微信登录暂未开放"
+                aria-label="微信登录暂未开放"
+                sx={footLinkSx}
+              >
+                微信暂未开放
+              </Box>
+            )}
           </Box>
         </AnimatedContent>
 
-        <AnimatedContent distance={24} duration={0.7} delay={1820} start={ready}>
-          <Typography sx={{ color: 'var(--color-text-muted)', fontSize: 9, mt: 2.5 }}>
-            你的信息仅用于社区认证
-          </Typography>
+        <AnimatedContent distance={24} duration={0.7} delay={1580} start={ready}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, mt: 2.5 }}>
+            <Typography sx={{ color: 'var(--color-text-muted)', fontSize: 9 }}>
+              你的信息仅用于社区认证
+            </Typography>
+            <Box
+              component="button"
+              type="button"
+              onClick={() => navigate('/', { replace: true })}
+              sx={{ ...footLinkSx, fontSize: 12, color: WARM, fontWeight: 600 }}
+            >
+              先逛逛
+            </Box>
+          </Box>
         </AnimatedContent>
       </Box>
 
-      {/* ===== 注册弹窗 ===== */}
-      <BottomSheet open={sheet === 'register'} onClose={closeSheet} title="注册" heightVh={66}>
+      <BottomSheet open={sheet === 'register'} onClose={closeSheet} title="注册" heightVh={72}>
         <Box component="form" onSubmit={handleRegister} sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-          {/* 账号信息 + 楼栋单元:统一 filled 块,小间距堆叠 */}
           <Box sx={fieldGroupSx}>
-            <TextField value={reg.username} onChange={setRegField('username')} label="用户名（4-20位字母或数字）" fullWidth variant="filled" autoComplete="username" sx={sheetFieldSx} />
+            <TextField value={reg.username} onChange={setRegField('username')} label="用户名（登录用，不可重复）" fullWidth variant="filled" autoComplete="username" sx={sheetFieldSx} />
+            <TextField value={reg.nickname} onChange={setRegField('nickname')} label="昵称（对外展示，可稍后修改）" fullWidth variant="filled" autoComplete="nickname" sx={sheetFieldSx} />
             <TextField type="password" value={reg.password} onChange={setRegField('password')} label="密码（至少8位）" fullWidth variant="filled" autoComplete="new-password" sx={sheetFieldSx} />
             <TextField type="password" value={reg.confirm} onChange={setRegField('confirm')} label="确认密码" fullWidth variant="filled" autoComplete="new-password" sx={sheetFieldSx} />
-            {/* 位置:点击打开期数/楼栋/单元级联选择弹窗 */}
-            <Box
-              onClick={() => setRegionOpen(true)}
-              sx={{
-                bgcolor: WARM_FILL, borderRadius: '10px', height: 56,
-                px: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                cursor: 'pointer', '&:active': { bgcolor: WARM_FILL_HOVER },
-              }}
-            >
-              <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                <Typography sx={{ fontSize: 11, color: '#9CA3AF', lineHeight: 1.2 }}>所在位置</Typography>
-                <Typography sx={{ fontSize: 16, color: regionText ? '#1C1C1E' : '#9CA3AF', mt: 0.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {regionText || '选择期数 / 楼栋 / 单元'}
-                </Typography>
-              </Box>
-              <ArrowForwardIcon sx={{ fontSize: 18, color: '#C7C7CC', flexShrink: 0, ml: 1 }} />
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <TextField
+                value={reg.building}
+                onChange={setRegDigits('building')}
+                label="楼栋（数字）"
+                placeholder="如 3"
+                inputMode="numeric"
+                fullWidth
+                variant="filled"
+                sx={sheetFieldSx}
+              />
+              <TextField
+                value={reg.unit}
+                onChange={setRegDigits('unit')}
+                label="房号（数字）"
+                placeholder="如 501"
+                inputMode="numeric"
+                fullWidth
+                variant="filled"
+                sx={sheetFieldSx}
+              />
             </Box>
           </Box>
 
-          {/* 底部:注册按钮 + 协议 */}
           <Box sx={{ mt: 'auto', pt: 2.5 }}>
-            <Button type="submit" disabled={regSubmitting || !reg.username.trim() || !reg.password} sx={sheetDarkBtn}>
+            <Button type="submit" disabled={regSubmitting || !reg.username.trim() || !reg.password} sx={sheetPrimaryBtn}>
               {regSubmitting ? '注册中...' : '注册'}
             </Button>
-            <Typography sx={{ fontSize: 11, color: '#C7C7CC', textAlign: 'center', mt: 1.5, lineHeight: 1.7 }}>
+            <Typography sx={{ fontSize: 11, color: 'var(--color-text-muted)', textAlign: 'center', mt: 1.5, lineHeight: 1.7 }}>
               注册即表示你同意
-              <Link href="#" underline="none" sx={{ color: WARM }} onClick={(e) => e.preventDefault()}>《用户协议》</Link>
+              <Box
+                component="button"
+                type="button"
+                onClick={() => openProtocol('用户协议')}
+                sx={{ ...footLinkSx, color: WARM, fontSize: 11, display: 'inline' }}
+              >
+                《用户协议》
+              </Box>
               和
-              <Link href="#" underline="none" sx={{ color: WARM }} onClick={(e) => e.preventDefault()}>《隐私政策》</Link>
+              <Box
+                component="button"
+                type="button"
+                onClick={() => openProtocol('隐私政策')}
+                sx={{ ...footLinkSx, color: WARM, fontSize: 11, display: 'inline' }}
+              >
+                《隐私政策》
+              </Box>
             </Typography>
           </Box>
         </Box>
       </BottomSheet>
 
-      {/* ===== 忘记密码：纯说明，无假提交 ===== */}
       <BottomSheet open={sheet === 'forgot'} onClose={closeSheet} title="忘记密码" heightVh={40}>
         <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-          <Typography sx={{ fontSize: 14, color: '#8E8E93', lineHeight: 1.7 }}>
+          <Typography sx={{ fontSize: 14, color: 'var(--color-text-muted)', lineHeight: 1.7 }}>
             暂不支持自助重置密码。请联系小区管理员核实身份后协助重置。
           </Typography>
           <Box sx={{ mt: 'auto', pt: 2.5 }}>
-            <Button onClick={closeSheet} sx={sheetDarkBtn}>我知道了</Button>
+            <Button onClick={closeSheet} sx={sheetPrimaryBtn}>我知道了</Button>
           </Box>
         </Box>
       </BottomSheet>
 
-      {/* ===== 微信登录弹窗 ===== */}
       <BottomSheet open={sheet === 'wechat'} onClose={closeSheet} title="微信登录" heightVh={44}>
         <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1.25, pt: 1 }}>
-            <Box sx={{ width: 64, height: 64, borderRadius: '16px', bgcolor: '#07C160', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 34 }}>
-              💬
+            <Box sx={{
+              width: 64, height: 64, borderRadius: '16px', bgcolor: '#07C160',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: '#fff', fontSize: 28, fontWeight: 700,
+            }}>
+              微
             </Box>
-            <Typography sx={{ fontSize: 13, color: '#8E8E93' }}>使用微信账号一键登录</Typography>
+            <Typography sx={{ fontSize: 13, color: 'var(--color-text-muted)' }}>使用微信账号一键登录</Typography>
           </Box>
           <Box sx={{ mt: 'auto', pt: 2 }}>
-            <Button onClick={WX_APPID ? handleWxLogin : closeSheet} sx={sheetDarkBtn}>
-              {WX_APPID ? '确认授权' : '微信登录暂未开放'}
-            </Button>
+            <Button onClick={handleWxLogin} sx={sheetPrimaryBtn}>确认授权</Button>
           </Box>
-        </Box>
-      </BottomSheet>
-
-      {/* ===== 位置级联选择弹窗(期数/楼栋/单元) ===== */}
-      <BottomSheet open={regionOpen} onClose={() => setRegionOpen(false)} title="选择所在位置" heightVh={60}>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-          {/* 期数 */}
-          <Box>
-            <Typography sx={{ fontSize: 13, color: '#8E8E93', mb: 1 }}>期数</Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {phases.map(p => (
-                <Chip
-                  key={p}
-                  label={p}
-                  onClick={() => setReg(r => ({ ...r, phase: p, building: '', unit: '' }))}
-                  sx={regChipSx(reg.phase === p)}
-                />
-              ))}
-            </Box>
-          </Box>
-
-          {/* 楼栋(选期数后出现) */}
-          {reg.phase && (
-            <Box>
-              <Typography sx={{ fontSize: 13, color: '#8E8E93', mb: 1 }}>楼栋</Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {Object.keys(community[reg.phase] || {}).map(b => (
-                  <Chip
-                    key={b}
-                    label={b}
-                    onClick={() => setReg(r => ({ ...r, building: b, unit: '' }))}
-                    sx={regChipSx(reg.building === b)}
-                  />
-                ))}
-              </Box>
-            </Box>
-          )}
-
-          {/* 单元(选楼栋后出现,选中即关闭) */}
-          {reg.phase && reg.building && (
-            <Box>
-              <Typography sx={{ fontSize: 13, color: '#8E8E93', mb: 1 }}>单元</Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {(community[reg.phase]?.[reg.building] || []).map(u => (
-                  <Chip
-                    key={u}
-                    label={u}
-                    onClick={() => { setReg(r => ({ ...r, unit: u })); setRegionOpen(false) }}
-                    sx={regChipSx(reg.unit === u)}
-                  />
-                ))}
-              </Box>
-            </Box>
-          )}
         </Box>
       </BottomSheet>
     </Box>

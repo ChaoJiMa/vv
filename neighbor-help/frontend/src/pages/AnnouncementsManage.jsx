@@ -86,9 +86,10 @@ export default function AnnouncementsManage() {
       <header style={{
         position: 'sticky', top: 0, zIndex: 20,
         display: 'flex', alignItems: 'center', gap: 8,
-        padding: '8px 12px', minHeight: 52,
+        padding: 'calc(8px + var(--safe-top)) 12px 8px', minHeight: 52,
         background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)',
         backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
         borderBottom: '1px solid var(--color-border)',
       }}>
         <button type="button" aria-label="返回" onClick={() => navigate('/profile')} style={iconBtn}>

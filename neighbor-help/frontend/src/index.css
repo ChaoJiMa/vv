@@ -18,14 +18,30 @@ body,
   min-height: 100%;
 }
 
+html {
+  background: var(--color-bg);
+  /* iOS Safari：配合 viewport-fit=cover，让 safe-area 生效 */
+  height: 100%;
+}
+
 body {
   margin: 0;
+  min-height: 100%;
+  min-height: 100svh;
   background: var(--color-bg);
   color: var(--color-text);
   font-family: system-ui, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  transition: background-color 0.35s ease, color 0.35s ease;
+}
+
+/* 主题切换：整页淡入淡出（配合 startViewTransition） */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.38s;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 #root {
@@ -36,7 +52,36 @@ body {
   box-sizing: border-box;
 }
 
+.nh-spin {
+  animation: nhSpin 0.7s linear infinite;
+}
+@keyframes nhSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* 列表骨架：暖色低对比，贴页面底，避免灰色块抢眼 */
+.nh-skeleton {
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-bg));
+  opacity: 0.42;
+  animation: nhSkeletonBreathe 1.6s ease-in-out infinite;
+}
+@keyframes nhSkeletonBreathe {
+  0%, 100% { opacity: 0.28; }
+  50% { opacity: 0.48; }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  body {
+    transition: none !important;
+  }
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
+  .nh-skeleton {
+    animation: none;
+    opacity: 0.36;
+  }
   *,
   *::before,
   *::after {

@@ -16,9 +16,14 @@ export default defineConfig({
     },
   },
   server: {
+    // 监听 0.0.0.0，同网段手机/其它设备可用本机 IP 访问
+    host: true,
+    port: 5173,
+    strictPort: true,
     proxy: {
-      '/api': 'http://localhost:8787',
-      '/auth': 'http://localhost:8787',
-    }
-  }
+      // 用 127.0.0.1，避免 Windows 上 localhost→::1 而 wrangler 只绑 IPv4 时代理 ECONNREFUSED
+      '/api': 'http://127.0.0.1:8787',
+      '/auth': 'http://127.0.0.1:8787',
+    },
+  },
 })

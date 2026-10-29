@@ -9,6 +9,7 @@ import ToastProvider from './components/ToastProvider'
 import ErrorBoundary from './components/ErrorBoundary'
 import RequireAuth from './components/RequireAuth'
 import Loading from './components/Loading'
+import ChromePad from './components/ChromePad'
 
 // 路由级代码分割:每个页面单独打包,首屏只加载当前路由
 const Home = lazy(() => import('./pages/Home'))
@@ -20,7 +21,7 @@ const Profile = lazy(() => import('./pages/Profile'))
 const Messages = lazy(() => import('./pages/Messages'))
 const Chat = lazy(() => import('./pages/Chat'))
 const NotFound = lazy(() => import('./pages/NotFound'))
-const AnnouncementsManage = lazy(() => import('./pages/AnnouncementsManage'))
+// 公告管理改走独立管理后台，H5 不再挂路由
 
 // 默认重试策略:只要后端给出了明确响应(error.code 存在),除 500 外一律不重试 ——
 // 4xx、限流(429)、业务错误(10xx/20xx)重试也是同样结果,徒增请求。
@@ -51,21 +52,21 @@ export default function App() {
           <QueryClientProvider client={queryClient}>
             <AuthProvider>
               <BrowserRouter>
+                <ChromePad />
                 <Suspense fallback={<Loading />}>
                   <Routes>
                     {/* 公开路由:无需登录即可浏览(帖子详情可看,但评论/响应等操作需登录) */}
                     <Route path="/login" element={<Login />} />
                     <Route path="/" element={<Home />} />
                     <Route path="/discover" element={<Discover />} />
-                    <Route path="/post/:id" element={<PostDetail />} />
+                    <Route path="/note/:id" element={<PostDetail />} />
                     {/* 受保护区:未登录一律跳 /login,登录后跳回原目标 */}
                     <Route element={<RequireAuth />}>
                       <Route path="/create" element={<CreatePost />} />
                       <Route path="/edit/:id" element={<CreatePost />} />
                       <Route path="/profile" element={<Profile />} />
-                      <Route path="/announcements/manage" element={<AnnouncementsManage />} />
                       <Route path="/messages" element={<Messages />} />
-                      <Route path="/messages/:peerId" element={<Chat />} />
+                      <Route path="/messages/:conversationId" element={<Chat />} />
                     </Route>
                     {/* 未知路径:落到 404(公开,不强制登录) */}
                     <Route path="*" element={<NotFound />} />

@@ -32,7 +32,7 @@ export default function ToastProvider() {
       role="status"
       style={{
         position: 'fixed',
-        top: 'calc(12px + env(safe-area-inset-top))',
+        top: 'calc(12px + var(--safe-top))',
         left: '50%',
         transform: 'translateX(-50%)',
         zIndex: 2000,

@@ -4,9 +4,14 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!-- 内容延伸进安全区；顶/底栏颜色由 theme-color（ThemeProvider 按主题动态更新）决定 -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#fff8f2" />
+    <meta name="theme-color" content="#1a1614" media="(prefers-color-scheme: dark)" />
     <!-- 预加载登录页标题字体子集,避免标题入场时字体换帧(FOUT)造成的卡顿 -->
     <link rel="preload" href="/fonts/kaixin-subset.woff2" as="font" type="font/woff2" crossorigin />
-    <title>frontend</title>
+    <title>邻里互助</title>
   </head>
   <body>
     <div id="root"></div>

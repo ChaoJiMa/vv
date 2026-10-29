@@ -5,10 +5,12 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { toast } from '../toast'
-import { downscaleImage, safeParse } from '../utils/image'
+import { downscaleImage, normalizeImages } from '../utils/image'
 import BottomNav from '../components/BottomNav'
 import { AppShell, Button, Field, Sheet } from '../components/ui'
-import { ImageIcon, MenuIcon } from '../components/icons'
+import { ImageIcon } from '../components/icons'
+import TypePickSheet from '../components/TypePickSheet'
+import { formatResidence } from '../utils/residence'
 
 const MAX_IMAGES = 6
 const TITLE_PLACEHOLDER = {
@@ -17,7 +19,6 @@ const TITLE_PLACEHOLDER = {
   lost: '输入物品名称',
   group: '输入拼单主题',
 }
-const ENTRY_COLORS = ['mint', 'sky', 'cream', 'primary']
 
 export default function CreatePost() {
   const navigate = useNavigate()
@@ -28,10 +29,11 @@ export default function CreatePost() {
   const isEdit = !!id
 
   const [type, setType] = useState(() => (!id && location.state?.type) || '')
+  const [typePickOpen, setTypePickOpen] = useState(() => !id && !location.state?.type)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [contact, setContact] = useState('')
-  const [postLocation, setPostLocation] = useState(() => [user?.building, user?.unit].filter(Boolean).join(' '))
+  const [postLocation, setPostLocation] = useState(() => formatResidence(user?.building, user?.unit))
   const [moreOpen, setMoreOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [images, setImages] = useState([])
@@ -56,9 +58,19 @@ export default function CreatePost() {
   useEffect(() => {
     if (isEdit && editing && editing.status !== 'open') {
       toast.error('已完成的帖子不可编辑')
-      navigate(`/post/${id}`, { replace: true })
+      navigate(`/note/${id}`, { replace: true })
     }
   }, [isEdit, editing, id, navigate])
+
+  // 同路由再次带 state.type 进入时同步分类（如底栏 + 重选）
+  const [navKey, setNavKey] = useState(location.key)
+  if (!isEdit && location.key !== navKey) {
+    setNavKey(location.key)
+    if (location.state?.type) {
+      setType(location.state.type)
+      setTypePickOpen(false)
+    }
+  }
 
   const [filledId, setFilledId] = useState(null)
   const [contactUnavailable, setContactUnavailable] = useState(false)
@@ -77,7 +89,7 @@ export default function CreatePost() {
       if (editing.contact) setMoreOpen(true)
     }
     setPostLocation(editing.location || '')
-    setImages(safeParse(editing.images))
+    setImages(normalizeImages(editing.images, editing.cover))
     setFilledId(id)
   }
 
@@ -95,7 +107,7 @@ export default function CreatePost() {
       qc.invalidateQueries({ queryKey: ['myPosts'] })
       if (isEdit) qc.invalidateQueries({ queryKey: ['post', id] })
       toast.success(isEdit ? '已保存' : '发布成功')
-      navigate(`/post/${data.id}`, { replace: true })
+      navigate(`/note/${data.id}`, { replace: true })
     },
     onError: (e) => toast.error(e.message || (isEdit ? '保存失败' : '发布失败')),
   })
@@ -114,9 +126,15 @@ export default function CreatePost() {
   const canSubmit = type && title.trim() && content.trim() && uploading === 0
   const hasDraft = !isEdit && (type || title.trim() || content.trim() || contact.trim() || images.length)
 
+  const leaveCreate = () => {
+    // 新建发布统一回首页，避免登录后进发布再「返回」落到登录页
+    if (isEdit) navigate(-1)
+    else navigate('/', { replace: true })
+  }
+
   const handleCancel = () => {
     if (hasDraft) setCancelOpen(true)
-    else navigate(-1)
+    else leaveCreate()
   }
 
   const handleSubmit = () => {
@@ -135,9 +153,17 @@ export default function CreatePost() {
     setUploading(n => n + todo.length)
     for (const f of todo) {
       try {
-        const compressed = await downscaleImage(f)
-        const { key } = await api.uploadImage(compressed)
-        setImages(prev => [...prev, key])
+        const { file, width, height } = await downscaleImage(f)
+        const data = await api.uploadImage(file, { width, height })
+        const row = { key: data.key }
+        if (data.width > 0 && data.height > 0) {
+          row.width = data.width
+          row.height = data.height
+        } else if (width > 0 && height > 0) {
+          row.width = width
+          row.height = height
+        }
+        setImages(prev => [...prev, row])
       } catch (err) {
         toast.error(err.message || '图片上传失败')
       } finally {
@@ -146,16 +172,18 @@ export default function CreatePost() {
     }
   }
 
-  const removeImage = (key) => setImages(prev => prev.filter(k => k !== key))
+  const removeImage = (key) => setImages(prev => prev.filter(img => img.key !== key))
+  const typeLabel = menus.find(m => m.value === type)?.label || '选择分类'
 
   return (
     <AppShell withNav>
       <header style={{
         position: 'sticky', top: 0, zIndex: 20,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '10px 12px', minHeight: 52,
+        padding: 'calc(10px + var(--safe-top)) 12px 10px', minHeight: 52,
         background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)',
         backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
         borderBottom: '1px solid var(--color-border)',
       }}>
         <button type="button" onClick={handleCancel} style={ghostLink}>取消</button>
@@ -172,32 +200,23 @@ export default function CreatePost() {
       </header>
 
       <div style={{ padding: 16 }}>
-        <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--color-text-muted)', fontWeight: 600 }}>选择分类</p>
-        {errors.type ? <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--color-danger)' }}>{errors.type}</p> : null}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
-          {menus.map((t, i) => {
-            const active = type === t.value
-            const tint = ENTRY_COLORS[i % ENTRY_COLORS.length]
-            const bg = tint === 'primary' ? 'var(--color-bg-accent)' : `var(--color-accent-${tint})`
-            return (
-              <button
-                key={t.value}
-                type="button"
-                onClick={() => { setType(t.value); setErrors(e => ({ ...e, type: undefined })) }}
-                style={{
-                  textAlign: 'left', padding: 14, borderRadius: 16, cursor: 'pointer',
-                  border: active ? '2px solid var(--color-primary)' : '1.5px solid var(--color-border)',
-                  background: active ? 'color-mix(in srgb, var(--color-primary) 10%, var(--color-surface))' : bg,
-                  color: 'var(--color-text)', minHeight: 88,
-                }}
-              >
-                <div style={{ color: active ? 'var(--color-primary)' : 'var(--color-text-muted)' }}><MenuIcon type={t.value} size={24} /></div>
-                <div style={{ fontSize: 14, fontWeight: 700, marginTop: 6 }}>{t.label}</div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>{t.desc}</div>
-              </button>
-            )
-          })}
-        </div>
+        <button
+          type="button"
+          onClick={() => setTypePickOpen(true)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+            marginBottom: 14, padding: '12px 14px', borderRadius: 14, cursor: 'pointer',
+            border: errors.type ? '1.5px solid var(--color-danger)' : '1.5px solid var(--color-border)',
+            background: 'var(--color-surface)', color: 'var(--color-text)',
+          }}
+        >
+          <span style={{ flex: 1, textAlign: 'left', fontSize: 14, fontWeight: 700 }}>
+            {type ? typeLabel : '选择分类'}
+          </span>
+          <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>更换</span>
+          <ExpandMoreIcon sx={{ fontSize: 20, color: 'var(--color-text-muted)' }} />
+        </button>
+        {errors.type ? <p style={{ margin: '-6px 0 12px', fontSize: 12, color: 'var(--color-danger)' }}>{errors.type}</p> : null}
 
         <div ref={titleRef}>
           <Field
@@ -232,13 +251,13 @@ export default function CreatePost() {
           onChange={handlePickImages}
         />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 12 }}>
-          {images.map(key => (
-            <div key={key} style={{ position: 'relative', paddingTop: '100%', borderRadius: 12, overflow: 'hidden', background: 'var(--color-bg-accent)' }}>
-              <img src={api.imgUrl(key)} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+          {images.map(img => (
+            <div key={img.key} style={{ position: 'relative', paddingTop: '100%', borderRadius: 12, overflow: 'hidden', background: 'var(--color-bg-accent)' }}>
+              <img src={api.imgUrl(img.key)} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
               <button
                 type="button"
                 aria-label="删除图片"
-                onClick={() => removeImage(key)}
+                onClick={() => removeImage(img.key)}
                 style={{
                   position: 'absolute', top: 4, right: 4, width: 24, height: 24, borderRadius: 12,
                   border: 'none', background: 'rgba(0,0,0,0.55)', color: '#fff', cursor: 'pointer', fontSize: 14,
@@ -305,15 +324,30 @@ export default function CreatePost() {
         </p>
       </div>
 
-      <Sheet open={cancelOpen} onClose={() => setCancelOpen(false)} title="放弃这次发布?" heightVh={30}>
+      <Sheet open={cancelOpen} onClose={() => setCancelOpen(false)} title="放弃这次发布?">
         <p style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--color-text-muted)' }}>
           你填写的内容尚未发布,离开将不会保留。
         </p>
         <div style={{ display: 'flex', gap: 10 }}>
           <Button type="button" variant="secondary" style={{ flex: 1 }} onClick={() => setCancelOpen(false)}>继续编辑</Button>
-          <Button type="button" style={{ flex: 1, background: 'var(--color-danger)' }} onClick={() => navigate(-1)}>放弃</Button>
+          <Button type="button" style={{ flex: 1, background: 'var(--color-danger)' }} onClick={leaveCreate}>放弃</Button>
         </div>
       </Sheet>
+
+      <TypePickSheet
+        open={typePickOpen}
+        onClose={() => {
+          setTypePickOpen(false)
+          if (!type && !isEdit) leaveCreate()
+        }}
+        value={type}
+        title={type ? '更换分类' : '选择分类'}
+        onPick={(v) => {
+          setType(v)
+          setErrors(e => ({ ...e, type: undefined }))
+          setTypePickOpen(false)
+        }}
+      />
 
       <BottomNav />
     </AppShell>

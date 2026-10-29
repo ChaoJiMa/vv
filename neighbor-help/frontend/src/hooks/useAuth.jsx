@@ -3,6 +3,15 @@ import { api } from '../api'
 
 const AuthContext = createContext(null)
 
+// StrictMode 双挂载时复用同一次 getMe，避免开发态双打 /api/me/get
+let meInflight = null
+function fetchMeShared() {
+  if (!meInflight) {
+    meInflight = api.getMe().finally(() => { meInflight = null })
+  }
+  return meInflight
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   // 仅当本地有 token 时才需要异步恢复登录态而进入 loading;无 token 时初始即就绪,
@@ -11,9 +20,13 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const token = localStorage.getItem('token')
-    if (token) {
-      api.getMe().then(setUser).catch(() => api.clearToken()).finally(() => setLoading(false))
-    }
+    if (!token) return undefined
+    let cancelled = false
+    fetchMeShared()
+      .then((u) => { if (!cancelled) setUser(u) })
+      .catch(() => { if (!cancelled) api.clearToken() })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [])
 
   const login = (token, userData) => {

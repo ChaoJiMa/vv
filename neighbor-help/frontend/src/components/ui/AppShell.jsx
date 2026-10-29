@@ -10,7 +10,7 @@ export default function AppShell({ children, withNav = false, className = '', st
         background: 'var(--color-bg)',
         color: 'var(--color-text)',
         boxSizing: 'border-box',
-        paddingBottom: withNav ? 'var(--nav-height)' : undefined,
+        paddingBottom: withNav ? 'var(--nav-height-safe)' : undefined,
         textAlign: 'left',
         ...style,
       }}

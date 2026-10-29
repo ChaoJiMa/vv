@@ -17,6 +17,12 @@
   --radius-card: 20px;
   --radius-btn: 14px;
   --nav-height: 72px;
+  /* 含 iOS Home 指示条：底栏总占位 / 页面底部留白 */
+  --nav-height-safe: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px));
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* 与 ThemeProvider syncBrowserChrome 一致，供底栏/Safari 采样 */
+  --chrome-color: #fff8f2;
   --font-display: "KaiXinTi", system-ui, sans-serif;
   --shadow-card: 0 4px 16px rgba(236, 110, 51, 0.08);
   color-scheme: light;
@@ -32,6 +38,7 @@
   --color-bg: #1a1614;
   --color-bg-accent: #2a211c;
   --color-surface: #26201c;
+  --chrome-color: #1a1614;
   --color-text: #f5f2ef;
   --color-text-muted: #a89f97;
   --color-border: rgba(245, 242, 239, 0.12);

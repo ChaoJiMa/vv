@@ -8,15 +8,30 @@ import CloseIcon from '@mui/icons-material/Close'
 const WARM_FILL = 'var(--color-bg-accent)'
 const WARM_FILL_HOVER = 'var(--color-bg-accent)'
 
-// 居中底部抽屉:从底部滑入,圆角顶 + 拖拽手柄 + 标题 + 圆形关闭按钮。
-// 手柄区支持指针拖拽:按住下滑跟手移动,松手超过阈值关闭,否则回弹。
-// 全站统一弹窗样式(登录页、个人页共用)。
-export default function BottomSheet({ open, onClose, title, heightVh = 50, children }) {
+const ENTER_MS = 480
+const EXIT_MS = 300
+const EASE_ENTER = 'cubic-bezier(0.16, 1, 0.3, 1)'
+const EASE_EXIT = 'cubic-bezier(0.4, 0, 0.2, 1)'
+
+// 居中底部抽屉：高度随内容撑开；heightVh 保留兼容但不再固定高度（统一上限 90dvh）。
+export default function BottomSheet({ open, onClose, title, children }) {
   const [dragY, setDragY] = useState(0)
-  const [isDragging, setIsDragging] = useState(false) // 仅用于渲染期决定是否禁用过渡
+  const [isDragging, setIsDragging] = useState(false)
   const dragging = useRef(false)
   const startY = useRef(0)
   const curDy = useRef(0)
+
+  const resetDrag = () => {
+    setDragY(0)
+    curDy.current = 0
+    dragging.current = false
+    setIsDragging(false)
+  }
+
+  const handleClose = () => {
+    resetDrag()
+    onClose?.()
+  }
 
   const onPointerDown = (e) => {
     dragging.current = true
@@ -26,7 +41,7 @@ export default function BottomSheet({ open, onClose, title, heightVh = 50, child
   }
   const onPointerMove = (e) => {
     if (!dragging.current) return
-    const dy = Math.max(0, e.clientY - startY.current) // 只允许向下
+    const dy = Math.max(0, e.clientY - startY.current)
     curDy.current = dy
     setDragY(dy)
   }
@@ -34,8 +49,7 @@ export default function BottomSheet({ open, onClose, title, heightVh = 50, child
     if (!dragging.current) return
     dragging.current = false
     setIsDragging(false)
-    // 下滑超过 80px 视为关闭意图,否则回弹
-    if (curDy.current > 80) onClose()
+    if (curDy.current > 80) handleClose()
     else { setDragY(0); curDy.current = 0 }
   }
 
@@ -43,48 +57,48 @@ export default function BottomSheet({ open, onClose, title, heightVh = 50, child
     <Drawer
       anchor="bottom"
       open={open}
-      onClose={onClose}
-      // 进入用 ease-out-expo:起步快、长程平滑减速到停,无过冲回弹(最顺滑、不突兀);退出干脆
-      transitionDuration={{ enter: 450, exit: 240 }}
+      onClose={handleClose}
+      transitionDuration={{ enter: ENTER_MS, exit: EXIT_MS }}
       slotProps={{
         transition: {
           easing: {
-            enter: 'cubic-bezier(0.16, 1, 0.3, 1)',
-            exit: 'cubic-bezier(0.4, 0, 1, 1)',
+            enter: EASE_ENTER,
+            exit: EASE_EXIT,
           },
         },
         backdrop: {
-          // 遮罩降低黑度 + 轻微模糊,避免瞬间压黑的生硬感
           sx: {
-            bgcolor: 'rgba(0,0,0,0.32)',
-            backdropFilter: 'blur(2px)',
-            WebkitBackdropFilter: 'blur(2px)',
+            bgcolor: 'rgba(0,0,0,0.28)',
+            backdropFilter: 'blur(3px)',
+            WebkitBackdropFilter: 'blur(3px)',
+            transition: `opacity ${open ? ENTER_MS : EXIT_MS}ms ${open ? EASE_ENTER : EASE_EXIT} !important`,
           },
         },
         paper: {
           sx: {
             width: '100%', maxWidth: 480, mx: 'auto',
-            height: `${heightVh}dvh`,
+            height: 'auto',
+            maxHeight: '90dvh',
             borderRadius: '20px 20px 0 0',
             overflow: 'hidden',
             px: 3, pt: 0,
-            // 底部内边距并入 iOS 安全区,避免按钮被 Home 指示条遮挡
-            pb: 'calc(24px + env(safe-area-inset-bottom))',
+            pb: 'calc(24px + var(--safe-bottom))',
             display: 'flex', flexDirection: 'column',
             bgcolor: 'var(--color-surface)',
             color: 'var(--color-text)',
-            backdropFilter: 'blur(28px) saturate(180%)',
-            WebkitBackdropFilter: 'blur(28px) saturate(180%)',
             borderTop: '1px solid var(--color-border)',
-            boxShadow: '0 -8px 40px rgba(0,0,0,0.18)',
+            boxShadow: '0 -6px 28px rgba(0,0,0,0.12)',
             backgroundImage: 'none',
-            transform: dragY ? `translateY(${dragY}px)` : 'none',
-            transition: isDragging ? 'none' : 'transform 0.25s ease',
+            ...(dragY > 0 ? { transform: `translateY(${dragY}px) !important` } : {}),
+            transition: isDragging
+              ? 'none'
+              : dragY > 0
+                ? `transform 0.28s ${EASE_ENTER}`
+                : undefined,
           },
         },
       }}
     >
-      {/* 拖拽手柄(可按住下滑关闭) */}
       <Box
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -94,15 +108,26 @@ export default function BottomSheet({ open, onClose, title, heightVh = 50, child
       >
         <Box sx={{ width: 36, height: 4, borderRadius: 2, bgcolor: 'var(--color-border)' }} />
       </Box>
-      {/* 标题行 */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pt: 0.5, pb: 2.5, flexShrink: 0 }}>
         <Typography sx={{ fontSize: 17, fontWeight: 600, color: 'var(--color-text)', letterSpacing: '-0.01em' }}>{title}</Typography>
-        <IconButton onClick={onClose} sx={{ width: 28, height: 28, bgcolor: WARM_FILL, color: 'var(--color-text-muted)', '&:hover': { bgcolor: WARM_FILL_HOVER } }}>
+        <IconButton onClick={handleClose} sx={{ width: 28, height: 28, bgcolor: WARM_FILL, color: 'var(--color-text-muted)', '&:hover': { bgcolor: WARM_FILL_HOVER } }}>
           <CloseIcon sx={{ fontSize: 16 }} />
         </IconButton>
       </Box>
-      {/* 内容区:可滚动 */}
-      <Box sx={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>{children}</Box>
+      <Box sx={{
+        flex: '0 1 auto',
+        minHeight: 0,
+        overflowY: 'auto',
+        overscrollBehavior: 'contain',
+        scrollbarWidth: 'none',
+        msOverflowStyle: 'none',
+        '&::-webkit-scrollbar': { display: 'none' },
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+      >
+        {children}
+      </Box>
     </Drawer>
   )
 }

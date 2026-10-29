@@ -4,18 +4,40 @@ import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tansta
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { toast } from '../toast'
-import { safeParse } from '../utils/image'
+import { coverAspectRatio, imageKeys } from '../utils/image'
+import { resolveAvatarUrl } from '../utils/avatar'
+import { formatResidence } from '../utils/residence'
+import {
+  clampDetailAspect, detailCoverHeightPx, NO_IMAGE_ASPECT,
+} from '../utils/imageAspect'
 import {
   AppShell, Button, Field, IconBtn, Sheet, Sticker,
 } from '../components/ui'
 import {
-  BackIcon, CopyIcon, FlagIcon, MenuIcon, RefreshIcon,
+  BackIcon, CopyIcon, FlagIcon, HeartIcon, MenuSticker, RefreshIcon,
 } from '../components/icons'
+import {
+  formatRelativeTime, getTypeTheme, timeBadgeStyle, typePillStyle,
+} from '../utils/typeTheme'
 
 const RESPOND_LABEL = {
   help: '我要帮忙',
   idle: '我想要',
   lost: '这是我的',
+}
+
+function loadDetailAspect(url) {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve(clampDetailAspect((img.naturalHeight || 1) / (img.naturalWidth || 1)))
+    img.onerror = () => resolve(1)
+    img.src = url
+  })
+}
+
+function coverWidthPx() {
+  if (typeof window === 'undefined') return 390
+  return Math.min(window.innerWidth, 480)
 }
 
 export default function PostDetail() {
@@ -29,20 +51,36 @@ export default function PostDetail() {
   const [adoptAuto, setAdoptAuto] = useState(false)
   const [reportTarget, setReportTarget] = useState(null)
   const [viewerIdx, setViewerIdx] = useState(null)
+  const [coverIdx, setCoverIdx] = useState(0)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleteCommentId, setDeleteCommentId] = useState(null)
+  const [likeBusy, setLikeBusy] = useState(false)
+  const [authorMenuOpen, setAuthorMenuOpen] = useState(false)
+  const [asyncAspect, setAsyncAspect] = useState(null)
+  const [asyncThumb, setAsyncThumb] = useState(null)
+  /** { commentId, nickname } 底栏回复模式 */
+  const [replyTo, setReplyTo] = useState(null)
+  /** commentId -> { list, page, hasMore, loading, expanded } */
+  const [replyExpand, setReplyExpand] = useState({})
+  const [deleteReplyId, setDeleteReplyId] = useState(null)
+  const coverScrollRef = useRef(null)
+  const commentInputRef = useRef(null)
 
-  const { data: menus = [] } = useQuery({
-    queryKey: ['menus'],
-    queryFn: () => api.getMenus(),
-    staleTime: 5 * 60 * 1000,
-  })
-  const menuMap = Object.fromEntries(menus.map(m => [m.value, m]))
-
-  const { data: post, isLoading, isError, refetch } = useQuery({
+  const { data: post, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ['post', id],
-    queryFn: () => api.getPost(id),
+    queryFn: async () => {
+      const data = await api.getPost(id)
+      // 详情已带首页评论：写入 comments 缓存，避免再打 /posts/comments?page=1
+      if (data?.comments) {
+        qc.setQueryData(['comments', id], {
+          pages: [data.comments],
+          pageParams: [1],
+        })
+      }
+      return data
+    },
   })
+  const isRefreshing = isFetching && !isLoading
 
   const {
     data: commentData, fetchNextPage, hasNextPage, isFetchingNextPage, refetch: refetchComments,
@@ -51,24 +89,72 @@ export default function PostDetail() {
     queryFn: ({ pageParam }) => api.getComments(id, pageParam),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
+    // 等详情写入首页后再启用；首页走缓存，仅翻页打 comments
+    enabled: !!post,
+    staleTime: 60 * 1000,
   })
   const comments = commentData?.pages.flatMap(p => p.list) ?? []
-  const commentTotal = commentData?.pages?.[0]?.total ?? post?.comment_count ?? 0
+  // 总数含二级回复（以后端 stats 为准）
+  const commentTotal = post?.stats?.commentCount
+    ?? post?.comment_count
+    ?? commentData?.pages?.[0]?.total
+    ?? post?.comments?.total
+    ?? 0
+
+  const postThumb = post ? (imageKeys(post.images, post.cover)[0] || null) : null
+  const knownAspect = post ? coverAspectRatio(post) : null
+  if (postThumb !== asyncThumb) {
+    setAsyncThumb(postThumb)
+    setAsyncAspect(null)
+  }
+  useEffect(() => {
+    if (!postThumb || knownAspect != null) return undefined
+    let cancelled = false
+    loadDetailAspect(api.imgUrl(postThumb)).then((aspect) => {
+      if (!cancelled) setAsyncAspect(aspect)
+    })
+    return () => { cancelled = true }
+  }, [postThumb, knownAspect])
+
+  const coverAspect = !postThumb
+    ? NO_IMAGE_ASPECT
+    : (knownAspect != null ? knownAspect : (asyncAspect ?? 1))
+  const coverH = detailCoverHeightPx({ aspect: coverAspect, widthPx: coverWidthPx() })
+
+  const refreshComments = () => {
+    qc.invalidateQueries({ queryKey: ['comments', id] })
+    qc.invalidateQueries({ queryKey: ['post', id] })
+    setReplyExpand({})
+  }
 
   const commentMutation = useMutation({
-    mutationFn: (text) => api.addComment(id, text),
+    mutationFn: (text) => (
+      replyTo
+        ? api.addCommentReply(replyTo.commentId, text)
+        : api.addComment(id, text)
+    ),
     onSuccess: () => {
       setComment('')
-      qc.invalidateQueries({ queryKey: ['comments', id] })
-      qc.invalidateQueries({ queryKey: ['post', id] })
+      setReplyTo(null)
+      refreshComments()
     },
     onError: (e) => toast.error(e.message || '发送失败'),
+  })
+
+  const deleteReplyMutation = useMutation({
+    mutationFn: (replyId) => api.deleteCommentReply(replyId),
+    onSuccess: () => {
+      setDeleteReplyId(null)
+      refreshComments()
+    },
+    onError: (e) => toast.error(e.message || '删除失败'),
   })
 
   const closeMutation = useMutation({
     mutationFn: (helpers) => api.closePost(id, helpers),
     onSuccess: () => {
       setAdoptOpen(false)
+      setAuthorMenuOpen(false)
       toast.success('已完成')
       qc.invalidateQueries({ queryKey: ['post', id] })
       qc.invalidateQueries({ queryKey: ['myPosts'] })
@@ -89,30 +175,47 @@ export default function PostDetail() {
     onError: (e) => toast.error(e.message || '删除失败'),
   })
 
+  const openConversation = async (authorUserId) => {
+    const peer = authorUserId || post?.author?.id || post?.user_id
+    if (!peer) {
+      toast.error('无法私信')
+      return
+    }
+    try {
+      const data = await api.ensureConversation(peer, id)
+      navigate(`/messages/${data.conversationId}`)
+    } catch (e) {
+      toast.error(e.message || '打开会话失败')
+    }
+  }
+
   const respondMutation = useMutation({
-    mutationFn: () => api.respondPost(id),
-    onSuccess: () => {
+    mutationFn: async () => {
+      await api.respondPost(id)
+      const peer = post.author?.id || post.user_id
+      try {
+        const data = await api.ensureConversation(peer, id)
+        return { conversationId: data.conversationId }
+      } catch (e) {
+        return { ensureError: e }
+      }
+    },
+    onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['post', id] })
-      navigate(`/messages/${post.user_id}`, { state: { postId: id } })
+      if (result?.conversationId) {
+        navigate(`/messages/${result.conversationId}`)
+        return
+      }
+      toast.error(result?.ensureError?.message || '已响应，打开私信失败，请再点「私信」')
     },
     onError: (e) => toast.error(e.message || '响应失败'),
-  })
-
-  const unrespondMutation = useMutation({
-    mutationFn: () => api.unrespondPost(id),
-    onSuccess: () => {
-      toast.success('已取消响应')
-      qc.invalidateQueries({ queryKey: ['post', id] })
-    },
-    onError: (e) => toast.error(e.message || '取消失败'),
   })
 
   const deleteCommentMutation = useMutation({
     mutationFn: (commentId) => api.deleteComment(commentId),
     onSuccess: () => {
       setDeleteCommentId(null)
-      qc.invalidateQueries({ queryKey: ['comments', id] })
-      qc.invalidateQueries({ queryKey: ['post', id] })
+      refreshComments()
     },
     onError: (e) => toast.error(e.message || '删除失败'),
   })
@@ -157,11 +260,24 @@ export default function PostDetail() {
     )
   }
 
-  const menu = menuMap[post.type]
-  const postImages = safeParse(post.images)
+  const postImages = imageKeys(post.images, post.cover)
+  const theme = getTypeTheme(post.type)
+  const timeLabel = formatRelativeTime(post.createdAt ?? post.created_at)
+  const closed = post.status === 'closed'
+  const authorId = post.author?.id || post.user_id
+  const nickname = (post.author?.nickname || post.nickname || '').trim() || '邻居'
+  const avatarSrc = resolveAvatarUrl(post.author?.avatar ?? post.avatar)
+  const building = post.author?.building ?? post.building
+  const unit = post.author?.unit ?? post.unit
+  const liked = !!(post.viewer?.liked ?? post.myLiked ?? post.my_liked)
+  const likeCount = Number(post.stats?.likeCount ?? post.like_count) || 0
+  const responded = !!(post.viewer?.responded ?? post.myResponded)
+  const isAuthor = !!(user && user.id === authorId)
+  const locLine = formatResidence(building, unit)
+  const initial = nickname === '邻居' ? '邻' : (nickname[0] || '邻')
 
   if (!adoptAuto && location.state?.openAdopt) {
-    if (user && user.id === post.user_id && post.status === 'open') setAdoptOpen(true)
+    if (user && user.id === authorId && post.status === 'open') setAdoptOpen(true)
     setAdoptAuto(true)
   }
 
@@ -175,150 +291,395 @@ export default function PostDetail() {
     }
   }
 
-  return (
-    <AppShell style={{ paddingBottom: 88 }}>
-      <header style={headerBar}>
-        <IconBtn ariaLabel="返回" onClick={() => navigate(-1)}><BackIcon size={22} /></IconBtn>
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <MenuIcon type={post.type} size={18} style={{ color: 'var(--color-primary)' }} />
-          <div style={{ fontWeight: 700, fontSize: 16 }}>{menu?.label || post.type}</div>
-        </div>
-        {post.status === 'closed' && <Sticker active={false} color="cream" style={{ minHeight: 28, padding: '4px 10px', pointerEvents: 'none' }}>已完成</Sticker>}
-        <button type="button" onClick={() => { refetch(); refetchComments() }} style={{ ...linkBtn, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          <RefreshIcon size={16} /> 刷新
-        </button>
-      </header>
+  const onCoverScroll = () => {
+    const el = coverScrollRef.current
+    if (!el || !postImages.length) return
+    const i = Math.round(el.scrollLeft / el.clientWidth)
+    if (i !== coverIdx) setCoverIdx(i)
+  }
 
-      {postImages.length > 0 ? (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: postImages.length === 1 ? '1fr' : 'repeat(3, 1fr)',
-          gap: 8, padding: '12px 16px 0',
-        }}>
-          {postImages.map((key, i) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setViewerIdx(i)}
+  const toggleLike = async () => {
+    if (!user) {
+      navigate('/login', { state: { from: location } })
+      return
+    }
+    if (likeBusy) return
+    setLikeBusy(true)
+    try {
+      const data = liked ? await api.unlikePost(id) : await api.likePost(id)
+      const nextLiked = !!data.liked
+      const nextCount = Number(data.likeCount ?? data.like_count) || 0
+      qc.setQueryData(['post', id], (old) => old ? {
+        ...old,
+        myLiked: nextLiked,
+        my_liked: nextLiked,
+        like_count: nextCount,
+        viewer: { ...(old.viewer || {}), liked: nextLiked },
+        stats: { ...(old.stats || {}), likeCount: nextCount },
+      } : old)
+    } catch (e) {
+      toast.error(e.message || '操作失败')
+    } finally {
+      setLikeBusy(false)
+    }
+  }
+
+  const sendComment = () => {
+    if (!user) {
+      navigate('/login', { state: { from: location } })
+      return
+    }
+    const text = comment.trim()
+    if (!text || commentMutation.isPending) return
+    commentMutation.mutate(text)
+  }
+
+  const startReply = (c) => {
+    if (!user) {
+      navigate('/login', { state: { from: location } })
+      return
+    }
+    setReplyTo({ commentId: c.id, nickname: c.nickname || '邻居' })
+    commentInputRef.current?.focus()
+  }
+
+  const togglePin = async (c) => {
+    try {
+      if (c.pinned || c.pinnedAt || c.pinned_at) await api.unpinComment(c.id)
+      else await api.pinComment(c.id)
+      refreshComments()
+    } catch (e) {
+      toast.error(e.message || '操作失败')
+    }
+  }
+
+  const expandReplies = async (c) => {
+    const cur = replyExpand[c.id]
+    const nextPage = cur?.expanded ? (cur.page || 1) + 1 : 1
+    setReplyExpand((prev) => ({
+      ...prev,
+      [c.id]: { ...(prev[c.id] || {}), loading: true, expanded: true },
+    }))
+    try {
+      const data = await api.getCommentReplies(c.id, nextPage)
+      setReplyExpand((prev) => {
+        const prevList = nextPage === 1 ? [] : (prev[c.id]?.list || [])
+        const seen = new Set(prevList.map((r) => r.id))
+        const merged = [...prevList, ...(data.list || []).filter((r) => !seen.has(r.id))]
+        return {
+          ...prev,
+          [c.id]: {
+            list: merged,
+            page: data.page,
+            hasMore: data.hasMore,
+            loading: false,
+            expanded: true,
+            total: data.total,
+          },
+        }
+      })
+    } catch (e) {
+      toast.error(e.message || '加载失败')
+      setReplyExpand((prev) => ({
+        ...prev,
+        [c.id]: { ...(prev[c.id] || {}), loading: false },
+      }))
+    }
+  }
+
+  const visibleReplies = (c) => {
+    const ex = replyExpand[c.id]
+    if (ex?.expanded && ex.list) return ex.list
+    return c.replies?.list || []
+  }
+
+  const repliesHasMore = (c) => {
+    const ex = replyExpand[c.id]
+    if (ex?.expanded) return !!ex.hasMore
+    return !!(c.replies?.hasMore)
+  }
+
+  const repliesMoreCount = (c) => {
+    const total = c.replies?.total ?? 0
+    const shown = visibleReplies(c).length
+    return Math.max(0, total - shown)
+  }
+
+  const renderBottomPrimary = () => {
+    if (!user) {
+      return (
+        <Button type="button" style={barPrimaryBtn} onClick={() => navigate('/login', { state: { from: location } })}>
+          登录
+        </Button>
+      )
+    }
+    if (isAuthor) {
+      return (
+        <button
+          type="button"
+          aria-label="更多"
+          onClick={() => setAuthorMenuOpen(true)}
+          style={moreBtn}
+        >
+          ⋯
+        </button>
+      )
+    }
+    if (RESPOND_LABEL[post.type]) {
+      if (responded) {
+        return (
+          <Button
+            type="button"
+            style={barPrimaryBtn}
+            onClick={() => openConversation(authorId)}
+          >
+            私信
+          </Button>
+        )
+      }
+      return (
+        <Button
+          type="button"
+          style={barPrimaryBtn}
+          onClick={() => respondMutation.mutate()}
+          loading={respondMutation.isPending}
+          disabled={closed}
+        >
+          {RESPOND_LABEL[post.type]}
+        </Button>
+      )
+    }
+    return (
+      <Button
+        type="button"
+        variant="secondary"
+        style={barPrimaryBtn}
+        onClick={() => openConversation(authorId)}
+      >
+        私信 TA
+      </Button>
+    )
+  }
+
+  return (
+    <AppShell style={{ paddingBottom: 'calc(96px + var(--safe-bottom))' }}>
+      <div style={{ position: 'relative' }}>
+        <header style={overlayHeader}>
+          <IconBtn
+            ariaLabel="返回"
+            onClick={() => navigate(-1)}
+            style={{ background: 'rgba(0,0,0,.35)', color: '#fff' }}
+          >
+            <BackIcon size={22} />
+          </IconBtn>
+          <div style={{ flex: 1 }} />
+          <IconBtn
+            ariaLabel="刷新"
+            disabled={isRefreshing}
+            onClick={async () => {
+              const r = await refetch()
+              if (r.data?.comments) {
+                qc.setQueryData(['comments', id], {
+                  pages: [r.data.comments],
+                  pageParams: [1],
+                })
+              } else {
+                refetchComments()
+              }
+            }}
+            style={{ background: 'rgba(0,0,0,.35)', color: '#fff' }}
+          >
+            <RefreshIcon size={18} className={isRefreshing ? 'nh-spin' : undefined} />
+          </IconBtn>
+          {user && !isAuthor && (
+            <IconBtn
+              ariaLabel="举报"
+              onClick={() => setReportTarget({ type: 'post', id })}
+              style={{ background: 'rgba(0,0,0,.35)', color: '#fff', marginLeft: 6 }}
+            >
+              <FlagIcon size={18} />
+            </IconBtn>
+          )}
+        </header>
+
+        <div style={{ position: 'relative' }}>
+          {postImages.length > 0 ? (
+            <div style={{ position: 'relative', background: 'var(--color-bg-accent)' }}>
+              <div
+                ref={coverScrollRef}
+                onScroll={onCoverScroll}
+                style={{
+                  display: 'flex',
+                  overflowX: 'auto',
+                  scrollSnapType: 'x mandatory',
+                  WebkitOverflowScrolling: 'touch',
+                  scrollbarWidth: 'none',
+                }}
+                className="nh-detail-cover"
+              >
+                {postImages.map((key, i) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setViewerIdx(i)}
+                    style={{
+                      flex: '0 0 100%',
+                      scrollSnapAlign: 'start',
+                      border: 'none',
+                      padding: 0,
+                      height: coverH,
+                      cursor: 'pointer',
+                      background: 'transparent',
+                    }}
+                  >
+                    <img
+                      src={api.imgUrl(key)}
+                      alt=""
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                    />
+                  </button>
+                ))}
+              </div>
+              {postImages.length > 1 && (
+                <div style={{
+                  position: 'absolute', left: 0, right: 0, bottom: 40,
+                  display: 'flex', justifyContent: 'center', gap: 6, pointerEvents: 'none',
+                }}>
+                  {postImages.map((_, i) => (
+                    <span
+                      key={i}
+                      style={{
+                        width: i === coverIdx ? 14 : 6, height: 6, borderRadius: 999,
+                        background: i === coverIdx ? '#fff' : 'rgba(255,255,255,.5)',
+                        transition: 'width .15s ease',
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div
               style={{
-                position: 'relative', paddingTop: postImages.length === 1 ? '56%' : '100%',
-                border: 'none', borderRadius: 16, overflow: 'hidden', cursor: 'pointer',
-                background: 'var(--color-bg-accent)', padding: 0,
+                height: coverH,
+                background: theme.cover,
+                position: 'relative',
+                overflow: 'hidden',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
-              <img src={api.imgUrl(key)} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div style={{
-          margin: '12px 16px 0', padding: 28, borderRadius: 'var(--radius-card)',
-          background: 'var(--color-bg-accent)', display: 'flex', justifyContent: 'center', color: 'var(--color-primary)',
-        }}>
-          <MenuIcon type={post.type} size={48} />
-        </div>
-      )}
+              <span style={{
+                position: 'absolute', top: -30, right: -20, width: 140, height: 140,
+                borderRadius: '50%', background: 'rgba(255,255,255,.28)',
+              }} />
+              <span style={{
+                position: 'absolute', bottom: -40, left: 10, width: 110, height: 110,
+                borderRadius: '50%', background: 'rgba(255,255,255,.2)',
+              }} />
+              <MenuSticker type={post.type} size={72} style={{ position: 'relative', zIndex: 1 }} />
+            </div>
+          )}
 
-      <section style={{ padding: '16px 16px 12px' }}>
-        {menu?.label && (
-          <Sticker active={false} color="cream" style={{ minHeight: 28, padding: '4px 10px', marginBottom: 10, pointerEvents: 'none' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <MenuIcon type={post.type} size={14} />
-              {menu.label}
+          {closed ? (
+            <div
+              aria-hidden
+              style={{
+                position: 'absolute', inset: 0,
+                background: 'color-mix(in srgb, var(--color-bg) 35%, transparent)',
+                pointerEvents: 'none',
+              }}
+            />
+          ) : null}
+
+          <div style={{
+            position: 'absolute', left: 14, bottom: 14, zIndex: 2,
+            display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap',
+          }}>
+            <span style={typePillStyle(theme)}>{theme.label}</span>
+            {closed ? (
+              <span style={{ ...typePillStyle(theme), background: 'rgba(80,80,80,.75)', color: '#fff' }}>已结束</span>
+            ) : null}
+          </div>
+          {timeLabel ? (
+            <span style={{ position: 'absolute', right: 14, bottom: 14, zIndex: 2, ...timeBadgeStyle }}>
+              {timeLabel}
             </span>
-          </Sticker>
-        )}
+          ) : null}
+        </div>
+      </div>
+
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '14px 16px 0',
+      }}>
+        <span style={{
+          width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 14, fontWeight: 700, overflow: 'hidden',
+          background: theme.pillBg, color: theme.pillFg,
+        }}>
+          {avatarSrc ? (
+            <img src={avatarSrc} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : initial}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 14, fontWeight: 700, color: 'var(--color-text)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {nickname}
+          </div>
+          {locLine ? (
+            <div style={{
+              fontSize: 12, color: 'var(--color-text-muted)', marginTop: 2,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              {locLine}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <section style={{ padding: '12px 16px 14px' }}>
         <h1 style={{ margin: '0 0 10px', fontSize: 20, fontWeight: 800, lineHeight: 1.35 }}>{post.title}</h1>
         {post.content && (
-          <p style={{ margin: '0 0 14px', fontSize: 14, color: 'var(--color-text-muted)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{post.content}</p>
+          <p style={{ margin: '0 0 14px', fontSize: 15, color: 'var(--color-text-muted)', lineHeight: 1.75, whiteSpace: 'pre-wrap' }}>{post.content}</p>
         )}
 
-        {(post.location || post.contact || post.contactUnavailable || (user && user.id !== post.user_id && !post.myResponded && RESPOND_LABEL[post.type])) && (
+        {(post.location || post.contact || post.contactUnavailable || (user && !isAuthor && !responded && RESPOND_LABEL[post.type])) && (
           <div style={{
-            padding: 12, borderRadius: 14, marginBottom: 12,
-            background: 'var(--color-bg-accent)', border: '1px solid var(--color-border)',
+            padding: '12px 14px', borderRadius: 16, marginBottom: 14,
+            background: 'var(--color-bg-accent)',
           }}>
-            {post.location && <div style={metaLine}>📍 {post.location}</div>}
+            {post.location && <div style={metaLine}>地点 · {post.location}</div>}
             {post.contact && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ ...metaLine, flex: 1 }}>📞 {post.contact}</span>
-                <button type="button" onClick={copyContact} style={{ ...linkBtn, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: post.location ? 6 : 0 }}>
+                <span style={{ ...metaLine, flex: 1 }}>联系 · {post.contact}</span>
+                <button type="button" onClick={copyContact} style={{ ...linkBtn, display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--color-primary)' }}>
                   <CopyIcon size={14} /> 复制
                 </button>
               </div>
             )}
-            {post.contactUnavailable && <div style={{ ...metaLine, color: 'var(--color-danger)' }}>联系方式暂时无法显示</div>}
-            {user && user.id !== post.user_id && !post.myResponded && !post.contact && !post.contactUnavailable && RESPOND_LABEL[post.type] && post.status === 'open' && (
-              <div style={metaLine}>响应后可查看联系方式</div>
+            {post.contactUnavailable && <div style={{ ...metaLine, color: 'var(--color-danger)', marginTop: 4 }}>联系方式暂时无法显示</div>}
+            {user && !isAuthor && !responded && !post.contact && !post.contactUnavailable && RESPOND_LABEL[post.type] && post.status === 'open' && (
+              <div style={{ ...metaLine, marginTop: 4 }}>响应后可查看联系方式</div>
             )}
-            <div style={{ ...metaLine, marginTop: 4, fontSize: 11 }}>仅相关邻居可见联系方式</div>
+            <div style={{ ...metaLine, marginTop: 6, fontSize: 11, opacity: 0.85 }}>仅相关邻居可见联系方式</div>
           </div>
         )}
 
         {post.helpers?.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12, alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 4, alignItems: 'center' }}>
             <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>感谢:</span>
             {post.helpers.map(h => (
-              <Sticker key={h.helper_id} active={false} color="mint" style={{ minHeight: 28, padding: '4px 10px', pointerEvents: 'none', fontSize: 12 }}>
+              <Sticker key={h.helperId || h.helper_id} active={false} color="mint" style={{ minHeight: 28, padding: '4px 10px', pointerEvents: 'none', fontSize: 12 }}>
                 {h.thanked ? '🙏 ' : ''}{h.nickname || '邻居'}
               </Sticker>
             ))}
           </div>
         )}
-
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, fontSize: 12, color: 'var(--color-text-muted)' }}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {post.building || ''}{post.unit || ''}邻居 · {post.nickname}
-            </span>
-            {user && user.id !== post.user_id && (
-              <IconBtn ariaLabel="举报" onClick={() => setReportTarget({ type: 'post', id })} style={{ width: 32, height: 32, minWidth: 32, minHeight: 32, color: 'var(--color-text-muted)' }}>
-                <FlagIcon size={16} />
-              </IconBtn>
-            )}
-          </div>
-
-          {user && user.id === post.user_id && (
-            <div style={{ display: 'flex', gap: 6 }}>
-              {post.status === 'open' && (
-                <>
-                  <Button type="button" variant="secondary" style={smBtn} onClick={() => navigate(`/edit/${id}`)}>编辑</Button>
-                  <Button type="button" style={smBtn} onClick={() => setAdoptOpen(true)} disabled={closeMutation.isPending}>标记完成</Button>
-                </>
-              )}
-              <Button type="button" variant="ghost" style={{ ...smBtn, color: 'var(--color-danger)' }} onClick={() => setDeleteOpen(true)} disabled={deleteMutation.isPending}>删除</Button>
-            </div>
-          )}
-
-          {!user && (
-            <Button type="button" style={smBtn} onClick={() => navigate('/login', { state: { from: location } })}>登录后参与</Button>
-          )}
-
-          {user && user.id !== post.user_id && (
-            RESPOND_LABEL[post.type] ? (
-              post.myResponded ? (
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <Button type="button" variant="secondary" style={smBtn} onClick={() => navigate(`/messages/${post.user_id}`, { state: { postId: id } })}>私信</Button>
-                  {post.status === 'open' && (
-                    <Button type="button" variant="ghost" style={smBtn} onClick={() => unrespondMutation.mutate()} loading={unrespondMutation.isPending}>取消响应</Button>
-                  )}
-                </div>
-              ) : (
-                <Button
-                  type="button"
-                  style={smBtn}
-                  onClick={() => respondMutation.mutate()}
-                  loading={respondMutation.isPending}
-                  disabled={post.status === 'closed'}
-                >
-                  {RESPOND_LABEL[post.type]}
-                </Button>
-              )
-            ) : (
-              <Button type="button" variant="secondary" style={smBtn} onClick={() => navigate(`/messages/${post.user_id}`, { state: { postId: id } })}>私信 TA</Button>
-            )
-          )}
-        </div>
       </section>
 
       {RESPOND_LABEL[post.type] && post.responses?.length > 0 && (
@@ -326,31 +687,88 @@ export default function PostDetail() {
           <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 8 }}>{post.responses.length} 位邻居已响应</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {post.responses.map(r => (
-              <Sticker key={r.user_id} active={false} color="sky" style={{ minHeight: 28, padding: '4px 10px', pointerEvents: 'none', fontSize: 12 }}>
-                {r.nickname || '邻居'}{r.building ? ` · ${r.building}` : ''}
+              <Sticker key={r.userId || r.user_id} active={false} color="sky" style={{ minHeight: 28, padding: '4px 10px', pointerEvents: 'none', fontSize: 12 }}>
+                {r.nickname || '邻居'}{r.building ? ` · ${formatResidence(r.building, '')}` : ''}
               </Sticker>
             ))}
           </div>
         </section>
       )}
 
-      <section style={{ padding: '14px 16px 24px', borderTop: '1px solid var(--color-border)' }}>
-        <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 12 }}>共 {commentTotal} 条回复</div>
-        {comments.map(c => (
-          <div key={c.id} style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 12 }}>
-              <strong style={{ color: 'var(--color-text)' }}>{c.nickname}</strong>
-              <span style={{ color: 'var(--color-text-muted)' }}>{c.building || ''}</span>
-              {user && user.id === c.user_id && (
-                <button type="button" onClick={() => setDeleteCommentId(c.id)} style={{ ...linkBtn, marginLeft: 'auto', color: 'var(--color-danger)' }}>删除</button>
-              )}
-              {user && user.id !== c.user_id && (
-                <button type="button" onClick={() => setReportTarget({ type: 'comment', id: c.id })} style={{ ...linkBtn, marginLeft: 'auto' }}>举报</button>
-              )}
+      <section style={{ padding: '16px 16px 24px', borderTop: '1px solid color-mix(in srgb, var(--color-border) 70%, transparent)' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text)', marginBottom: 14 }}>
+          回复 · {commentTotal}
+        </div>
+        {comments.map(c => {
+          const pinned = !!(c.pinned || c.pinnedAt || c.pinned_at)
+          const replies = visibleReplies(c)
+          const more = repliesMoreCount(c)
+          const expanding = replyExpand[c.id]?.loading
+          return (
+            <div key={c.id} style={{ marginBottom: 18 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 12, flexWrap: 'wrap' }}>
+                <strong style={{ color: 'var(--color-text)' }}>{c.nickname}</strong>
+                <span style={{ color: 'var(--color-text-muted)' }}>{formatResidence(c.building, '')}</span>
+                {pinned ? (
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, color: 'var(--color-primary)',
+                    background: 'color-mix(in srgb, var(--color-primary) 12%, transparent)',
+                    borderRadius: 999, padding: '2px 7px',
+                  }}>
+                    置顶
+                  </span>
+                ) : null}
+                <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                  {isAuthor && (
+                    <button type="button" onClick={() => togglePin(c)} style={linkBtn}>
+                      {pinned ? '取消置顶' : '置顶'}
+                    </button>
+                  )}
+                  <button type="button" onClick={() => startReply(c)} style={{ ...linkBtn, color: 'var(--color-primary)' }}>回复</button>
+                  {user && user.id === c.user_id && (
+                    <button type="button" onClick={() => setDeleteCommentId(c.id)} style={{ ...linkBtn, color: 'var(--color-danger)' }}>删除</button>
+                  )}
+                  {user && user.id !== c.user_id && (
+                    <button type="button" onClick={() => setReportTarget({ type: 'comment', id: c.id })} style={linkBtn}>举报</button>
+                  )}
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: 14, color: 'var(--color-text-muted)', lineHeight: 1.55 }}>{c.content}</p>
+
+              {replies.length > 0 || repliesHasMore(c) ? (
+                <div style={{ marginTop: 10, marginLeft: 12, paddingLeft: 10, borderLeft: '2px solid var(--color-border)' }}>
+                  {replies.map((r) => (
+                    <div key={r.id} style={{ marginBottom: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 2 }}>
+                        <strong style={{ color: 'var(--color-text)' }}>{r.nickname}</strong>
+                        <span style={{ color: 'var(--color-text-muted)' }}>{formatResidence(r.building, '')}</span>
+                        <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4 }}>
+                          {user && user.id === (r.userId || r.user_id) && (
+                            <button type="button" onClick={() => setDeleteReplyId(r.id)} style={{ ...linkBtn, color: 'var(--color-danger)' }}>删除</button>
+                          )}
+                          {user && user.id !== (r.userId || r.user_id) && (
+                            <button type="button" onClick={() => setReportTarget({ type: 'reply', id: r.id })} style={linkBtn}>举报</button>
+                          )}
+                        </span>
+                      </div>
+                      <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-muted)', lineHeight: 1.5 }}>{r.content}</p>
+                    </div>
+                  ))}
+                  {repliesHasMore(c) ? (
+                    <button
+                      type="button"
+                      disabled={expanding}
+                      onClick={() => expandReplies(c)}
+                      style={{ ...linkBtn, color: 'var(--color-primary)', paddingLeft: 0 }}
+                    >
+                      {expanding ? '加载中…' : (more > 0 ? `还有 ${more} 条回复` : '加载更多回复')}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
-            <p style={{ margin: 0, fontSize: 14, color: 'var(--color-text-muted)', lineHeight: 1.55 }}>{c.content}</p>
-          </div>
-        ))}
+          )
+        })}
         {comments.length > 0 && (
           <div ref={sentinelRef} style={{ textAlign: 'center', padding: 8, color: 'var(--color-text-muted)', fontSize: 12 }}>
             {isFetchingNextPage ? '加载中…' : ''}
@@ -359,25 +777,73 @@ export default function PostDetail() {
       </section>
 
       <div style={composerBar}>
+        {replyTo ? (
+          <button
+            type="button"
+            onClick={() => setReplyTo(null)}
+            style={{
+              ...linkBtn,
+              flexShrink: 0,
+              maxWidth: 88,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              color: 'var(--color-primary)',
+            }}
+            title="取消回复"
+          >
+            取消
+          </button>
+        ) : null}
         <input
+          ref={commentInputRef}
           value={comment}
           onChange={e => setComment(e.target.value)}
-          placeholder={user ? '写下你的回复...' : '登录后才能回复'}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              sendComment()
+            }
+          }}
+          placeholder={
+            !user
+              ? '登录后才能回复'
+              : (replyTo ? `回复 @${replyTo.nickname}` : '说点什么…')
+          }
           disabled={!user}
           style={{
-            flex: 1, minHeight: 44, borderRadius: 999, border: '1.5px solid var(--color-border)',
-            background: 'var(--color-bg)', color: 'var(--color-text)', padding: '0 16px', fontSize: 14, outline: 'none',
+            flex: 1, minWidth: 0, minHeight: 40, borderRadius: 999, border: '1.5px solid var(--color-border)',
+            background: 'var(--color-bg)', color: 'var(--color-text)', padding: '0 14px', fontSize: 14, outline: 'none',
           }}
         />
-        <Button
+        {user && comment.trim() ? (
+          <Button
+            type="button"
+            onClick={sendComment}
+            loading={commentMutation.isPending}
+            style={{ borderRadius: 999, minWidth: 56, minHeight: 40, padding: '0 12px' }}
+          >
+            发送
+          </Button>
+        ) : null}
+        <button
           type="button"
-          onClick={() => user ? commentMutation.mutate(comment.trim()) : navigate('/login')}
-          loading={commentMutation.isPending}
-          disabled={user && !comment.trim()}
-          style={{ borderRadius: 999, minWidth: 72 }}
+          aria-label={liked ? '取消点赞' : '点赞'}
+          aria-pressed={liked}
+          disabled={likeBusy}
+          onClick={toggleLike}
+          style={{
+            border: 'none', background: 'transparent', cursor: 'pointer',
+            display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
+            gap: 0, padding: '2px 6px', minWidth: 40,
+            color: liked ? 'var(--color-primary)' : 'var(--color-text-muted)',
+            fontSize: 11, fontWeight: 600,
+          }}
         >
-          发送
-        </Button>
+          <HeartIcon size={20} filled={liked} />
+          {likeCount > 0 ? likeCount : '赞'}
+        </button>
+        {renderBottomPrimary()}
       </div>
 
       {adoptOpen && (
@@ -412,15 +878,57 @@ export default function PostDetail() {
         >
           <img src={api.imgUrl(postImages[viewerIdx])} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
           {postImages.length > 1 && (
-            <div style={{ position: 'absolute', top: 'calc(16px + env(safe-area-inset-top))', left: 0, right: 0, textAlign: 'center', color: '#fff', fontSize: 13 }}>
+            <div style={{ position: 'absolute', top: 'calc(16px + var(--safe-top))', left: 0, right: 0, textAlign: 'center', color: '#fff', fontSize: 13 }}>
               {viewerIdx + 1} / {postImages.length}
             </div>
           )}
-          <IconBtn ariaLabel="关闭" onClick={(e) => { e.stopPropagation(); setViewerIdx(null) }} style={{ position: 'absolute', top: 'calc(8px + env(safe-area-inset-top))', right: 8, color: '#fff' }}>
+          <IconBtn ariaLabel="关闭" onClick={(e) => { e.stopPropagation(); setViewerIdx(null) }} style={{ position: 'absolute', top: 'calc(8px + var(--safe-top))', right: 8, color: '#fff' }}>
             <BackIcon size={22} />
           </IconBtn>
         </div>
       )}
+
+      <Sheet open={authorMenuOpen} onClose={() => setAuthorMenuOpen(false)} title="管理帖子" heightVh={40}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {post.status === 'open' && (
+            <>
+              <Button
+                type="button"
+                variant="secondary"
+                style={{ width: '100%' }}
+                onClick={() => {
+                  setAuthorMenuOpen(false)
+                  navigate(`/edit/${id}`)
+                }}
+              >
+                编辑
+              </Button>
+              <Button
+                type="button"
+                style={{ width: '100%' }}
+                onClick={() => {
+                  setAuthorMenuOpen(false)
+                  setAdoptOpen(true)
+                }}
+                disabled={closeMutation.isPending}
+              >
+                标记完成
+              </Button>
+            </>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            style={{ width: '100%', color: 'var(--color-danger)' }}
+            onClick={() => {
+              setAuthorMenuOpen(false)
+              setDeleteOpen(true)
+            }}
+          >
+            删除
+          </Button>
+        </div>
+      </Sheet>
 
       <Sheet open={deleteOpen} onClose={() => setDeleteOpen(false)} title="确定删除这条帖子吗?" heightVh={28}>
         <p style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--color-text-muted)' }}>删除后不可恢复。</p>
@@ -431,7 +939,7 @@ export default function PostDetail() {
       </Sheet>
 
       <Sheet open={!!deleteCommentId} onClose={() => setDeleteCommentId(null)} title="删除这条评论?" heightVh={28}>
-        <p style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--color-text-muted)' }}>删除后不可恢复。</p>
+        <p style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--color-text-muted)' }}>删除后其下回复一并删除，且不可恢复。</p>
         <div style={{ display: 'flex', gap: 10 }}>
           <Button type="button" variant="secondary" style={{ flex: 1 }} onClick={() => setDeleteCommentId(null)}>取消</Button>
           <Button
@@ -444,6 +952,25 @@ export default function PostDetail() {
           </Button>
         </div>
       </Sheet>
+
+      <Sheet open={!!deleteReplyId} onClose={() => setDeleteReplyId(null)} title="删除这条回复?" heightVh={28}>
+        <p style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--color-text-muted)' }}>删除后不可恢复。</p>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Button type="button" variant="secondary" style={{ flex: 1 }} onClick={() => setDeleteReplyId(null)}>取消</Button>
+          <Button
+            type="button"
+            loading={deleteReplyMutation.isPending}
+            style={{ flex: 1, background: 'var(--color-danger)' }}
+            onClick={() => deleteReplyMutation.mutate(deleteReplyId)}
+          >
+            删除
+          </Button>
+        </div>
+      </Sheet>
+
+      <style>{`
+        .nh-detail-cover::-webkit-scrollbar { display: none; }
+      `}</style>
     </AppShell>
   )
 }
@@ -508,7 +1035,7 @@ function AdoptSheet({ open, onClose, postId, postType, onConfirm, submitting }) 
             <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0', borderBottom: '1px solid var(--color-border)' }}>
               <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600 }}>
                 {p.nickname}
-                {p.building ? <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', fontSize: 12 }}> · {p.building}</span> : null}
+                {p.building ? <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', fontSize: 12 }}> · {formatResidence(p.building, '')}</span> : null}
               </div>
               {adopted && (
                 <button type="button" onClick={() => toggleThank(p.id)} style={{ ...linkBtn, color: state === 'thank' ? 'var(--color-primary)' : 'var(--color-text-muted)' }}>
@@ -546,7 +1073,7 @@ function ReportSheet({ open, onClose, targetType, onSubmit, submitting }) {
   const [custom, setCustom] = useState('')
   const isOther = reason === '其他'
   const finalReason = isOther ? (custom.trim() || '其他') : reason
-  const label = targetType === 'post' ? '帖子' : '评论'
+  const label = targetType === 'post' ? '帖子' : targetType === 'reply' ? '回复' : '评论'
 
   return (
     <Sheet open={open} onClose={onClose} title={`举报${label}`} heightVh={52}>
@@ -575,24 +1102,41 @@ function ReportSheet({ open, onClose, targetType, onSubmit, submitting }) {
   )
 }
 
-const headerBar = {
-  position: 'sticky', top: 0, zIndex: 20,
+const overlayHeader = {
+  position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5,
   display: 'flex', alignItems: 'center', gap: 4,
-  padding: '6px 8px', minHeight: 52,
-  background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)',
-  backdropFilter: 'blur(10px)',
-  borderBottom: '1px solid var(--color-border)',
+  padding: 'calc(8px + var(--safe-top)) 10px 8px',
 }
 const composerBar = {
   position: 'fixed', left: '50%', transform: 'translateX(-50%)', bottom: 0,
-  width: '100%', maxWidth: 480, display: 'flex', gap: 8, alignItems: 'center',
-  padding: '10px 12px calc(10px + env(safe-area-inset-bottom))',
+  width: '100%', maxWidth: 480, display: 'flex', gap: 6, alignItems: 'center',
+  padding: '10px 12px calc(10px + var(--safe-bottom))',
   background: 'var(--color-surface)', borderTop: '1px solid var(--color-border)',
   boxSizing: 'border-box', zIndex: 40,
+}
+const barPrimaryBtn = {
+  borderRadius: 999,
+  minHeight: 40,
+  padding: '0 14px',
+  flexShrink: 0,
+  fontSize: 13,
+  whiteSpace: 'nowrap',
+}
+const moreBtn = {
+  border: 'none',
+  background: 'var(--color-bg-accent)',
+  borderRadius: 999,
+  width: 40,
+  height: 40,
+  cursor: 'pointer',
+  fontSize: 22,
+  lineHeight: 1,
+  color: 'var(--color-text)',
+  flexShrink: 0,
 }
 const linkBtn = {
   border: 'none', background: 'transparent', color: 'var(--color-text-muted)',
   fontSize: 13, fontWeight: 600, cursor: 'pointer', minHeight: 36, padding: '4px 8px',
 }
 const smBtn = { minHeight: 36, padding: '6px 12px', fontSize: 13 }
-const metaLine = { fontSize: 13, color: 'var(--color-text-muted)', lineHeight: 1.5 }
+const metaLine = { fontSize: 13, color: 'var(--color-text-muted)' }
