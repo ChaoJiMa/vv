@@ -1,0 +1,18 @@
+{
+  "description": "前期软团草稿备用；当前页面已改用gummy-neighbors-personas图集，本文件不参与运行。",
+  "status": "draft",
+  "default": "simple",
+  "size": [1254, 1254],
+  "backgroundSize": "200% 200%",
+  "backgroundPositions": {
+    "help": "0% 0%",
+    "idle": "100% 0%",
+    "lost": "-4% 100%",
+    "group": "94% 100%"
+  },
+  "sets": [
+    { "id": "simple", "label": "日常", "file": "gummy-neighbors-simple.webp" },
+    { "id": "cheerful", "label": "活力", "file": "gummy-neighbors-cheerful.webp" },
+    { "id": "mellow", "label": "温柔", "file": "gummy-neighbors-mellow.webp" }
+  ]
+}

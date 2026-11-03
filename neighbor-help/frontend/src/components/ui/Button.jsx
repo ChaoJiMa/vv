@@ -1,3 +1,4 @@
+/** 统一操作按钮：等待 / 禁用由全局状态样式使用固定灰色，业务仍只需传 loading 或 disabled。 */
 export default function Button({
   variant = 'primary',
   loading = false,
@@ -24,7 +25,7 @@ export default function Button({
     fontSize: 15,
     fontWeight: 600,
     cursor: busy ? 'not-allowed' : 'pointer',
-    opacity: busy ? 0.65 : 1,
+    opacity: 1,
     transition: `transform var(--motion-duration) ease, background var(--motion-duration) ease`,
     background: isPrimary
       ? 'var(--color-primary)'

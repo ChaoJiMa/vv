@@ -1,0 +1,20 @@
+Built-in image_gen style-transfer prompt, 2026-11-03.
+Reference: user-provided UI Notes screenshot only; earlier mascot drafts were not used as identity references.
+Final output: frontend/src/assets/gummy-neighbors-personas.webp
+
+Use case: style-transfer.
+Create a NEW sprite sheet of original little cartoon mascots, closely matching the VISUAL LANGUAGE of the tiny creatures in the provided app screenshot. The screenshot is STYLE REFERENCE ONLY. Output only the isolated character artwork, never phones, screenshots, UI cards, buttons, headings, logos or text.
+
+Most important: these must be TWELVE DIFFERENT simple, mischievous small creatures, NOT the same plump pear/blob repeated with different expressions. The reference creatures have compact rounded-triangle, narrow teardrop, slanted soft-quadrilateral and flattened puddle silhouettes, expressive asymmetrical oval eyes, tiny black mouths and very few thin black arm lines. Their charm comes from shape and eye attitude. Keep head and body as one simple form. Make them quirky, a little cheeky, sweet and endearing.
+
+Art direction: crisp app-sticker illustration, almost flat with a small soft candy gradient near the base, no heavy highlights, no plush/clay/3D/plastic look, no watercolor texture. No boxes, parcels, keys, large accessories, or realistic objects. NO repeated scallops/lobes or flower-shaped bodies. No scribble circles or elaborate hair curls. At most two very short black arm strokes per creature; some need none. White oval eyes with lively black pupils: vary tilt, size asymmetry, eyelids, sideways glance and wink, rather than putting the same two giant round eyes on every figure. Lines fine and restrained.
+
+Production layout: exactly 4 columns by 3 rows, 12 equal square sprite cells, overall 4:3 landscape canvas, ideally 1536x1152 pixels. Each complete character fits within the central 76% of its cell. Give EVERY cell at least 10% fully transparent padding at its four edges. Exact horizontal and vertical grid boundaries must be completely clear. Nothing crosses into a neighboring cell. No drawn grid or tile background, no ground shadow.
+
+Color/category columns stay consistent across all three rows:
+Column 1 pink; column 2 butter yellow; column 3 soft lilac; column 4 periwinkle blue. No teal/green.
+Row 1: pink small rounded triangle waving one fine arm with bright side-looking eyes; yellow low soft quadrilateral with a cheeky half-lidded smile; lilac tall narrow teardrop with curious upward eyes and tiny surprised mouth; blue very flat little puddle with eyes peeking over its top edge and an amused tiny mouth.
+Row 2: pink leaning slim bean with bashful inward hands; yellow squat rounded triangle with a playful tiny grin; lilac asymmetrical small triangle winking; blue narrow upright soft quadrilateral with a thoughtful sideways look and a single arm at its cheek.
+Row 3: pink low rounded trapezoid with pleased closed eyes; yellow slender waterdrop leaning sideways with huge curious eyes; lilac compact wide bean with one tiny raised arm and a mischievous smile; blue two small simple triangular creatures leaning together as one grouped icon, one slightly smaller.
+
+Keep the figures readable at 40–72px. Transparent alpha background all around each sprite. No checkerboard baked into the image, no white or colored rectangle, no border, no caption or watermark. Match the reference's small clean cute cartoon attitude much more closely than a generic glossy jelly mascot.

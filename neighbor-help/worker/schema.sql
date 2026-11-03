@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
   avatar TEXT,
   building TEXT,
   unit TEXT,
+  registration_invite_code TEXT, -- 可选注册来源备注；不表示认证或奖励，不在用户响应中返回
   created_at INTEGER,            -- 毫秒时间戳,Date.now()
   token_version INTEGER DEFAULT 0, -- token 吊销版本:改密码/退出登录时 +1,使旧 token 立即失效
   role TEXT NOT NULL DEFAULT 'user' -- user | admin;管理接口每次查库确认
@@ -200,3 +201,8 @@ CREATE TABLE IF NOT EXISTS announcements (
 );
 CREATE INDEX IF NOT EXISTS idx_announcements_enabled_sort
   ON announcements(enabled, sort DESC, updated_at DESC);
+-- Persistent image deletion claims; keys are never reused.
+CREATE TABLE IF NOT EXISTS image_deletions (
+  image_key TEXT PRIMARY KEY,
+  claimed_at INTEGER NOT NULL
+);

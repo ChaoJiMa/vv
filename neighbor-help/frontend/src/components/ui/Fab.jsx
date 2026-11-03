@@ -7,7 +7,7 @@ export default function Fab({ onClick, children, ariaLabel = '操作', style, ..
       style={{
         position: 'fixed',
         right: 16,
-        bottom: 'calc(var(--nav-height-safe) + 12px)',
+        bottom: 'calc(var(--nav-floating-footprint) + 12px)',
         width: 56,
         height: 56,
         borderRadius: 28,

@@ -1,15 +1,13 @@
 import { toast } from './toast'
+import { captureSession, assertSessionCurrent, setSessionToken } from './session'
 
 const BASE = import.meta.env.VITE_API_URL || ''
-
-function getToken() {
-  return localStorage.getItem('token')
-}
 
 // 后端统一返回 { code, message, data }:code===200 成功,返回 data;否则视为失败。
 // 失败默认 toast 弹窗提示 message,调用方可传 { silentError: true } 关闭(自行处理错误展示)。
 async function request(path, options = {}) {
-  const token = getToken()
+  const session = captureSession()
+  const token = session.token
   const res = await fetch(BASE + path, {
     ...options,
     headers: {
@@ -17,15 +15,16 @@ async function request(path, options = {}) {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
-  })
+  }).catch(error => { assertSessionCurrent(session); throw error })
   const body = await res.json().catch(() => ({}))
+  assertSessionCurrent(session)
   const message = body.message || '请求失败'
 
   // token 失效/过期:清除本地登录态。
   // silentAuth(如挂载时恢复登录态)只清 token、留在当前页;用户主动操作才跳登录页。
   // 已在登录页时不跳,避免循环。
-  if (res.status === 401 || body.code === 401) {
-    localStorage.removeItem('token')
+  if (body.code === 401 || (res.status === 401 && body.code == null)) {
+    setSessionToken(null, session)
     if (!options.silentAuth) {
       if (!options.silentError) toast.error('登录已过期，请重新登录')
       if (!location.pathname.startsWith('/login')) location.href = '/login'
@@ -38,7 +37,7 @@ async function request(path, options = {}) {
   if (body.code !== 200) {
     if (!options.silentError) toast.error(message)
     const err = new Error(message)
-    err.code = body.code
+    err.code = body.code ?? res.status
     throw err
   }
 
@@ -51,11 +50,22 @@ function post(path, body, options = {}) {
   return request(path, { method: 'POST', body: JSON.stringify(body || {}), ...options })
 }
 
+/** 公开注册能力查询：旧服务的 401/404 表示尚未支持，不按登录失效清除当前会话。 */
+async function getRegistrationOptions() {
+  const response = await fetch(BASE + '/auth/registration-options', { headers: { Accept: 'application/json' }, cache: 'no-store' })
+  if (response.status === 401 || response.status === 404) return { inviteCodeSupported: false }
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok || body.code !== 200) throw new Error('暂时无法确认邀请码是否可用，请稍后重试')
+  return { inviteCodeSupported: body.data?.inviteCodeSupported === true }
+}
+
 // 图片上传:走 multipart/form-data,不能用 post()(它强制 application/json)。
 // 不手动设 Content-Type —— 让浏览器自动带上 multipart boundary。
 // 可选 dims 作服务端解析失败时的宽高兜底。返回 { key, width?, height? }。
-async function uploadImage(file, dims = {}) {
-  const token = getToken()
+// 压缩/批量上传流程传入选图时的 session，禁止在账号切换后发起后续上传。
+async function uploadImage(file, dims = {}, session = captureSession()) {
+  assertSessionCurrent(session)
+  const token = session.token
   const form = new FormData()
   form.append('file', file)
   if (dims.width > 0 && dims.height > 0) {
@@ -66,13 +76,15 @@ async function uploadImage(file, dims = {}) {
     method: 'POST',
     headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: form,
-  })
+  }).catch(error => { assertSessionCurrent(session); throw error })
   const body = await res.json().catch(() => ({}))
+  assertSessionCurrent(session)
   // token 失效:与 request() 一致地清登录态并跳登录,避免上传时卡在过期会话。
-  if (res.status === 401 || body.code === 401) {
-    localStorage.removeItem('token')
-    toast.error('登录已过期，请重新登录')
-    if (!location.pathname.startsWith('/login')) location.href = '/login'
+  if (body.code === 401 || (res.status === 401 && body.code == null)) {
+    if (setSessionToken(null, session)) {
+      toast.error('登录已过期，请重新登录')
+      if (!location.pathname.startsWith('/login')) location.href = '/login'
+    }
     const err = new Error(body.message || '登录已过期')
     err.code = 401
     throw err
@@ -132,10 +144,11 @@ export const api = {
   adminDeleteAnnouncement: (id) => post('/api/announcements/admin/delete', { id }),
   // 图片:上传单张返回 { key, width?, height? };imgUrl 把 key 拼成可访问的代理 URL
   uploadImage,
-  imgUrl: (key) => `${BASE}/api/img/${key}`,
-  register: (body) => post('/auth/register', body),
+  imgUrl: (key) => `${BASE}/api/img/${key}?v=2`,
+  register: (body, options) => post('/auth/register', body, options),
+  getRegistrationOptions,
   loginWithPassword: (body) => post('/auth/login', body),
   loginWithCode: (code) => post('/auth/wechat', { code }),
-  setToken: (token) => localStorage.setItem('token', token),
-  clearToken: () => localStorage.removeItem('token'),
+  setToken: setSessionToken,
+  clearToken: (expected) => setSessionToken(null, expected),
 }

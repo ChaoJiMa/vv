@@ -1,108 +1,126 @@
 import Svg from './svg'
 import MenuSticker from './MenuSticker'
+import CategoryIcon from './CategoryIcon'
 
 export { MenuSticker }
 
 const stroke = {
   stroke: 'currentColor',
-  strokeWidth: 2.25,
+  strokeWidth: 1.8,
   strokeLinecap: 'round',
   strokeLinejoin: 'round',
 }
 
-/** 太阳线稿 — 与贴纸同题材 */
+/** 求助使用援手符号；太阳仅保留给浅色主题，避免业务和外观设置混淆。 */
 export function HelpIcon(props) {
-  return (
-    <Svg {...props}>
-      <circle cx="12" cy="12" r="4.2" {...stroke} />
-      <path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6.2 6.2l1.5 1.5M16.3 16.3l1.5 1.5M6.2 17.8l1.5-1.5M16.3 7.7l1.5-1.5" {...stroke} />
-    </Svg>
-  )
+  return <CategoryIcon type="help" {...props} />
 }
 
 /** 纸箱线稿 */
 export function IdleIcon(props) {
-  return (
-    <Svg {...props}>
-      <path d="M4.5 9.5 12 5l7.5 4.5V19a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1V9.5Z" {...stroke} />
-      <path d="M4.5 9.5 12 13.5l7.5-4" {...stroke} />
-      <path d="M12 13.5V20" {...stroke} />
-    </Svg>
-  )
+  return <CategoryIcon type="idle" {...props} />
 }
 
 /** 钥匙线稿 */
 export function LostIcon(props) {
-  return (
-    <Svg {...props}>
-      <circle cx="10" cy="10" r="4.5" {...stroke} />
-      <circle cx="10" cy="10" r="1.6" {...stroke} />
-      <path d="M13.2 13.2 19 19" {...stroke} />
-      <path d="M16.2 16.2h3.2M17.5 18.8h2.2" {...stroke} />
-    </Svg>
-  )
+  return <CategoryIcon type="lost" {...props} />
 }
 
-/** 购物袋线稿 */
+/** 邻居同行的双人线标 */
 export function GroupIcon(props) {
-  return (
-    <Svg {...props}>
-      <path d="M7 8.5h10l-1 11.5H8L7 8.5Z" {...stroke} />
-      <path d="M9.5 8.5c0-3 5-3 5 0" {...stroke} />
-    </Svg>
-  )
+  return <CategoryIcon type="group" {...props} />
 }
 
+/** 导航选中使用实心轮廓与真实镂空；颜色跟随父级，不修改通用 Svg 和其他业务线标。 */
 export function NavHomeIcon({ filled, ...props }) {
+  if (filled) {
+    return (
+      <Svg {...props} data-active>
+        <path
+          d="M11.05 2.8a1.5 1.5 0 0 1 1.9 0l8.5 7a1.2 1.2 0 0 1-.76 2.12H20V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8.08h-.69a1.2 1.2 0 0 1-.76-2.12l8.5-7ZM10 22v-6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v6h-4Z"
+          fill="currentColor" stroke="none" fillRule="evenodd" clipRule="evenodd"
+        />
+      </Svg>
+    )
+  }
   return (
-    <Svg {...props}>
-      {filled ? (
-        <path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5.5v-6h-3v6H5a1 1 0 0 1-1-1v-9.5Z" fill="currentColor" stroke="none" />
-      ) : (
-        <>
-          <path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-9.5Z" {...stroke} />
-          <path d="M9.5 21v-7h5v7" {...stroke} />
-        </>
-      )}
+    <Svg {...props} data-active={filled || undefined}>
+      <path d="m3.5 10 8.5-7 8.5 7M5.5 9v10.5h13V9M9.5 19.5v-6h5v6" {...stroke} />
     </Svg>
   )
 }
 
 export function NavDiscoverIcon({ filled, ...props }) {
+  if (filled) {
+    return (
+      <Svg {...props} data-active>
+        <path
+          d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20ZM16.8 7.2l-3.1 6.5-6.5 3.1 3.1-6.5 6.5-3.1Z"
+          fill="currentColor" stroke="none" fillRule="evenodd" clipRule="evenodd"
+        />
+      </Svg>
+    )
+  }
   return (
-    <Svg {...props}>
-      <circle cx="11" cy="11" r="6.5" {...stroke} />
-      <path d="m16.2 16.2 3.5 3.5" {...stroke} />
-      {filled ? <circle cx="11" cy="11" r="2.4" fill="currentColor" stroke="none" /> : null}
+    <Svg {...props} data-active={filled || undefined}>
+      <circle cx="12" cy="12" r="8.5" {...stroke} />
+      <path d="m15.5 8.5-2 5-5 2 2-5 5-2Z" {...stroke} />
     </Svg>
   )
 }
 
 export function NavMessageIcon({ filled, ...props }) {
+  if (filled) {
+    return (
+      <Svg {...props} data-active>
+        <path
+          d="M5 3h14a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3h-7.5l-5.3 3.1a.8.8 0 0 1-1.2-.69V19a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3ZM7.75 9.5a1.25 1.25 0 0 0 0 2.5h1.5a1.25 1.25 0 0 0 0-2.5h-1.5ZM14.75 9.5a1.25 1.25 0 0 0 0 2.5h1.5a1.25 1.25 0 0 0 0-2.5h-1.5Z"
+          fill="currentColor" stroke="none" fillRule="evenodd" clipRule="evenodd"
+        />
+      </Svg>
+    )
+  }
   return (
-    <Svg {...props}>
+    <Svg {...props} data-active={filled || undefined}>
       <path
         d="M5 6.5h14a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H10l-4 3v-3H5A1.5 1.5 0 0 1 3.5 15V8A1.5 1.5 0 0 1 5 6.5Z"
         {...stroke}
-        fill={filled ? 'currentColor' : 'none'}
+        fill="none"
       />
     </Svg>
   )
 }
 
 export function NavMeIcon({ filled, ...props }) {
+  if (filled) {
+    return (
+      <Svg {...props} data-active>
+        <circle cx="12" cy="6.25" r="4.25" fill="currentColor" stroke="none" />
+        <path
+          d="M2 21.5c0-5.6 4.5-9 10-9s10 3.4 10 9a.5.5 0 0 1-.5.5h-19a.5.5 0 0 1-.5-.5Z"
+          fill="currentColor" stroke="none"
+        />
+      </Svg>
+    )
+  }
+  // 显式 filled=false 是导航线稿，轮廓约 20px；未传状态的登录页等复用保留原有尺寸。
   return (
-    <Svg {...props}>
-      <circle cx="12" cy="8.5" r="3.25" {...stroke} fill={filled ? 'currentColor' : 'none'} />
-      <path d="M5 19.5c1.2-3.2 3.6-5 7-5s5.8 1.8 7 5" {...stroke} />
+    <Svg {...props} data-active={filled || undefined}>
+      <circle cx="12" cy={filled === false ? 7 : 8.5} r={filled === false ? 3.75 : 3.25} {...stroke} />
+      <path d={filled === false ? 'M3 21c1.5-4 4.5-6 9-6s7.5 2 9 6' : 'M5 19.5c1.2-3.2 3.6-5 7-5s5.8 1.8 7 5'} {...stroke} />
     </Svg>
   )
 }
 
-export function NavAddIcon(props) {
+/** 导航显式状态使用约 20px 加号，选中加重；默认形态留给登录等复用，filled 不透传到 SVG。 */
+export function NavAddIcon({ filled, ...props }) {
   return (
-    <Svg {...props}>
-      <path d="M12 6v12M6 12h12" {...stroke} strokeWidth={2.5} />
+    <Svg {...props} data-active={filled || undefined}>
+      <path
+        d={filled === undefined ? 'M12 6v12M6 12h12' : 'M12 3.5v17M3.5 12h17'}
+        {...stroke}
+        strokeWidth={filled ? 2.8 : stroke.strokeWidth}
+      />
     </Svg>
   )
 }
@@ -163,7 +181,53 @@ export function ThemeSystemIcon(props) {
 }
 
 export function SearchIcon(props) {
-  return <NavDiscoverIcon {...props} />
+  return (
+    <Svg {...props}>
+      <circle cx="10.5" cy="10.5" r="6.5" {...stroke} />
+      <path d="m15.5 15.5 4 4" {...stroke} />
+    </Svg>
+  )
+}
+
+/** “全部”分类的四格线标，不再使用大色块中的“全”字。 */
+export function GridIcon(props) {
+  return (
+    <Svg {...props}>
+      <rect x="4" y="4" width="6" height="6" rx="1.2" {...stroke} />
+      <rect x="14" y="4" width="6" height="6" rx="1.2" {...stroke} />
+      <rect x="4" y="14" width="6" height="6" rx="1.2" {...stroke} />
+      <rect x="14" y="14" width="6" height="6" rx="1.2" {...stroke} />
+    </Svg>
+  )
+}
+
+/** 说明与新手提示独立于“求助互助”分类。 */
+export function InfoIcon(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="8.5" {...stroke} />
+      <path d="M12 11.5v5" {...stroke} />
+      <circle cx="12" cy="7.8" r="0.9" fill="currentColor" stroke="none" />
+    </Svg>
+  )
+}
+
+/** 通知铃铛，供空通知与同类入口复用。 */
+export function BellIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M6 8.5a6 6 0 0 1 12 0v4l1.5 3h-15l1.5-3v-4ZM10 19a2 2 0 0 0 4 0" {...stroke} />
+    </Svg>
+  )
+}
+
+/** 公告使用扩音器，不借用通知或求助符号。 */
+export function MegaphoneIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M4 9h4l9-4v14l-9-4H4V9ZM8 15l1.5 5h3L11 16.3M20 9.5a5 5 0 0 1 0 5" {...stroke} />
+    </Svg>
+  )
 }
 
 export function RefreshIcon(props) {
