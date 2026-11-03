@@ -38,6 +38,8 @@ npx wrangler deploy
 
 `0014` 使用 `CREATE TABLE IF NOT EXISTS`，可重复执行；该方式不补写历史迁移记录，后续升级仍需按实际结构选择增量文件。已有正常迁移记录并已应用到 `0013` 的环境，按常规 `migrations list` / `migrations apply` 应用 `0014` 即可。
 
+2026-11-03核对生产环境时，迁移登记保留旧名称`0012_comment_replies_pin.sql`，实际已具备现`0013_comment_replies_pin.sql`的`comments.pinned_at`、`comment_replies`表及两个索引；当前文件名因此仍显示待应用。不能重复执行该`ADD COLUMN`，也不能仅凭迁移名称判断缺少结构。本次仅定向执行缺失的0014、0015，未修改历史登记；后续升级仍须先检查真实字段、表和待应用文件，不直接运行完整链。部署版本与验证见[持续开发记录](../../../docs/development/neighbor-help/2026-11-03-gummy-theme.md)。
+
 ## 可选注册来源字段（0015）
 
 新增 `0015_registration_invite.sql`，为 `users` 增加可空 `registration_invite_code` 列。它只记录注册时的可选邀请码，不创建邀请人关系、积分或居住认证；旧用户保持 `NULL`。新注册处理会在同一条用户 `INSERT` 中保存来源，因此必须先完成迁移，再发布 Worker。
