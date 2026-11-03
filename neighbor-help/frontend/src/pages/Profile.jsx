@@ -1,10 +1,11 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { keepPreviousData, useMutation, useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import {
   MoreIcon, ThemeMoonIcon, ThemeSunIcon, ThemeSystemIcon,
 } from '../components/icons'
 import { api } from '../api'
+import { captureSession, isSessionCurrent, assertSessionCurrent } from '../session'
 import { useAuth } from '../hooks/useAuth'
 import { useAppTheme } from '../theme/useAppTheme'
 import { toast } from '../toast'
@@ -45,7 +46,7 @@ export default function Profile() {
   const menuRef = useRef(null)
 
   const { data: stats } = useQuery({
-    queryKey: ['myStats'],
+    queryKey: ['myStats', user?.id],
     queryFn: () => api.getMyStats(),
     enabled: !!user,
   })
@@ -60,13 +61,13 @@ export default function Profile() {
   const {
     data, isLoading, isError, refetch, fetchNextPage, hasNextPage, isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ['myPosts', status],
+    queryKey: ['myPosts', status, user?.id],
     queryFn: ({ pageParam }) => api.getMyPosts(pageParam, status),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
     enabled: !!user,
     // 全部/进行中/已完成切换时保留上一屏，避免闪四个骨架框
-    placeholderData: keepPreviousData,
+    placeholderData: (previous, query) => query?.queryKey[2] === user?.id ? previous : undefined,
   })
   const list = data?.pages.flatMap(p => p.list) ?? []
 
@@ -279,11 +280,12 @@ export default function Profile() {
           actionLabel: '去发布',
           onAction: () => navigate('/create'),
         }}
-        renderItem={(post, { aspect }) => (
+        renderItem={(post, { aspect, priority }) => (
           <PostCard
             post={post}
             menu={menuMap[post.type]}
             aspect={aspect}
+            priority={priority}
             onClick={() => navigate(`/note/${post.id}`)}
           />
         )}
@@ -442,6 +444,7 @@ function SegTab({ active, onClick, label }) {
 }
 
 function EditProfileForm({ user, setUser, onDone }) {
+  const [formSession] = useState(captureSession)
   const qc = useQueryClient()
   const [nickname, setNickname] = useState(user.nickname || '')
   const [building, setBuilding] = useState(user.building || '')
@@ -457,7 +460,9 @@ function EditProfileForm({ user, setUser, onDone }) {
   const initial = displayInitial({ nickname: nickname.trim() || user.nickname })
 
   const mutation = useMutation({
+    onMutate: () => formSession,
     mutationFn: () => {
+      assertSessionCurrent(formSession)
       const body = {
         nickname: nickname.trim(),
         building: building.trim(),
@@ -466,14 +471,15 @@ function EditProfileForm({ user, setUser, onDone }) {
       if (avatarDraft !== undefined) body.avatar = avatarDraft
       return api.updateMe(body)
     },
-    onSuccess: () => {
-      setUser(prev => ({
+    onSuccess: (_data, _variables, session) => {
+      if (!isSessionCurrent(session)) return
+      setUser(prev => prev?.id === user.id ? ({
         ...prev,
         nickname: nickname.trim(),
         building: building.trim(),
         unit: unit.trim(),
         ...(avatarDraft !== undefined ? { avatar: avatarDraft } : {}),
-      }))
+      }) : prev)
       // 头像/昵称变更后刷新列表与详情里的作者信息
       qc.invalidateQueries({ queryKey: ['posts'] })
       qc.invalidateQueries({ queryKey: ['myPosts'] })
@@ -483,7 +489,7 @@ function EditProfileForm({ user, setUser, onDone }) {
       toast.success('保存成功')
       onDone()
     },
-    onError: (e) => toast.error(e.message || '保存失败'),
+    onError: (e, _variables, session) => { if (isSessionCurrent(session)) toast.error(e.message || '保存失败') },
   })
 
   const pickAvatar = async (e) => {
@@ -492,11 +498,13 @@ function EditProfileForm({ user, setUser, onDone }) {
     if (!file) return
     setUploading(true)
     try {
+      assertSessionCurrent(formSession)
       const { file: out, width, height } = await downscaleImage(file, 512)
-      const data = await api.uploadImage(out, { width, height })
+      const data = await api.uploadImage(out, { width, height }, formSession)
+      assertSessionCurrent(formSession)
       setAvatarDraft(data.key)
     } catch (err) {
-      toast.error(err.message || '头像上传失败')
+      if (isSessionCurrent(formSession)) toast.error(err.message || '头像上传失败')
     } finally {
       setUploading(false)
     }
@@ -591,18 +599,24 @@ function EditProfileForm({ user, setUser, onDone }) {
 }
 
 function PasswordForm({ onDone }) {
+  const [formSession] = useState(captureSession)
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirm, setConfirm] = useState('')
 
   const mutation = useMutation({
-    mutationFn: () => api.changePassword({ oldPassword, newPassword }),
-    onSuccess: (data) => {
-      if (data?.token) api.setToken(data.token)
+    onMutate: () => formSession,
+    mutationFn: () => {
+      assertSessionCurrent(formSession)
+      return api.changePassword({ oldPassword, newPassword })
+    },
+    onSuccess: (data, _variables, session) => {
+      if (!isSessionCurrent(session)) return
+      if (data?.token) api.setToken(data.token, session, { restore: false })
       toast.success('密码修改成功')
       onDone()
     },
-    onError: (e) => toast.error(e.message || '修改失败'),
+    onError: (e, _variables, session) => { if (isSessionCurrent(session)) toast.error(e.message || '修改失败') },
   })
 
   const handleSubmit = () => {

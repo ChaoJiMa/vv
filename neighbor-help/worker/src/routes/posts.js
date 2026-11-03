@@ -3,11 +3,13 @@
 import { Hono } from 'hono'
 import { hashPassword, verifyPassword, signJWT, genId, bumpTokenVersion, verifyAuth } from '../auth.js'
 import { success, fail, CODE } from '../response.js'
-import { LIMITS, requireText, optionalText, optionalDigits, escapeLike, parseAvatarUpdate, staleAvatarKey } from '../validate.js'
+import { LIMITS, requireText, optionalText, optionalDigits, escapeLike, parseAvatarUpdate } from '../validate.js'
 import { authRequired } from '../middleware.js'
 import { rateLimit } from '../ratelimit.js'
 import { findSensitive } from '../sensitive.js'
 import { sanitizeImages, imageKeys, parseStoredImages } from '../images.js'
+import { validateImageAttachments } from '../imageAccess.js'
+import { IMAGE_BINDING_ALLOWED, cleanupRemovedImages } from '../imageCleanup.js'
 import { getCommunity } from '../config.js'
 import { pickValidHelpers } from './helpers.js'
 import { canSeeContact, encryptContact, decryptContact, omitContact } from '../contactCrypto.js'
@@ -166,7 +168,7 @@ async function loadRepliesPage(db, commentId, page = 1, pageSize = REPLIES_PAGE_
     db.prepare(
       `SELECT r.*, u.nickname, u.building FROM comment_replies r
        JOIN users u ON r.user_id=u.id
-       WHERE r.comment_id=? ORDER BY r.created_at ASC LIMIT ? OFFSET ?`
+       WHERE r.comment_id=? ORDER BY r.created_at ASC, r.id ASC LIMIT ? OFFSET ?`
     ).bind(commentId, limit, offset).all(),
     db.prepare('SELECT COUNT(*) AS n FROM comment_replies WHERE comment_id=?').bind(commentId).first(),
   ])
@@ -195,11 +197,28 @@ async function loadCommentsPage(db, postId, page = 1) {
     db.prepare('SELECT COUNT(*) AS n FROM comments WHERE post_id=?').bind(postId).first(),
   ])
   const rows = list || []
-  const enriched = []
-  for (const row of rows) {
-    const replies = await loadRepliesPage(db, row.id, 1, REPLIES_PREVIEW)
-    enriched.push(serializeTopComment(row, replies))
+  const previews = new Map()
+  if (rows.length) {
+    // 一次取回本页所有评论的回复预览和总数，避免逐条往返 D1。
+    const { results: replies } = await db.prepare(`
+      SELECT * FROM (
+        SELECT r.*, u.nickname, u.building,
+          ROW_NUMBER() OVER (PARTITION BY r.comment_id ORDER BY r.created_at ASC, r.id ASC) AS reply_rank,
+          COUNT(*) OVER (PARTITION BY r.comment_id) AS reply_total
+        FROM comment_replies r JOIN users u ON r.user_id = u.id
+        WHERE r.comment_id IN (SELECT value FROM json_each(?))
+      ) WHERE reply_rank <= ? ORDER BY comment_id, reply_rank
+    `).bind(JSON.stringify(rows.map(row => row.id)), REPLIES_PREVIEW).all()
+    for (const reply of replies || []) {
+      if (!previews.has(reply.comment_id)) {
+        previews.set(reply.comment_id, { list: [], total: reply.reply_total, page: 1, hasMore: reply.reply_total > REPLIES_PREVIEW })
+      }
+      previews.get(reply.comment_id).list.push(serializeReply(reply))
+    }
   }
+  const enriched = rows.map(row => serializeTopComment(row,
+    previews.get(row.id) || { list: [], total: 0, page: 1, hasMore: false }
+  ))
   const total = countRow?.n ?? 0
   return { list: enriched, total, page: p, hasMore: offset + rows.length < total }
 }
@@ -288,13 +307,13 @@ api.post('/me/update', authRequired, async (c) => {
   if (!av.ok) return fail(CODE.INVALID_INPUT, av.message)
   if (av.change) {
     const prev = await c.env.DB.prepare('SELECT avatar FROM users WHERE id=?').bind(userId).first()
-    await c.env.DB.prepare('UPDATE users SET building=?, unit=?, nickname=?, avatar=? WHERE id=?')
-      .bind(bld.value, ut.value, nick.value, av.value, userId).run()
-    // 旧头像是 R2 key 且已更换/清空 → 尽力删对象，失败不阻断资料更新
-    const stale = staleAvatarKey(prev?.avatar, av.value)
-    if (stale && c.env.IMAGES) {
-      try { await c.env.IMAGES.delete(stale) } catch { /* ignore */ }
-    }
+    const access = await validateImageAttachments(c.env, userId, av.value ? [av.value] : [], [prev?.avatar])
+    if (!access.ok) return fail(CODE.IMAGE_INVALID, access.message)
+    const result = await c.env.DB.prepare(`UPDATE users SET building=?, unit=?, nickname=?, avatar=?
+      WHERE id=? AND avatar IS ? AND ${IMAGE_BINDING_ALLOWED}`)
+      .bind(bld.value, ut.value, nick.value, av.value, userId, prev?.avatar ?? null, JSON.stringify(av.value ? [av.value] : [])).run()
+    if (!result.meta.changes) return fail(CODE.CONFLICT, '资料已更新或图片已失效，请刷新后重试')
+    if (prev?.avatar && prev.avatar !== av.value) await cleanupRemovedImages(c.env, [prev.avatar])
   } else {
     await c.env.DB.prepare('UPDATE users SET building=?, unit=?, nickname=? WHERE id=?')
       .bind(bld.value, ut.value, nick.value, userId).run()
@@ -424,10 +443,15 @@ api.post('/posts/create', authRequired, async (c) => {
     else locValue = [b, u].filter(Boolean).join(' ')
   }
   const id = genId()
+  const newImages = sanitizeImages(images)
+  const access = await validateImageAttachments(c.env, userId, imageKeys(newImages))
+  if (!access.ok) return fail(CODE.IMAGE_INVALID, access.message)
   const contactStored = await encryptContact(cont.value, c.env.CONTACT_ENC_KEY)
-  await c.env.DB.prepare(
-    'INSERT INTO posts (id, user_id, type, title, content, images, contact, location, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).bind(id, userId, type, t.value, ct.value, JSON.stringify(sanitizeImages(images)), contactStored, locValue, Date.now()).run()
+  const result = await c.env.DB.prepare(
+    `INSERT INTO posts (id, user_id, type, title, content, images, contact, location, created_at)
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${IMAGE_BINDING_ALLOWED}`
+  ).bind(id, userId, type, t.value, ct.value, JSON.stringify(newImages), contactStored, locValue, Date.now(), JSON.stringify(imageKeys(newImages))).run()
+  if (!result.meta.changes) return fail(CODE.IMAGE_INVALID, '图片已失效，请重新上传')
   return success({ id })
 })
 
@@ -435,7 +459,7 @@ api.post('/posts/create', authRequired, async (c) => {
 api.post('/posts/update', authRequired, async (c) => {
   const userId = c.get('userId')
   const { id, type, title, content, images, contact, location } = await bodyOf(c)
-  // 先取帖子,校验归属与状态;同时取旧 images,用于更新后清理被移除的图片对象
+  // 先取帖子，校验归属与状态；旧 images 只允许在本帖中继续保留。
   const post = await c.env.DB.prepare('SELECT user_id, status, images FROM posts WHERE id = ?').bind(id).first()
   if (!post || post.user_id !== userId) return fail(CODE.POST_NOT_FOUND, '帖子不存在或无权操作')
   if (post.status !== 'open') return fail(CODE.POST_MISSING_FIELD, '已完成的帖子不可编辑')
@@ -454,19 +478,15 @@ api.post('/posts/update', authRequired, async (c) => {
   const bad = await findSensitive(c.env, `${t.value} ${ct.value}`)
   if (bad) return fail(CODE.CONTENT_BLOCKED, `内容含违规词「${bad}」,请修改后再保存`)
   const newImages = sanitizeImages(images)
-  const newKeys = imageKeys(newImages)
+  const access = await validateImageAttachments(c.env, userId, imageKeys(newImages), imageKeys(parseStoredImages(post.images)))
+  if (!access.ok) return fail(CODE.IMAGE_INVALID, access.message)
   const contactStored = await encryptContact(cont.value, c.env.CONTACT_ENC_KEY)
-  await c.env.DB.prepare('UPDATE posts SET type=?, title=?, content=?, images=?, contact=?, location=? WHERE id=? AND user_id=?')
-    .bind(type, t.value, ct.value, JSON.stringify(newImages), contactStored, loc.value, id, userId).run()
-  // 清理被移除的旧图(编辑时删掉的图片),避免 R2 孤儿对象累积。
-  try {
-    const oldKeys = imageKeys(parseStoredImages(post.images))
-    if (oldKeys.length && c.env.IMAGES) {
-      const kept = new Set(newKeys)
-      const removed = oldKeys.filter(k => !kept.has(k))
-      if (removed.length) await c.env.IMAGES.delete(removed)
-    }
-  } catch { /* 解析失败或 R2 异常都忽略,不阻断编辑 */ }
+  const result = await c.env.DB.prepare(`UPDATE posts SET type=?, title=?, content=?, images=?, contact=?, location=?
+    WHERE id=? AND user_id=? AND status='open' AND images IS ? AND ${IMAGE_BINDING_ALLOWED}`)
+    .bind(type, t.value, ct.value, JSON.stringify(newImages), contactStored, loc.value, id, userId, post.images, JSON.stringify(imageKeys(newImages))).run()
+  if (!result.meta.changes) return fail(CODE.CONFLICT, '帖子已更新或图片已失效，请刷新后重试')
+  const remaining = new Set(imageKeys(newImages))
+  await cleanupRemovedImages(c.env, imageKeys(parseStoredImages(post.images)).filter(key => !remaining.has(key)))
   return success({ id })
 })
 
@@ -656,10 +676,10 @@ api.post('/posts/close', authRequired, async (c) => {
 api.post('/posts/delete', authRequired, async (c) => {
   const userId = c.get('userId')
   const { id } = await bodyOf(c)
-  // 先校验归属,避免对他人帖子做关联删除;同时取 images 以便删帖后清理 R2 对象
-  const post = await c.env.DB.prepare('SELECT user_id, images FROM posts WHERE id = ?').bind(id).first()
+  // 先校验归属，避免对他人帖子做关联删除。
+  const post = await c.env.DB.prepare('SELECT user_id FROM posts WHERE id = ?').bind(id).first()
   if (!post || post.user_id !== userId) return fail(CODE.POST_NOT_FOUND, '帖子不存在或无权操作')
-  await c.env.DB.batch([
+  const deleted = await c.env.DB.batch([
     c.env.DB.prepare('DELETE FROM comment_replies WHERE post_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM comments WHERE post_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM post_responses WHERE post_id=?').bind(id),
@@ -667,15 +687,10 @@ api.post('/posts/delete', authRequired, async (c) => {
     c.env.DB.prepare('DELETE FROM post_likes WHERE post_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM notifications WHERE post_id=?').bind(id),
     // 按帖会话:删帖不删私信/conversations,保留 post_id 与标题快照,UI 显示「原帖已删除」。
-    c.env.DB.prepare('DELETE FROM posts WHERE id=? AND user_id=?').bind(id, userId),
+    c.env.DB.prepare('DELETE FROM posts WHERE id=? AND user_id=? RETURNING images').bind(id, userId),
   ])
-  // 帖子已删,best-effort 清理其图片对象(失败不影响删帖结果)。
-  try {
-    const keys = imageKeys(parseStoredImages(post.images))
-    if (keys.length && c.env.IMAGES) {
-      await c.env.IMAGES.delete(keys)
-    }
-  } catch { /* 解析失败或 R2 异常都忽略,不阻断删帖 */ }
+  const removedImages = deleted[deleted.length - 1].results?.[0]?.images
+  await cleanupRemovedImages(c.env, imageKeys(parseStoredImages(removedImages)))
   return success({ success: true })
 })
 

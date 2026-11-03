@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api'
+import { captureSession, isSessionCurrent, assertSessionCurrent } from '../session'
 import { useAuth } from '../hooks/useAuth'
 import { usePageVisible, pollInterval } from '../hooks/usePageVisible'
 import { toast } from '../toast'
@@ -26,7 +27,7 @@ export default function Chat() {
   const {
     data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ['thread', conversationId],
+    queryKey: ['thread', conversationId, user?.id],
     queryFn: ({ pageParam }) => api.getThread(conversationId, pageParam),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
@@ -75,10 +76,15 @@ export default function Chat() {
   }, [list.length, pageCount])
 
   const sendMutation = useMutation({
-    mutationFn: (content) => api.sendMessage(conversationId, content, { silentError: true }),
-    onMutate: async (content) => {
-      await qc.cancelQueries({ queryKey: ['thread', conversationId] })
-      const prev = qc.getQueryData(['thread', conversationId])
+    mutationFn: ({ content, session }) => {
+      assertSessionCurrent(session)
+      return api.sendMessage(conversationId, content, { silentError: true })
+    },
+    onMutate: async ({ content, session }) => {
+      const queryKey = ['thread', conversationId, user?.id]
+      await qc.cancelQueries({ queryKey })
+      assertSessionCurrent(session)
+      const prev = qc.getQueryData(queryKey)
       const tempId = `temp-${Date.now()}`
       const optimistic = {
         id: tempId,
@@ -88,7 +94,7 @@ export default function Chat() {
         created_at: Date.now(),
         pending: true,
       }
-      qc.setQueryData(['thread', conversationId], (old) => {
+      qc.setQueryData(queryKey, (old) => {
         if (!old?.pages?.length) {
           return {
             // 保留当前 peer，避免首条乐观消息把顶栏头像/昵称冲掉
@@ -103,34 +109,37 @@ export default function Chat() {
       })
       setText('')
       setFailedDraft(null)
-      return { prev, content }
+      return { prev, content, session, queryKey }
     },
     onError: (e, _content, ctx) => {
-      if (ctx?.prev !== undefined) qc.setQueryData(['thread', conversationId], ctx.prev)
+      if (!isSessionCurrent(ctx?.session)) return
+      if (ctx.prev !== undefined) qc.setQueryData(ctx.queryKey, ctx.prev)
+      else qc.removeQueries({ queryKey: ctx.queryKey, exact: true })
       if (ctx?.content) {
-        setText(ctx.content)
+        setText(current => current || ctx.content)
         setFailedDraft(ctx.content)
       }
       toast.error(e.message || '发送失败')
     },
-    onSuccess: () => {
+    onSuccess: (_data, _content, ctx) => {
+      if (!isSessionCurrent(ctx?.session)) return
       setFailedDraft(null)
-      qc.invalidateQueries({ queryKey: ['thread', conversationId] })
-      qc.invalidateQueries({ queryKey: ['conversations'] })
-      qc.invalidateQueries({ queryKey: ['unread'] })
+      qc.invalidateQueries({ queryKey: ['thread', conversationId, user?.id] })
+      qc.invalidateQueries({ queryKey: ['conversations', user?.id] })
+      qc.invalidateQueries({ queryKey: ['unread', user?.id] })
     },
   })
 
   const handleSend = () => {
     const t = text.trim()
     if (!t || sendMutation.isPending) return
-    sendMutation.mutate(t)
+    sendMutation.mutate({ content: t, session: captureSession() })
   }
 
   const handleResend = () => {
     if (!failedDraft || sendMutation.isPending) return
     setText(failedDraft)
-    sendMutation.mutate(failedDraft)
+    sendMutation.mutate({ content: failedDraft, session: captureSession() })
   }
 
   const openPost = () => {

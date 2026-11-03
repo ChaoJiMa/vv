@@ -32,7 +32,7 @@ export default function AnnouncementsManage() {
   }, [user, navigate])
 
   const { data, isLoading } = useQuery({
-    queryKey: ADMIN_QK,
+    queryKey: [...ADMIN_QK, user?.id],
     queryFn: () => api.adminListAnnouncements(),
     enabled: isAdmin,
   })

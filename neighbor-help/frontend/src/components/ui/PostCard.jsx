@@ -18,7 +18,7 @@ function readLikeCount(post) {
   return Number(post.stats?.likeCount ?? post.like_count) || 0
 }
 
-export default function PostCard({ post, menu, onClick, aspect }) {
+export default function PostCard({ post, menu, onClick, aspect, priority = false }) {
   const navigate = useNavigate()
   const { user } = useAuth()
   const thumb = coverKey(post)
@@ -34,10 +34,11 @@ export default function PostCard({ post, menu, onClick, aspect }) {
   )
 
   const [likeOverride, setLikeOverride] = useState(null)
-  const [likePostId, setLikePostId] = useState(post.id)
+  const likeKey = `${user?.id || 'guest'}:${post.id}`
+  const [likePostId, setLikePostId] = useState(likeKey)
   const [liking, setLiking] = useState(false)
-  if (likePostId !== post.id) {
-    setLikePostId(post.id)
+  if (likePostId !== likeKey) {
+    setLikePostId(likeKey)
     setLikeOverride(null)
   }
   const liked = likeOverride ? likeOverride.liked : readLiked(post)
@@ -105,6 +106,9 @@ export default function PostCard({ post, menu, onClick, aspect }) {
           <img
             src={api.imgUrl(thumb)}
             alt=""
+            loading={priority ? 'eager' : 'lazy'}
+            fetchPriority={priority ? 'high' : 'auto'}
+            decoding="async"
             style={{
               position: 'absolute',
               inset: 0,
@@ -213,7 +217,7 @@ export default function PostCard({ post, menu, onClick, aspect }) {
             overflow: 'hidden',
           }}>
             {avatarSrc ? (
-              <img src={avatarSrc} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <img src={avatarSrc} alt="" loading="lazy" decoding="async" width={20} height={20} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             ) : initial}
           </span>
           <span style={{

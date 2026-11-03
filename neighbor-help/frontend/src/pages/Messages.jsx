@@ -27,7 +27,7 @@ export default function Messages() {
   const visible = usePageVisible()
 
   const conv = useInfiniteQuery({
-    queryKey: ['conversations'],
+    queryKey: ['conversations', user?.id],
     queryFn: ({ pageParam }) => api.getConversations(pageParam),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
@@ -36,7 +36,7 @@ export default function Messages() {
   const messages = conv.data?.pages.flatMap(p => p.list) ?? []
 
   const noti = useInfiniteQuery({
-    queryKey: ['notifications'],
+    queryKey: ['notifications', user?.id],
     queryFn: ({ pageParam }) => api.getNotifications(pageParam),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
@@ -45,7 +45,7 @@ export default function Messages() {
   const notifications = noti.data?.pages.flatMap(p => p.list) ?? []
 
   const { data: unread } = useQuery({
-    queryKey: ['unread'],
+    queryKey: ['unread', user?.id],
     queryFn: () => api.getUnread(),
     enabled: !!user,
     refetchInterval: pollInterval(visible, 15000),
@@ -73,8 +73,8 @@ export default function Messages() {
   const readNoti = useMutation({
     mutationFn: (id) => api.readNotification(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['notifications'] })
-      qc.invalidateQueries({ queryKey: ['unread'] })
+      qc.invalidateQueries({ queryKey: ['notifications', user?.id] })
+      qc.invalidateQueries({ queryKey: ['unread', user?.id] })
     },
   })
 

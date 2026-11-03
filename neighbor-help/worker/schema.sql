@@ -200,3 +200,8 @@ CREATE TABLE IF NOT EXISTS announcements (
 );
 CREATE INDEX IF NOT EXISTS idx_announcements_enabled_sort
   ON announcements(enabled, sort DESC, updated_at DESC);
+-- Persistent image deletion claims; keys are never reused.
+CREATE TABLE IF NOT EXISTS image_deletions (
+  image_key TEXT PRIMARY KEY,
+  claimed_at INTEGER NOT NULL
+);

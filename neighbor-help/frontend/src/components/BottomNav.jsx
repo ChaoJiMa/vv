@@ -21,7 +21,7 @@ export default function BottomNav() {
   const [typePickOpen, setTypePickOpen] = useState(false)
 
   const { data: unread } = useQuery({
-    queryKey: ['unread'],
+    queryKey: ['unread', user?.id],
     queryFn: () => api.getUnread(),
     enabled: !!user,
     refetchInterval: pollInterval(visible, 20000),
@@ -36,27 +36,27 @@ export default function BottomNav() {
       import('../pages/Messages')
       import('../pages/Profile')
       qc.prefetchInfiniteQuery({
-        queryKey: ['posts', '', ''],
+        queryKey: ['posts', '', '', user?.id],
         queryFn: ({ pageParam }) => api.getPosts('', pageParam, ''),
         initialPageParam: 1,
       })
       if (user) {
         qc.prefetchInfiniteQuery({
-          queryKey: ['conversations'],
+          queryKey: ['conversations', user?.id],
           queryFn: ({ pageParam }) => api.getConversations(pageParam),
           initialPageParam: 1,
         })
         qc.prefetchInfiniteQuery({
-          queryKey: ['notifications'],
+          queryKey: ['notifications', user?.id],
           queryFn: ({ pageParam }) => api.getNotifications(pageParam),
           initialPageParam: 1,
         })
         qc.prefetchInfiniteQuery({
-          queryKey: ['myPosts', ''],
+          queryKey: ['myPosts', '', user?.id],
           queryFn: ({ pageParam }) => api.getMyPosts(pageParam, ''),
           initialPageParam: 1,
         })
-        qc.prefetchQuery({ queryKey: ['myStats'], queryFn: () => api.getMyStats() })
+        qc.prefetchQuery({ queryKey: ['myStats', user?.id], queryFn: () => api.getMyStats() })
       }
     }
     let idleId

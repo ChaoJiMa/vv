@@ -7,7 +7,7 @@ import { useInfiniteScroll } from '../../hooks/useInfiniteScroll'
 /**
  * 帖子瀑布列表：加载骨架 / 错误 / 空态 / 列表 / 触底加载
  * @param {object} empty - EmptyState props（无数据时）
- * @param {function} renderItem - (item, { aspect }) => ReactNode
+ * @param {function} renderItem - (item, { aspect, priority }) => ReactNode
  */
 export default function PostFeed({
   items = [],

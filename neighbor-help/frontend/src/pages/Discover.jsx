@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
-import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
@@ -31,11 +31,11 @@ export default function Discover() {
   const {
     data, isLoading, isError, refetch, fetchNextPage, hasNextPage, isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ['posts', activeTab, keyword],
+    queryKey: ['posts', activeTab, keyword, user?.id],
     queryFn: ({ pageParam }) => api.getPosts(activeTab, pageParam, keyword),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
-    placeholderData: keepPreviousData,
+    placeholderData: (previous, query) => query?.queryKey[3] === user?.id ? previous : undefined,
   })
   const posts = data?.pages.flatMap(p => p.list) ?? []
 
@@ -173,11 +173,12 @@ export default function Discover() {
           actionLabel: keyword ? undefined : '去首页',
           onAction: keyword ? undefined : () => navigate('/'),
         }}
-        renderItem={(post, { aspect }) => (
+        renderItem={(post, { aspect, priority }) => (
           <PostCard
             post={post}
             menu={menuMap[post.type]}
             aspect={aspect}
+            priority={priority}
             onClick={() => navigate(`/note/${post.id}`)}
           />
         )}

@@ -67,7 +67,7 @@ export default function PostDetail() {
   const commentInputRef = useRef(null)
 
   const { data: post, isLoading, isError, isFetching, refetch } = useQuery({
-    queryKey: ['post', id],
+    queryKey: ['post', id, user?.id],
     queryFn: async () => {
       const data = await api.getPost(id)
       // 详情已带首页评论：写入 comments 缓存，避免再打 /posts/comments?page=1
@@ -123,7 +123,7 @@ export default function PostDetail() {
 
   const refreshComments = () => {
     qc.invalidateQueries({ queryKey: ['comments', id] })
-    qc.invalidateQueries({ queryKey: ['post', id] })
+    qc.invalidateQueries({ queryKey: ['post', id, user?.id] })
     setReplyExpand({})
   }
 
@@ -156,7 +156,7 @@ export default function PostDetail() {
       setAdoptOpen(false)
       setAuthorMenuOpen(false)
       toast.success('已完成')
-      qc.invalidateQueries({ queryKey: ['post', id] })
+      qc.invalidateQueries({ queryKey: ['post', id, user?.id] })
       qc.invalidateQueries({ queryKey: ['myPosts'] })
       qc.invalidateQueries({ queryKey: ['posts'] })
       qc.invalidateQueries({ queryKey: ['myStats'] })
@@ -169,7 +169,7 @@ export default function PostDetail() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['posts'] })
       qc.invalidateQueries({ queryKey: ['myPosts'] })
-      qc.removeQueries({ queryKey: ['post', id] })
+      qc.removeQueries({ queryKey: ['post', id, user?.id] })
       navigate('/')
     },
     onError: (e) => toast.error(e.message || '删除失败'),
@@ -201,7 +201,7 @@ export default function PostDetail() {
       }
     },
     onSuccess: (result) => {
-      qc.invalidateQueries({ queryKey: ['post', id] })
+      qc.invalidateQueries({ queryKey: ['post', id, user?.id] })
       if (result?.conversationId) {
         navigate(`/messages/${result.conversationId}`)
         return
@@ -309,7 +309,7 @@ export default function PostDetail() {
       const data = liked ? await api.unlikePost(id) : await api.likePost(id)
       const nextLiked = !!data.liked
       const nextCount = Number(data.likeCount ?? data.like_count) || 0
-      qc.setQueryData(['post', id], (old) => old ? {
+      qc.setQueryData(['post', id, user?.id], (old) => old ? {
         ...old,
         myLiked: nextLiked,
         my_liked: nextLiked,
@@ -976,12 +976,13 @@ export default function PostDetail() {
 }
 
 function AdoptSheet({ open, onClose, postId, postType, onConfirm, submitting }) {
+  const { user } = useAuth()
   const multi = postType === 'help'
   const [picks, setPicks] = useState({})
   const [inited, setInited] = useState(false)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['helperCandidates', postId],
+    queryKey: ['helperCandidates', postId, user?.id],
     queryFn: () => api.getHelperCandidates(postId),
     enabled: open,
   })

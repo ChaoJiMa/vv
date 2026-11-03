@@ -49,7 +49,7 @@ export default function Home() {
   const {
     data, isLoading, isError, refetch, fetchNextPage, hasNextPage, isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ['posts', '', ''],
+    queryKey: ['posts', '', '', user?.id],
     queryFn: ({ pageParam }) => api.getPosts('', pageParam, ''),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
@@ -106,11 +106,12 @@ export default function Home() {
           onAction: () => navigate('/create'),
           illustration: <EmptyPosts />,
         }}
-        renderItem={(post, { aspect }) => (
+        renderItem={(post, { aspect, priority }) => (
           <PostCard
             post={post}
             menu={menuMap[post.type]}
             aspect={aspect}
+            priority={priority}
             onClick={() => navigate(`/note/${post.id}`)}
           />
         )}

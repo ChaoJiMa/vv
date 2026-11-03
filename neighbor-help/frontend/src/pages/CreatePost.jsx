@@ -3,6 +3,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { api } from '../api'
+import { captureSession, isSessionCurrent, assertSessionCurrent } from '../session'
 import { useAuth } from '../hooks/useAuth'
 import { toast } from '../toast'
 import { downscaleImage, normalizeImages } from '../utils/image'
@@ -50,7 +51,7 @@ export default function CreatePost() {
   })
 
   const { data: editing } = useQuery({
-    queryKey: ['post', id],
+    queryKey: ['post', id, user?.id],
     queryFn: () => api.getPost(id),
     enabled: isEdit,
   })
@@ -105,7 +106,7 @@ export default function CreatePost() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['posts'] })
       qc.invalidateQueries({ queryKey: ['myPosts'] })
-      if (isEdit) qc.invalidateQueries({ queryKey: ['post', id] })
+      if (isEdit) qc.invalidateQueries({ queryKey: ['post', id, user?.id] })
       toast.success(isEdit ? '已保存' : '发布成功')
       navigate(`/note/${data.id}`, { replace: true })
     },
@@ -150,25 +151,35 @@ export default function CreatePost() {
     if (room <= 0) { toast.error(`最多上传 ${MAX_IMAGES} 张图片`); return }
     const todo = files.slice(0, room)
     if (files.length > room) toast.info(`最多上传 ${MAX_IMAGES} 张,已选取前 ${room} 张`)
+    const session = captureSession()
     setUploading(n => n + todo.length)
-    for (const f of todo) {
-      try {
-        const { file, width, height } = await downscaleImage(f)
-        const data = await api.uploadImage(file, { width, height })
-        const row = { key: data.key }
-        if (data.width > 0 && data.height > 0) {
-          row.width = data.width
-          row.height = data.height
-        } else if (width > 0 && height > 0) {
-          row.width = width
-          row.height = height
+    let remaining = todo.length
+    try {
+      for (const f of todo) {
+        try {
+          assertSessionCurrent(session)
+          const { file, width, height } = await downscaleImage(f)
+          const data = await api.uploadImage(file, { width, height }, session)
+          assertSessionCurrent(session)
+          const row = { key: data.key }
+          if (data.width > 0 && data.height > 0) {
+            row.width = data.width
+            row.height = data.height
+          } else if (width > 0 && height > 0) {
+            row.width = width
+            row.height = height
+          }
+          setImages(prev => [...prev, row])
+        } catch (err) {
+          if (!isSessionCurrent(session)) break
+          toast.error(err.message || '图片上传失败')
         }
-        setImages(prev => [...prev, row])
-      } catch (err) {
-        toast.error(err.message || '图片上传失败')
-      } finally {
+        remaining--
         setUploading(n => n - 1)
       }
+    } finally {
+      // 中断后同时撤下整批尚未处理的占位，避免上传计数卡住。
+      if (remaining) setUploading(n => n - remaining)
     }
   }
 
