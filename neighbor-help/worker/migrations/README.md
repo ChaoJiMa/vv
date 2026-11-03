@@ -37,3 +37,13 @@ npx wrangler deploy
 ```
 
 `0014` 使用 `CREATE TABLE IF NOT EXISTS`，可重复执行；该方式不补写历史迁移记录，后续升级仍需按实际结构选择增量文件。已有正常迁移记录并已应用到 `0013` 的环境，按常规 `migrations list` / `migrations apply` 应用 `0014` 即可。
+
+## 可选注册来源字段（0015）
+
+新增 `0015_registration_invite.sql`，为 `users` 增加可空 `registration_invite_code` 列。它只记录注册时的可选邀请码，不创建邀请人关系、积分或居住认证；旧用户保持 `NULL`。新注册处理会在同一条用户 `INSERT` 中保存来源，因此必须先完成迁移，再发布 Worker。
+
+- 有正常迁移记录、结构已到 `0014`：先检查待应用列表，确认只有预期新增迁移，再按标准 D1 迁移命令应用。
+- 手动建库且缺少历史迁移记录：先执行只读 `PRAGMA table_info(users)` 核对是否缺列；确认其余结构已到 `0014` 且该列不存在后，仅执行 `0015_registration_invite.sql`。不要补跑整个历史链。
+- `0015` 使用 `ALTER TABLE ADD COLUMN`，不是可手动重复执行的脚本；已有该列时不再执行。全新空库可以按顺序应用 `0001`–`0015`，不要用参考快照代替迁移链。
+
+仅更新前端时，不填写邀请码仍兼容旧注册接口；填写邀请码需后端能力查询确认支持，避免旧服务忽略该字段后造成保存成功的假象。具体请求见 [注册接口说明](../../../docs/interfaces/neighbor-help/registration.md)。

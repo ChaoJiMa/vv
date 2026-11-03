@@ -12,7 +12,18 @@ const RL_WINDOW_MS = 10 * 60 * 1000
 const clientIp = (c) => c.req.header('CF-Connecting-IP') || 'unknown'
 const bodyOf = async (c) => { try { return await c.req.json() } catch { return {} } }
 
+/** 认证响应保留既有用户字段，仅剔除密码和内部注册来源，避免 SELECT * 随表扩展泄露新字段。 */
+function safeAuthUser(user) {
+  const safeUser = { ...user }
+  delete safeUser.password
+  delete safeUser.registration_invite_code
+  return safeUser
+}
+
 const auth = new Hono()
+
+// 公开、只读的注册能力声明：让新客户端在选填邀请码时识别旧服务，不查询数据库或暴露配置。
+auth.get('/registration-options', () => success({ inviteCodeSupported: true }))
 
 // POST /auth/register —— 用户名密码注册
 auth.post('/register', async (c) => {
@@ -23,7 +34,7 @@ auth.post('/register', async (c) => {
     return fail(CODE.TOO_MANY_REQUESTS, `操作过于频繁,请${rl.retryAfter}秒后再试`)
   }
 
-  const { username: rawUsername, password, nickname, building, unit } = await bodyOf(c)
+  const { username: rawUsername, password, nickname, building, unit, inviteCode } = await bodyOf(c)
   const username = typeof rawUsername === 'string' ? rawUsername.trim() : ''
   if (!username || !password) {
     return fail(CODE.INVALID_INPUT, '用户名和密码不能为空')
@@ -47,6 +58,17 @@ auth.post('/register', async (c) => {
   const ut = optionalDigits(unit, LIMITS.unit, '房号')
   if (!ut.ok) return fail(CODE.INVALID_INPUT, ut.message)
 
+  // 邀请码仅记录注册来源，不代表社区认证、真实邀请人或积分奖励；缺省与空白都落 NULL。
+  let registrationInviteCode = null
+  if (inviteCode != null) {
+    if (typeof inviteCode !== 'string') return fail(CODE.INVALID_INPUT, '邀请码需为4-20位字母或数字')
+    const trimmedInviteCode = inviteCode.trim()
+    if (trimmedInviteCode) {
+      if (!/^[a-zA-Z0-9]{4,20}$/.test(trimmedInviteCode)) return fail(CODE.INVALID_INPUT, '邀请码需为4-20位字母或数字')
+      registrationInviteCode = trimmedInviteCode.toUpperCase()
+    }
+  }
+
   // 大小写不敏感查重 + UNIQUE 兜底（并发双插）
   const exists = await env.DB.prepare(
     'SELECT id FROM users WHERE username = ? COLLATE NOCASE'
@@ -59,9 +81,9 @@ auth.post('/register', async (c) => {
   const id = genId()
   try {
     await env.DB.prepare(
-      'INSERT INTO users (id, username, password, nickname, building, unit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO users (id, username, password, nickname, building, unit, registration_invite_code, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
       // 昵称缺省用「邻居」，不要用登录用户名（用户名不对他人展示）
-    ).bind(id, usernameKey, hashed, nick.value || '邻居', bld.value, ut.value, Date.now()).run()
+    ).bind(id, usernameKey, hashed, nick.value || '邻居', bld.value, ut.value, registrationInviteCode, Date.now()).run()
   } catch (err) {
     const msg = String(err?.message || err)
     if (/UNIQUE|constraint/i.test(msg)) {
@@ -73,7 +95,7 @@ auth.post('/register', async (c) => {
   const user = await env.DB.prepare('SELECT id, username, nickname, avatar, building, unit, role FROM users WHERE id = ?')
     .bind(id).first()
   const token = await signJWT({ userId: user.id, tv: 0 }, env.JWT_SECRET)
-  return success({ token, user })
+  return success({ token, user: safeAuthUser(user) })
 })
 
 // POST /auth/login —— 用户名密码登录
@@ -107,8 +129,7 @@ auth.post('/login', async (c) => {
   // 登录成功:清除该 IP 的失败计数
   await resetRateLimit(env, rlKey)
   const token = await signJWT({ userId: user.id, tv: user.token_version ?? 0 }, env.JWT_SECRET)
-  const { password: _, ...safeUser } = user
-  return success({ token, user: safeUser })
+  return success({ token, user: safeAuthUser(user) })
 })
 
 // POST /auth/wechat —— 微信 OAuth 登录(可选)
@@ -151,8 +172,7 @@ auth.post('/wechat', async (c) => {
   }
 
   const token = await signJWT({ userId: user.id, tv: user.token_version ?? 0, openid }, env.JWT_SECRET)
-  const { password: _, ...safeUser } = user
-  return success({ token, user: safeUser })
+  return success({ token, user: safeAuthUser(user) })
 })
 
 export default auth

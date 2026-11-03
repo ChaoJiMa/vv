@@ -1,0 +1,11 @@
+Built-in image_gen variant edit prompt, 2026-11-03.
+Style source: current simple neighborhood mascot atlas.
+Output: frontend/src/assets/gummy-neighbors-cheerful.webp
+
+Use case: style-transfer.
+Asset type: a second transparent 2x2 production mascot atlas, a coordinated backup set for an existing neighborhood-help app.
+Input image is the style/character reference: preserve its original simple matte pink, yellow, lavender and periwinkle blob family, huge white oval eyes with black pupils and clean thin black expression/arm lines. Create different expressions and gestures described below. Do not add hair curls, spiral lines, horns, stars, floating marks, decorative scribbles, scalloped feet, repeated lobes, surface texture or glossy plastic highlights. One clean bean or rounded triangular silhouette per character. Friendly, charming, almost flat 2D, with only one very subtle shade. No green or teal.
+Exact category positions: TOP LEFT pink helper; TOP RIGHT yellow parcel-holder; BOTTOM LEFT lavender key-holder; BOTTOM RIGHT two friendly periwinkle neighbors.
+Production layout is critical: perfectly square canvas divided into four equal square cells; each sprite/group centered INSIDE its own quadrant, fitting within the central 80% of its cell with at least 8% completely transparent padding at every cell edge. Leave a totally clear transparent cross through the exact horizontal and vertical midpoint. In particular the bottom-right blue pair MUST NOT cross into the left quadrant; show all edges completely. No cropped hands, feet or props. No actual grid, frames or tiles.
+Genuinely transparent alpha background. No white rectangle, no ground shadow, no checkerboard baked into pixels, no labels, numbers, captions, logos or watermark.
+Variant: cheerful and active. Pink leans a little right, eyes bright, tiny open happy smile, one simple raised arm ending in a round dot. Yellow hugs its small two-tone rectangular parcel proudly with a tiny smile, no detailed tape or folds. Lavender gives a playful wink while holding a small simple key close to its side (one circular hole, straight stem, two tiny teeth). The blue pair lean toward each other, one with an open happy face and the smaller one smiling with closed eyes; at most one short simple waving arm. Keep all features restrained and the silhouette very simple.

@@ -96,6 +96,8 @@ api.post('/posts/list', async (c) => {
   // contact 属隐私:公开列表一律剔除;明文仅在 detail 且作者/已响应时返回。
   const safeList = (list || []).map((row) => serializePost(omitContact(row), {
     liked: !!row.my_liked,
+    // 房号只向该帖作者本人返回；不得采用请求 body 中自报的身份。
+    viewerId: myId,
   }))
   const total = countRow?.n ?? 0
   return success({
@@ -252,6 +254,7 @@ api.post('/posts/detail', async (c) => {
   const helpersDto = (helpers || []).map(serializeHelper)
   const responsesDto = (responses || []).map(serializeResponse)
   const baseOpts = {
+    viewerId: myId,
     liked: myLiked,
     responded: myResponded,
     helpers: helpersDto,
@@ -383,7 +386,7 @@ api.post('/me/posts', authRequired, async (c) => {
   ])
 
   // 与公开列表一致剔除 contact,避免密文/明文经「我的帖子」外泄;编辑走 detail 解密。
-  const safeList = (list || []).map((row) => serializePost(omitContact(row)))
+  const safeList = (list || []).map((row) => serializePost(omitContact(row), { viewerId: userId }))
   const total = countRow?.n ?? 0
   return success({
     list: safeList,
@@ -430,17 +433,14 @@ api.post('/posts/create', authRequired, async (c) => {
   // 敏感词:标题 + 内容一并检查,命中即拦截
   const bad = await findSensitive(c.env, `${t.value} ${ct.value}`)
   if (bad) return fail(CODE.CONTENT_BLOCKED, `内容含违规词「${bad}」,请修改后再发布`)
-  // 位置默认带入发帖人资料的楼栋单元(用户未填时)
+  // 位置会公开展示，缺省只带楼栋；不把个人资料中的房号隐式发布到帖子。
+  // 明确填写的位置（包括用户自行写入的房号）保持原值，不推断或改写历史内容。
   let locValue = loc.value
   if (!locValue) {
-    const me = await c.env.DB.prepare('SELECT building, unit FROM users WHERE id=?').bind(userId).first()
+    const me = await c.env.DB.prepare('SELECT building FROM users WHERE id=?').bind(userId).first()
     const b = String(me?.building || '').trim()
-    const u = String(me?.unit || '').trim()
-    // 与前端 formatResidence 一致：纯数字拼「栋」「号」
-    if (/^\d+$/.test(b) && /^\d+$/.test(u)) locValue = `${b}栋${u}号`
-    else if (/^\d+$/.test(b) && !u) locValue = `${b}栋`
-    else if (!b && /^\d+$/.test(u)) locValue = `${u}号`
-    else locValue = [b, u].filter(Boolean).join(' ')
+    // 与前端仅楼栋的 formatResidence 一致；兼容既有非数字楼栋文字。
+    locValue = /^\d+$/.test(b) ? `${b}栋` : b
   }
   const id = genId()
   const newImages = sanitizeImages(images)

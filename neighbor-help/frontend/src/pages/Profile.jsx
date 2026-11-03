@@ -60,6 +60,7 @@ export default function Profile() {
 
   const {
     data, isLoading, isError, refetch, fetchNextPage, hasNextPage, isFetchingNextPage,
+    isFetchNextPageError, isRefetchError, isFetching, isPlaceholderData,
   } = useInfiniteQuery({
     queryKey: ['myPosts', status, user?.id],
     queryFn: ({ pageParam }) => api.getMyPosts(pageParam, status),
@@ -112,12 +113,14 @@ export default function Profile() {
     <AppShell withNav>
       {/* 浮层顶栏：上滑后收起 */}
       <div
+        className="nh-page-chrome-top"
         style={{
           position: 'fixed',
           top: 0, left: 0, right: 0, zIndex: 40,
           maxWidth: 480, margin: '0 auto',
           display: 'flex', justifyContent: 'flex-end', gap: 8,
           padding: 'calc(10px + var(--safe-top)) 12px 10px',
+          // 固定顶区由全局 chrome 类对齐同一视口柔光，局部按钮材质保持不变。
           opacity: compact ? 0 : 1,
           transform: compact ? 'translateY(-8px)' : 'translateY(0)',
           pointerEvents: compact ? 'none' : 'auto',
@@ -169,15 +172,8 @@ export default function Profile() {
       {/* 头区 */}
       <section
         ref={heroRef}
-        style={{ position: 'relative', padding: 'calc(56px + var(--safe-top)) 16px 20px', overflow: 'hidden' }}
+        style={{ position: 'relative', padding: 'calc(56px + var(--safe-top)) 16px 20px', overflow: 'hidden', background: 'transparent' }}
       >
-        <div
-          aria-hidden
-          style={{
-            position: 'absolute', inset: 0, pointerEvents: 'none',
-            background: 'linear-gradient(165deg, color-mix(in srgb, var(--color-primary) 18%, transparent) 0%, color-mix(in srgb, var(--color-accent-cream, #F5E6C8) 42%, transparent) 45%, transparent 85%)',
-          }}
-        />
         <button
           type="button"
           onClick={() => setEditOpen(true)}
@@ -227,9 +223,8 @@ export default function Profile() {
       <div
         style={{
           position: 'sticky', top: 0, zIndex: 30,
-          background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)',
-          backdropFilter: 'blur(10px)',
-          WebkitBackdropFilter: 'blur(10px)',
+          // 标签条初始位于头区下方，使用中性工具底，避免未吸顶时重复绘制视口顶部柔光。
+          background: 'var(--color-bg)',
           borderBottom: '1px solid var(--color-border)',
           padding: 'calc(8px + var(--safe-top)) 16px 8px',
         }}
@@ -260,6 +255,11 @@ export default function Profile() {
             />
           ))}
         </div>
+        {isPlaceholderData && (
+          <div role="status" style={{ paddingTop: 8, fontSize: 12, color: 'var(--color-text-muted)' }}>
+            正在更新帖子状态…
+          </div>
+        )}
       </div>
 
       <PostFeed
@@ -267,10 +267,15 @@ export default function Profile() {
         feedKey={status}
         feedClassName="nh-profile-feed"
         items={list}
-        isLoading={isLoading}
+        // 占位列表来自上一状态：空数据不能提前冒充新状态的空结果。
+        isLoading={isLoading || isPlaceholderData}
         isError={isError}
+        isFetchNextPageError={isFetchNextPageError}
+        isRefetchError={isRefetchError}
+        isFetching={isFetching}
         onRetry={() => refetch()}
         hasNextPage={hasNextPage}
+        autoLoadEnabled={!isPlaceholderData}
         isFetchingNextPage={isFetchingNextPage}
         fetchNextPage={fetchNextPage}
         empty={{

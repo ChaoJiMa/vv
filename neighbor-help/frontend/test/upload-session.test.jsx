@@ -1,6 +1,6 @@
-import { act } from 'react'
+import { act, createContext, useContext } from 'react'
 import { createRoot } from 'react-dom/client'
-import { MemoryRouter } from 'react-router-dom'
+import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthProvider, useAuth } from '../src/hooks/useAuth'
@@ -18,7 +18,13 @@ vi.mock('../src/utils/image', async importOriginal => ({ ...await importOriginal
 describe('uploads keep the session that selected the files', () => {
   const alice = { id: 'alice', nickname: 'Alice' }
   const bob = { id: 'bob', nickname: 'Bob' }
-  let root, container, client, auth, page
+  let root, container, client, auth, page, router
+  const PageContext = createContext(null)
+  // 发帖页依赖 data router 的离开拦截；上下文保留原测试按阶段挂载页面的方式。
+  function UploadPage() {
+    const kind = useContext(PageContext)
+    return kind === 'post' ? <CreatePost /> : kind === 'avatar' ? <Profile /> : null
+  }
   function Probe() { auth = useAuth(); return null }
   function deferred() {
     let resolve
@@ -27,11 +33,9 @@ describe('uploads keep the session that selected the files', () => {
   }
   async function render() {
     await act(async () => root.render(
-      <QueryClientProvider client={client}><AuthProvider><Probe /><MemoryRouter initialEntries={[
-        { pathname: '/create', state: { type: 'help' } },
-      ]}>
-        {page === 'post' ? <CreatePost /> : page === 'avatar' ? <Profile /> : null}
-      </MemoryRouter></AuthProvider></QueryClientProvider>
+      <QueryClientProvider client={client}><AuthProvider><Probe /><PageContext value={page}>
+        <RouterProvider router={router} />
+      </PageContext></AuthProvider></QueryClientProvider>
     ))
   }
   async function click(label) {
@@ -63,6 +67,7 @@ describe('uploads keep the session that selected the files', () => {
 
   beforeEach(() => {
     localStorage.clear()
+    sessionStorage.clear()
     localStorage.setItem('token', 'alice-token')
     vi.spyOn(api, 'getMe').mockResolvedValue(alice)
     vi.spyOn(api, 'getMenus').mockResolvedValue([])
@@ -75,12 +80,16 @@ describe('uploads keep the session that selected the files', () => {
     vi.stubGlobal('fetch', vi.fn(async () => response('uploaded.jpg')))
     client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     page = null
+    router = createMemoryRouter([{ path: '*', element: <UploadPage /> }], {
+      initialEntries: [{ pathname: '/create', state: { type: 'help' } }],
+    })
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
   })
   afterEach(async () => {
     await act(async () => root.unmount())
+    router.dispose()
     client.clear()
     container.remove()
     vi.restoreAllMocks()

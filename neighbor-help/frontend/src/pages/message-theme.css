@@ -1,0 +1,362 @@
+/* 消息入口的搜索与局部问候气泡；页面标题和卷线由共享 PageTitle 负责。 */
+.nh-message-page {
+  --message-hello-pink: #ec69c3;
+  --message-hello-orange: #efb24f;
+}
+
+.nh-message-page,
+.nh-chat-page {
+  background: transparent;
+}
+
+[data-theme="dark"] .nh-message-page {
+  --message-hello-pink: #cc8cbd;
+  --message-hello-orange: #d2a968;
+}
+
+.nh-message-page .nh-message-header {
+  /* 等同全局 chrome-top：只为吸顶遮挡层对齐视口柔光，不在文档流重复绘制渐变。 */
+  background-color: var(--color-bg);
+  background-image: var(--page-glow);
+  background-size: 100% 100svh;
+  background-position: center top;
+  background-repeat: no-repeat;
+}
+
+.nh-message-page .nh-message-refresh {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--page-heading-height);
+  height: var(--page-heading-height);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background-color: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+/* 刷新为无边框图标入口；等待只旋转图标，局部覆盖全局禁用按钮灰底，其他按钮不受影响。 */
+.nh-message-page .nh-message-refresh:disabled {
+  background: transparent !important;
+  color: var(--color-text) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+  cursor: wait;
+}
+
+.nh-message-page .nh-message-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 12px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 15px;
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
+.nh-message-page .nh-message-search > svg {
+  flex-shrink: 0;
+}
+
+.nh-message-page .nh-message-search input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 16px;
+  font-family: inherit;
+}
+
+.nh-message-page .nh-message-search input::placeholder {
+  color: var(--color-text-muted);
+  opacity: 1;
+}
+
+/* 整个搜索框提供明确焦点轮廓，避免输入和清空按钮各自出现重叠的内框。 */
+.nh-message-page .nh-message-search:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary);
+}
+
+.nh-message-page .nh-message-search input:focus {
+  outline: none;
+}
+
+.nh-message-page .nh-message-search input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+
+.nh-message-page .nh-message-search button {
+  flex-shrink: 0;
+  min-width: 44px;
+  min-height: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.nh-message-page .nh-message-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.nh-message-page .nh-message-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 5px 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nh-message-page .nh-message-tab[aria-selected="true"] {
+  border-color: var(--color-text);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.nh-message-page .nh-message-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 15px 0 13px;
+  color: var(--color-text-muted);
+}
+
+.nh-message-page .nh-message-section h2,
+.nh-message-page .nh-message-section > span {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.nh-message-page .nh-message-search-scope {
+  margin: -3px 0 16px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.nh-message-page .nh-message-hello {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 166px;
+  height: 56px;
+  border-radius: 16px;
+  background-color: var(--message-hello-pink);
+  background-image: linear-gradient(100deg, var(--message-hello-pink), var(--message-hello-orange));
+  color: var(--color-on-primary);
+  font-family: ui-rounded, system-ui, sans-serif;
+  font-size: 27px;
+  font-weight: 800;
+  letter-spacing: -1px;
+}
+
+.nh-message-page .nh-message-hello::after {
+  content: '';
+  position: absolute;
+  right: 17px;
+  bottom: -7px;
+  border-left: 11px solid transparent;
+  border-top: 12px solid var(--message-hello-orange);
+}
+
+.nh-message-page .nh-conversation-card {
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  min-height: 88px;
+  margin-bottom: 12px;
+  border-radius: 21px;
+  background-color: var(--color-surface);
+  box-shadow: inset 0 1px 0 var(--color-material-highlight);
+  transition: border-color var(--motion-duration) ease, background-color var(--motion-duration) ease;
+}
+
+.nh-message-page .nh-conversation-card.is-unread {
+  background-color: var(--color-category-help-soft);
+  background-image: linear-gradient(120deg, var(--color-category-help-soft), var(--color-surface) 85%);
+}
+
+.nh-message-page .nh-notification-card.is-unread {
+  background-color: var(--color-category-idle-soft);
+  background-image: linear-gradient(120deg, var(--color-category-idle-soft), var(--color-surface) 85%);
+}
+
+.nh-message-page .nh-conversation-card:active {
+  border-color: var(--color-primary);
+}
+
+.nh-message-page .nh-conversation-card:focus-visible,
+.nh-chat-page .nh-chat-source:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
+}
+
+.nh-message-page .nh-conversation-avatar {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border-radius: 19px;
+  color: var(--color-category-help-fg);
+  background-color: var(--color-category-help-bg);
+  box-shadow: inset 0 1px 0 var(--color-material-highlight), var(--shadow-candy);
+}
+
+.nh-message-page .nh-conversation-avatar-face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.nh-message-page .nh-conversation-avatar-face img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.nh-message-page .nh-notification-avatar {
+  color: var(--color-category-idle-fg);
+  background-color: var(--color-category-idle-bg);
+}
+
+.nh-message-page .nh-conversation-unread {
+  position: absolute;
+  right: -1px;
+  bottom: 1px;
+  width: 12px;
+  height: 12px;
+  border: 3px solid var(--color-surface);
+  border-radius: 50%;
+  background-color: var(--color-primary);
+}
+
+.nh-message-page .nh-conversation-copy {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.nh-message-page .nh-conversation-topline {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.nh-message-page .nh-conversation-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 15px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nh-message-page .nh-notification-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.nh-message-page .nh-conversation-time {
+  flex-shrink: 0;
+  padding-top: 2px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.nh-message-page .nh-conversation-preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  margin-top: 6px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* 会话页沿用原吸顶栏和键盘补偿，仅为头像、来源、气泡和输入区添加同一套材质。 */
+.nh-chat-page .nh-chat-avatar {
+  background-color: var(--color-category-idle-bg);
+  color: var(--color-category-idle-fg);
+  box-shadow: inset 0 1px 0 var(--color-material-highlight), var(--shadow-card);
+}
+
+.nh-chat-page .nh-chat-avatar.is-mine {
+  background-color: var(--color-category-help-bg);
+  color: var(--color-category-help-fg);
+}
+
+.nh-chat-page .nh-chat-source {
+  background-color: var(--color-category-idle-soft);
+  box-shadow: inset 0 1px 0 var(--color-material-highlight);
+}
+
+.nh-chat-page .nh-chat-bubble {
+  box-shadow: inset 0 1px 0 var(--color-material-highlight), var(--shadow-card);
+}
+
+.nh-chat-page .nh-chat-bubble.is-mine {
+  background-image: linear-gradient(135deg, var(--color-category-lost-soft), var(--color-category-lost-bg));
+}
+
+.nh-chat-page .nh-chat-input:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (max-width: 360px) {
+  .nh-message-page .nh-conversation-card {
+    gap: 10px;
+  }
+
+  .nh-message-page .nh-conversation-avatar {
+    width: 46px;
+    height: 46px;
+    border-radius: 17px;
+  }
+
+  .nh-message-page .nh-conversation-topline {
+    gap: 5px;
+  }
+}

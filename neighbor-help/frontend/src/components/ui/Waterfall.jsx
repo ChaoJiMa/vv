@@ -5,12 +5,15 @@ import {
 } from '../../utils/imageAspect'
 
 /**
- * 双列瀑布流：按当前较矮列放置；旧图片缺少尺寸时使用稳定的方形占位。
+ * 双列瀑布流：按当前较矮列放置；图文卡按封面和正文估高，无图卡按文字估高。
+ * cardVariant / cardMenus 只补充卡内绘制的估高信息，不改变较矮列优先的分配规则。
  */
 export default function Waterfall({
   items,
   renderItem,
   gap = CARD_GAP,
+  cardVariant = 'default',
+  cardMenus,
   style,
 }) {
   const wrapRef = useRef(null)
@@ -41,13 +44,16 @@ export default function Waterfall({
           ? clampAspect(known)
           : (coverKey(item) ? 1 : NO_IMAGE_ASPECT)
       )
-      const h = estimateCardHeight(colWidth, aspect)
+      const h = estimateCardHeight(colWidth, aspect, item, {
+        variant: cardVariant,
+        menu: cardMenus?.[item.type],
+      })
       const i = heights[0] <= heights[1] ? 0 : 1
       ;(i === 0 ? left : right).push({ item, aspect, priority: index < 2 })
       heights[i] += h
     }
     return [left, right]
-  }, [items, colWidth])
+  }, [items, colWidth, cardVariant, cardMenus])
 
   return (
     <>

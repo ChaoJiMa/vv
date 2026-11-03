@@ -1,0 +1,157 @@
+/* 注册仍为单页自然文档流；头图区紧凑，键盘和短屏不会把字段锁在固定高度容器中。 */
+.nh-registration-guide {
+  width: 100%;
+  max-width: 480px;
+  min-height: 100svh;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  color: var(--color-text);
+}
+
+.nh-registration-guide-hero {
+  --registration-hero-text: #282316;
+  --registration-hero-muted: #75632a;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  /* 参考屏的奶油黄仅用于注册头图；延伸至完整 28px 圆角下方，不移动原角色和字段。 */
+  padding: calc(12px + var(--safe-top)) 24px 28px;
+  background: var(--registration-hero-start);
+  background: linear-gradient(165deg, var(--registration-hero-start), var(--registration-hero-end));
+  color: var(--registration-hero-text);
+}
+
+/* 深色降低头图亮度，保留暖黄识别；局部深色字不跟随全局白字，避免黄底上对比不足。 */
+[data-theme="dark"] .nh-registration-guide-hero {
+  --registration-hero-text: #241d0e;
+  --registration-hero-muted: #423518;
+}
+
+.nh-registration-guide-topbar {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+}
+
+.nh-registration-guide-back {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(40, 35, 22, 0.08);
+  color: var(--registration-hero-text);
+  cursor: pointer;
+}
+
+.nh-registration-guide-back:focus-visible {
+  outline: 2px solid var(--registration-hero-text);
+  outline-offset: 3px;
+}
+
+.nh-registration-guide-back:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+/* 顶部三段文案共用原字标字体；字标的 40px 字号和 4px 字距保持原样。 */
+.nh-registration-guide-brand {
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: 400;
+  line-height: 1.3;
+  letter-spacing: 4px;
+  white-space: nowrap;
+}
+
+.nh-registration-guide-hero h1 {
+  margin: 8px 0 6px;
+  text-align: center;
+  font-size: clamp(26px, 7.2vw, 30px);
+  font-family: var(--font-display);
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+.nh-registration-guide-subtitle {
+  margin: 0;
+  text-align: center;
+  font-size: 13px;
+  font-family: var(--font-display);
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--registration-hero-muted);
+}
+
+/* 字体就绪前只隐藏文字绘制，保留原行高；返回、角色与表单立即可用。 */
+.nh-registration-font-pending .nh-registration-guide-brand,
+.nh-registration-font-pending h1,
+.nh-registration-font-pending .nh-registration-guide-subtitle {
+  visibility: hidden;
+}
+
+.nh-registration-guide-art {
+  position: relative;
+  height: 104px;
+  margin-top: 8px;
+  pointer-events: none;
+}
+
+.nh-registration-guide-character {
+  position: absolute;
+  z-index: 1;
+  bottom: -26px;
+  /* 仅装饰角色一次轻入场；表单和操作不等待动画，也不产生循环漂浮。 */
+  animation: nhRegistrationCharacterIn var(--motion-duration) ease-out both;
+}
+
+.nh-registration-guide-character-left {
+  left: calc(50% - 166px);
+}
+
+.nh-registration-guide-character-right {
+  right: calc(50% - 170px);
+}
+
+.nh-registration-guide-panel {
+  /* 只负责面板材质；文字、主按钮、错误色及原生输入方案继承全局主题，不在局部锁定浅色。 */
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+  margin-top: -28px;
+  padding: 24px 24px calc(24px + var(--safe-bottom));
+  border-radius: 28px 28px 0 0;
+  border: 0;
+  background: var(--registration-form-bg);
+  color: var(--color-text);
+  box-shadow: none;
+}
+
+@keyframes nhRegistrationCharacterIn {
+  from { opacity: 0.65; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 360px) {
+  .nh-registration-guide-hero { padding-inline: 20px; }
+  .nh-registration-guide-art { height: 88px; }
+  .nh-registration-guide-character-left { left: calc(50% - 144px); }
+  .nh-registration-guide-character-right { right: calc(50% - 146px); }
+  .nh-registration-guide-character .nh-gummy-character { width: 136px; height: 136px; }
+  .nh-registration-guide-panel { padding-inline: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nh-registration-guide-character {
+    animation: none;
+    transform: none;
+  }
+}

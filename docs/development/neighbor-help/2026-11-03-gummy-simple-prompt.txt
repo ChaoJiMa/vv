@@ -1,0 +1,17 @@
+Built-in image_gen edit prompt, 2026-11-03.
+Edit target: frontend/src/assets/gummy-neighbors.webp
+Style reference: user-provided UI Notes screenshot, used for simplicity only.
+Output integrated as: frontend/src/assets/gummy-neighbors-simple.webp
+
+Use case: style-transfer.
+Asset type: production transparent 2 by 2 mascot sprite atlas for a Chinese neighborhood-help app. This is a replacement of Image 1's overly ornate mascots, with a MUCH simpler and cuter visual style.
+Input images: Image 1 is the edit target, use ONLY its 2x2 category arrangement and four color identities. Image 2 is a style reference ONLY for the clean, simple blob silhouettes, big expressive eyes, restrained thin black facial/arm lines, and minimal soft shading. Do not reproduce its characters exactly, UI cards, typography, text, logos or mint/green palette.
+Primary request: simplify the cartoon characters strongly. Remove ALL head hair curls, spiral scribbles, loop flourishes, radiating marks, floating symbols, scalloped bases, repeated body bumps, finger details and glossy plastic texture. Each character has ONE smooth simple bean/rounded-teardrop silhouette with at most one asymmetrical lean, two large white oval eyes with black pupils and ONE tiny smile. Make facial expressions a little playful and endearing. At most two extremely simple thin arms. Matte candy colors with a very subtle single soft shade, almost flat 2D illustration; no watercolor noise and no hard shine.
+Keep this exact quadrant mapping, equally sized square cells:
+TOP LEFT: one warm pink friendly bean waving a simple stick arm, no extra objects.
+TOP RIGHT: one sunshine yellow rounded teardrop holding a SMALL simple two-tone rectangular parcel, no complex folds or tape details.
+BOTTOM LEFT: one soft lavender rounded triangular bean holding one SMALL simple key, with one circular hole and a short straight stem.
+BOTTOM RIGHT: two simple periwinkle-blue friendly beans leaning together, one bigger and one slightly smaller, each just eyes and a tiny smile. No head curls.
+Composition: square canvas, clean equal 2x2 grid with NO visible grid lines. Each sprite group stays wholly inside its own quadrant, aligned and centered similarly to Image 1; the main bodies themselves fill about 75–85% of each cell. Maintain a clear transparent gap between all quadrants. All heads, arms and small props fully inside the tile; no cropped body parts and no overlapping other quadrants.
+Backdrop: genuinely transparent alpha everywhere outside the characters. No background, no white rectangle, no checkerboard drawn into the image, no ground shadows, no labels, no text or watermark.
+The result must look intentionally much simpler than Image 1, closer to minimal friendly app mascots than detailed jelly creatures. Preserve the four color roles and category positions, change the drawing style and simplify shapes.

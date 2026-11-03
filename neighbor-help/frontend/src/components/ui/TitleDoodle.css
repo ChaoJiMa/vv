@@ -1,0 +1,18 @@
+/* 卷线统一尺寸与明暗配色；间距由各标题行显式分配，不让图形覆盖文字或右侧按钮。 */
+.nh-title-doodle {
+  --title-doodle-pink: #ec69c3;
+  --title-doodle-orange: #efb24f;
+  --title-doodle-star: #f1bf4c;
+  display: block;
+  flex: 0 0 48px;
+  width: 48px;
+  height: 40px;
+  pointer-events: none;
+  user-select: none;
+}
+
+[data-theme="dark"] .nh-title-doodle {
+  --title-doodle-pink: #cc8cbd;
+  --title-doodle-orange: #d2a968;
+  --title-doodle-star: #e3c27d;
+}

@@ -40,3 +40,8 @@
 
 - [会话隔离与图片生命周期](development/neighbor-help/2026-11-03-session-images.md)
 - [图片绑定及读取协议](interfaces/neighbor-help/images.md)
+- [前端体验优化记录](development/neighbor-help/2026-11-03-frontend-ux.md)
+- [前端导航与浏览恢复约定](interfaces/neighbor-help/frontend-navigation.md)
+- [注册、邀请码与住址展示约定](interfaces/neighbor-help/registration.md)
+- [简洁线性图标调整](development/neighbor-help/2026-11-03-linear-icons.md)
+- [原布局下的糖果胶质视觉调整](development/neighbor-help/2026-11-03-gummy-theme.md)

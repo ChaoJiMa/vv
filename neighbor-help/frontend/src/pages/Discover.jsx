@@ -1,6 +1,6 @@
-import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, useSearchParams, useNavigationType } from 'react-router-dom'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import BottomNav from '../components/BottomNav'
@@ -9,15 +9,20 @@ import {
 } from '../components/ui'
 import { CloseIcon, SearchIcon } from '../components/icons'
 import { EmptyPosts, EmptySearch } from '../components/illustrations/EmptyArts'
-import { scrollToTop } from '../utils/scrollToTop'
+import { useDiscoverScroll } from '../hooks/useDiscoverScroll'
+import PageTitle from '../components/ui/PageTitle'
 
 export default function Discover() {
   const navigate = useNavigate()
   const location = useLocation()
+  const navigationType = useNavigationType()
+  const [params, setParams] = useSearchParams()
   const { user } = useAuth()
-  const [activeTab, setActiveTab] = useState(location.state?.type || '')
-  const [search, setSearch] = useState('')
-  const [keyword, setKeyword] = useState('')
+  // 已提交条件以 URL 为准，刷新、分享与详情返回均使用同一份查询状态。
+  const activeTab = params.get('type') || ''
+  const keyword = (params.get('keyword') || '').trim()
+  const [searchDraft, setSearchDraft] = useState({ keyword, text: keyword })
+  const search = searchDraft.keyword === keyword ? searchDraft.text : keyword
   const [searchOpen, setSearchOpen] = useState(false)
   const searchInputRef = useRef(null)
 
@@ -30,6 +35,7 @@ export default function Discover() {
 
   const {
     data, isLoading, isError, refetch, fetchNextPage, hasNextPage, isFetchingNextPage,
+    isPlaceholderData, isFetching, isFetchNextPageError, isRefetchError,
   } = useInfiniteQuery({
     queryKey: ['posts', activeTab, keyword, user?.id],
     queryFn: ({ pageParam }) => api.getPosts(activeTab, pageParam, keyword),
@@ -38,15 +44,37 @@ export default function Discover() {
     placeholderData: (previous, query) => query?.queryKey[3] === user?.id ? previous : undefined,
   })
   const posts = data?.pages.flatMap(p => p.list) ?? []
+  const restoringScroll = useDiscoverScroll({
+    entryKey: location.key,
+    viewerId: user?.id,
+    search: location.search,
+    ready: !!data && !isPlaceholderData,
+    pageCount: data?.pages.length || 0,
+    hasNextPage,
+    fetchNextPage,
+    isFetching,
+    isError,
+  })
+
+  /** 只更新本页条件，保留其它查询参数；新历史条目从顶部开始，返回则还原旧位置。 */
+  const updateFilters = (type, word) => {
+    const next = new URLSearchParams(params)
+    if (type) next.set('type', type)
+    else next.delete('type')
+    if (word) next.set('keyword', word)
+    else next.delete('keyword')
+    if (next.toString() !== params.toString()) setParams(next)
+  }
 
   const submitSearch = () => {
     const next = search.trim()
-    setKeyword(next)
-    if (!next) setSearchOpen(false)
+    updateFilters(activeTab, next)
+    setSearchDraft({ keyword: next, text: next })
+    setSearchOpen(false)
   }
   const clearSearch = () => {
-    setSearch('')
-    setKeyword('')
+    updateFilters(activeTab, '')
+    setSearchDraft({ keyword: '', text: '' })
     setSearchOpen(false)
   }
 
@@ -54,26 +82,16 @@ export default function Discover() {
     if (searchOpen) searchInputRef.current?.focus()
   }, [searchOpen])
 
-  useLayoutEffect(() => {
-    scrollToTop()
-  }, [activeTab, keyword])
-
   const toggleSearch = () => {
-    if (searchOpen && !keyword) {
-      setSearchOpen(false)
-      setSearch('')
-      return
-    }
-    setSearchOpen(true)
+    if (!searchOpen) setSearchDraft({ keyword, text: keyword })
+    setSearchOpen(open => !open)
   }
 
   return (
     <AppShell withNav>
-      <StickyHeader style={{ padding: 'calc(12px + var(--safe-top)) 16px 8px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, flex: 1 }}>
-            发现
-          </h1>
+      <StickyHeader style={{ padding: 'calc(var(--page-heading-top) + var(--safe-top)) 16px 8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', minHeight: 'var(--page-heading-height)', gap: 8 }}>
+          <PageTitle>发现</PageTitle>
           <button
             type="button"
             aria-label={searchOpen ? '收起搜索' : '搜索'}
@@ -87,49 +105,41 @@ export default function Discover() {
           >
             <SearchIcon size={20} />
           </button>
-          {!user && (
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => navigate('/login')}
-              style={{ minHeight: 36, padding: '6px 14px' }}
-            >
-              登录
-            </Button>
-          )}
         </div>
 
         {searchOpen && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
             <div style={{
-              flex: 1, display: 'flex', alignItems: 'center', gap: 8,
+              // 两层flex均允许收缩到输入内容以下，避免窄屏被input默认固有宽度撑开。
+              flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8,
               background: 'var(--color-surface)', border: '1.5px solid var(--color-border)',
               borderRadius: 999, padding: '0 12px', minHeight: 44,
             }}>
-              <SearchIcon size={18} style={{ color: 'var(--color-text-muted)' }} />
+              <SearchIcon size={18} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
               <input
                 ref={searchInputRef}
                 value={search}
-                onChange={e => setSearch(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') submitSearch() }}
+                onChange={e => setSearchDraft({ keyword, text: e.target.value })}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) submitSearch() }}
+                aria-label="搜索标题或内容"
                 placeholder="搜索标题或内容"
                 style={{
-                  flex: 1, border: 'none', outline: 'none', background: 'transparent',
+                  flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent',
                   color: 'var(--color-text)', fontSize: 14, minHeight: 40,
                 }}
               />
               {search ? (
                 <button
                   type="button"
-                  aria-label="清除输入"
-                  onClick={() => setSearch('')}
-                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, color: 'var(--color-text-muted)' }}
+                  aria-label="清除搜索"
+                  onClick={clearSearch}
+                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, color: 'var(--color-text-muted)', flexShrink: 0 }}
                 >
                   <CloseIcon size={16} />
                 </button>
               ) : null}
             </div>
-            <Button type="button" onClick={submitSearch} style={{ borderRadius: 999, minWidth: 64 }}>
+            <Button type="button" onClick={submitSearch} style={{ borderRadius: 999, minWidth: 64, flexShrink: 0 }}>
               搜索
             </Button>
           </div>
@@ -151,19 +161,28 @@ export default function Discover() {
           mode="filter"
           menus={menus}
           active={activeTab}
-          onSelect={setActiveTab}
+          onSelect={type => updateFilters(type, keyword)}
         />
+        {isPlaceholderData && (
+          <div role="status" style={{ paddingTop: 8, fontSize: 12, color: 'var(--color-text-muted)' }}>
+            正在更新筛选结果…
+          </div>
+        )}
       </StickyHeader>
 
       <PostFeed
         key={`${activeTab}|${keyword}`}
         style={{ padding: '12px 16px 24px' }}
-        feedClassName="nh-discover-panel"
+        feedClassName={`nh-discover-panel${navigationType === 'POP' ? ' nh-discover-return' : ''}`}
         items={posts}
-        isLoading={isLoading}
+        isLoading={isLoading || isPlaceholderData}
         isError={isError}
+        isFetchNextPageError={isFetchNextPageError}
+        isRefetchError={isRefetchError}
+        isFetching={isFetching}
         onRetry={() => refetch()}
         hasNextPage={hasNextPage}
+        autoLoadEnabled={!isPlaceholderData && !restoringScroll}
         isFetchingNextPage={isFetchingNextPage}
         fetchNextPage={fetchNextPage}
         empty={{
@@ -192,6 +211,9 @@ export default function Discover() {
         .nh-discover-panel {
           animation: nhDiscoverPanelIn 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
         }
+        /* 历史返回直接显示原列表，避免错峰入场把已恢复位置的卡片暂时隐藏。 */
+        .nh-discover-return,
+        .nh-discover-return .nh-waterfall-card { animation: none; }
         @keyframes nhDiscoverPanelIn {
           from { opacity: 0; transform: translateY(6px); }
           to { opacity: 1; transform: translateY(0); }
@@ -208,8 +230,9 @@ export default function Discover() {
 
 const iconBtn = {
   border: 'none',
-  width: 40,
-  height: 40,
+  width: 'var(--page-heading-height)',
+  height: 'var(--page-heading-height)',
+  flexShrink: 0,
   borderRadius: 12,
   display: 'inline-flex',
   alignItems: 'center',

@@ -1,21 +1,41 @@
-import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { usePageVisible, pollInterval } from '../hooks/usePageVisible'
+import { useInfiniteScroll } from '../hooks/useInfiniteScroll'
 import BottomNav from '../components/BottomNav'
-import { AppShell, EmptyState, ListError, Skeleton } from '../components/ui'
+import { AppShell, Button, EmptyState, ListError, Skeleton } from '../components/ui'
 import {
-  HeartIcon, NotiAdoptIcon, NotiCommentIcon, NotiRespondIcon, NotiThankIcon, RefreshIcon,
+  HeartIcon, NotiAdoptIcon, NotiCommentIcon, NotiRespondIcon, NotiThankIcon, RefreshIcon, SearchIcon,
 } from '../components/icons'
-import { EmptyMessages, EmptyNotices } from '../components/illustrations/EmptyArts'
+import { EmptyMessages } from '../components/illustrations/EmptyArts'
 import { resolveAvatarUrl } from '../utils/avatar'
 import { scrollToTop } from '../utils/scrollToTop'
+import PageTitle from '../components/ui/PageTitle'
+import './message-theme.css'
 
 function badgeText(n) {
   if (!n || n <= 0) return null
   return n > 99 ? '99+' : String(n)
+}
+
+/** 通知标题与列表筛选共用同一份文案，不根据关键词虚构新的通知内容。 */
+function notificationTitle(item) {
+  if (item.notiType === 'thank') return `${item.actorName} 采纳并感谢了你`
+  if (item.notiType === 'adopt') return `${item.actorName} 采纳了你的帮助`
+  if (item.notiType === 'respond') return `${item.actorName} 响应了你的帖子`
+  if (item.notiType === 'like') return `${item.actorName} 赞了你的帖子`
+  return `${item.actorName} 回复了你`
+}
+
+/** 只检查接口已加载到当前列表的昵称、帖子与消息文字，不触发或伪装服务端全量搜索。 */
+function matchesLoadedItem(item, tab, keyword) {
+  const fields = tab === 'message'
+    ? [item.peerName, item.postDeleted ? '原帖已删除' : (item.postTitle || '原帖已删除'), item.content ? `${item.fromMe ? '我: ' : ''}${item.content}` : '暂无消息']
+    : [notificationTitle(item), item.postTitle, item.content]
+  return fields.filter(Boolean).join(' ').toLowerCase().includes(keyword)
 }
 
 export default function Messages() {
@@ -23,6 +43,8 @@ export default function Messages() {
   const { user } = useAuth()
   const qc = useQueryClient()
   const [tab, setTab] = useState('message')
+  const [search, setSearch] = useState('')
+  const searchInputRef = useRef(null)
   const [defaultLocked, setDefaultLocked] = useState(false)
   const visible = usePageVisible()
 
@@ -81,22 +103,21 @@ export default function Messages() {
   const active = tab === 'message' ? conv : noti
   const isLoading = active.isLoading
   const isError = active.isError
-  const isRefreshing = active.isRefetching
+  // 所有当前列表请求都锁定刷新入口并旋转图标，避免等待中只禁用却没有反馈。
+  const isRefreshing = active.isFetching
   const list = tab === 'message' ? messages : notifications
+  const keyword = search.trim().toLowerCase()
+  const filtering = keyword.length > 0
+  const shownList = filtering ? list.filter(item => matchesLoadedItem(item, tab, keyword)) : list
 
-  const sentinelRef = useRef(null)
-  const observe = useCallback((node) => {
-    if (!node) return
-    const io = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting && active.hasNextPage && !active.isFetchingNextPage) active.fetchNextPage()
-    }, { rootMargin: '200px' })
-    io.observe(node)
-    return io
-  }, [active])
-  useEffect(() => {
-    const io = observe(sentinelRef.current)
-    return () => io?.disconnect()
-  }, [observe])
+  // 私信和通知共用失败恢复规则；查询出错时停下哨兵，避免每次错误重绘再次请求失败页。
+  const sentinelRef = useInfiniteScroll({
+    hasNextPage: active.hasNextPage,
+    isFetchingNextPage: active.isFetchingNextPage,
+    fetchNextPage: active.fetchNextPage,
+    // 筛选时必须由用户明确加载下一页，避免没有匹配项时悄悄下载整个会话历史。
+    enabled: !!user && list.length > 0 && !filtering && !isError && !active.isFetching,
+  })
 
   if (!user) {
     return (
@@ -111,67 +132,59 @@ export default function Messages() {
     if (it.postId) navigate(`/note/${it.postId}`)
   }
 
+  // 清空按钮会随关键词一起卸载；把键盘焦点交回仍然存在的搜索框。
+  const clearSearch = () => {
+    setSearch('')
+    searchInputRef.current?.focus()
+  }
+
   return (
-    <AppShell withNav>
-      <header style={{
+    <AppShell withNav className="nh-message-page">
+      {/* 参考好友页的轻量构图；这里仍是实际会话与通知，不添加好友关系或在线状态。 */}
+      <header className="nh-message-header" style={{
         position: 'sticky', top: 0, zIndex: 20,
-        background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
-        borderBottom: '1px solid var(--color-border)',
-        padding: 'calc(12px + var(--safe-top)) 16px 10px',
+        padding: 'calc(var(--page-heading-top) + var(--safe-top)) 20px 12px',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
-          <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, flex: 1 }}>消息</h1>
+        <div style={{ display: 'flex', alignItems: 'center', minHeight: 'var(--page-heading-height)', marginBottom: 20 }}>
+          <PageTitle>聊天</PageTitle>
           <button
             type="button"
+            className="nh-message-refresh"
+            aria-label="刷新"
             disabled={isRefreshing}
+            aria-busy={isRefreshing || undefined}
             onClick={() => active.refetch()}
-            style={{ ...linkBtn, display: 'inline-flex', alignItems: 'center', gap: 4, opacity: isRefreshing ? 0.7 : 1 }}
           >
             <RefreshIcon size={16} className={isRefreshing ? 'nh-spin' : undefined} />
-            刷新
           </button>
+        </div>
+        <div className="nh-message-search" role="search" aria-label="筛选当前列表">
+          <SearchIcon size={23} />
+          <input
+            type="search"
+            ref={searchInputRef}
+            value={search}
+            aria-label="搜索当前列表"
+            aria-describedby={filtering ? 'nh-message-search-scope' : undefined}
+            placeholder="搜索当前列表"
+            onChange={event => setSearch(event.target.value)}
+          />
+          {search && <button type="button" aria-label="清空搜索" onClick={clearSearch}>清空</button>}
         </div>
         <div
           role="tablist"
           aria-label="消息分类"
-          style={{
-            position: 'relative',
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: 4,
-            padding: 4,
-            borderRadius: 12,
-            background: 'var(--color-bg-accent)',
-            border: '1px solid var(--color-border)',
-          }}
+          className="nh-message-tabs"
         >
-          <span
-            aria-hidden
-            className="nh-msg-seg-thumb"
-            style={{
-              position: 'absolute',
-              top: 4,
-              bottom: 4,
-              left: 4,
-              width: 'calc(50% - 4px)',
-              borderRadius: 10,
-              background: 'var(--color-surface)',
-              boxShadow: '0 1px 3px color-mix(in srgb, var(--color-text) 12%, transparent), 0 0 0 1px color-mix(in srgb, var(--color-primary) 14%, transparent)',
-              transform: tab === 'comment' ? 'translateX(calc(100% + 4px))' : 'translateX(0)',
-              transition: 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)',
-              pointerEvents: 'none',
-              zIndex: 0,
-            }}
-          />
           <SegTab
+            id="nh-message-tab-private"
             active={tab === 'message'}
             onClick={() => setTab('message')}
             label="私信"
             badge={msgBadge}
           />
           <SegTab
+            id="nh-message-tab-notice"
             active={tab === 'comment'}
             onClick={() => setTab('comment')}
             label="通知"
@@ -180,25 +193,45 @@ export default function Messages() {
         </div>
       </header>
 
-      <div key={tab} className="nh-msg-panel" style={{ padding: '8px 0 24px' }}>
+      <div key={tab} id="nh-message-panel" role="tabpanel" aria-labelledby={tab === 'message' ? 'nh-message-tab-private' : 'nh-message-tab-notice'} className="nh-msg-panel" style={{ padding: '4px 20px 24px' }}>
+        <div className="nh-message-section">
+          <h2>{tab === 'message' ? '全部会话' : '全部通知'}</h2>
+          {filtering && !isLoading && <span role="status" aria-live="polite">{shownList.length} 条匹配</span>}
+        </div>
+        {filtering && <p className="nh-message-search-scope" id="nh-message-search-scope">仅查找当前已加载的{tab === 'message' ? '会话' : '通知'}。</p>}
         {isLoading && (
           <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
             <Skeleton height={64} />
             <Skeleton height={64} />
           </div>
         )}
-        {!isLoading && isError && <ListError onRetry={() => active.refetch()} />}
-        {!isLoading && !isError && list.length === 0 && (
+        {!isLoading && isError && list.length === 0 && <ListError onRetry={() => active.refetch()} />}
+        {list.length > 0 && active.isRefetchError && (
+          <div role="status" style={{ textAlign: 'center', padding: 16 }}>
+            <p style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>刷新失败，已保留当前内容</p>
+            <Button variant="secondary" loading={active.isFetching} onClick={() => active.refetch()}>重试刷新</Button>
+          </div>
+        )}
+        {!isLoading && !isError && !filtering && list.length === 0 && (
           <EmptyState
-            illustration={tab === 'message' ? <EmptyMessages /> : <EmptyNotices />}
+            illustration={<MessageHello />}
             title={tab === 'message' ? '暂无私信' : '暂无通知'}
             description={tab === 'message' ? '去社区认识新邻居吧' : '有新动态时会在这里提醒你'}
             actionLabel={tab === 'message' ? '去首页' : undefined}
             onAction={tab === 'message' ? () => navigate('/') : undefined}
           />
         )}
+        {!isLoading && filtering && shownList.length === 0 && (!isError || list.length > 0) && (
+          <EmptyState
+            illustration={<SearchIcon size={44} />}
+            title="当前列表暂无匹配"
+            description={active.hasNextPage ? '可加载更多内容后继续查找，或换个关键词' : '试试其他关键词，或清空搜索查看全部'}
+            actionLabel="清空搜索"
+            onAction={clearSearch}
+          />
+        )}
 
-        {!isLoading && tab === 'message' && messages.map((it) => {
+        {!isLoading && tab === 'message' && shownList.map((it) => {
           const unreadMsg = it.unread > 0
           const postLabel = it.postDeleted ? '原帖已删除' : (it.postTitle || '原帖已删除')
           const preview = it.content
@@ -209,27 +242,33 @@ export default function Messages() {
             <button
               key={`m-${it.conversationId}`}
               type="button"
+              className={`nh-conversation-card${unreadMsg ? ' is-unread' : ''}`}
+              aria-label={unreadMsg ? `未读私信，${it.peerName}，${postLabel}，${preview}，${formatTime(it.createdAt)}` : undefined}
               onClick={() => navigate(`/messages/${it.conversationId}`)}
               style={rowBtn}
             >
-              <span style={{ width: 8, height: 8, borderRadius: 4, flexShrink: 0, background: unreadMsg ? 'var(--color-primary)' : 'transparent' }} />
-              <span style={{ ...avatar, overflow: 'hidden' }}>
-                {peerAvatarSrc
-                  ? <img src={peerAvatarSrc} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  : (it.peerName?.[0] || '邻')}
+              <span className="nh-conversation-avatar" style={avatar} aria-hidden>
+                <span className="nh-conversation-avatar-face">
+                  {peerAvatarSrc
+                    ? <img src={peerAvatarSrc} alt="" />
+                    : (it.peerName?.[0] || '邻')}
+                </span>
+                {unreadMsg && <span className="nh-conversation-unread" />}
               </span>
-              <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                <span style={{ display: 'block', fontWeight: unreadMsg ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.peerName}</span>
-                <span style={{ display: 'block', fontSize: 12, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span className="nh-conversation-copy">
+                <span className="nh-conversation-topline">
+                  <span className="nh-conversation-name" style={{ fontWeight: unreadMsg ? 750 : 650 }}>{it.peerName}</span>
+                  <span className="nh-conversation-time">{formatTime(it.createdAt)}</span>
+                </span>
+                <span className="nh-conversation-preview">
                   {postLabel} · {preview}
                 </span>
               </span>
-              <span style={{ fontSize: 11, color: 'var(--color-text-muted)', flexShrink: 0 }}>{formatTime(it.createdAt)}</span>
             </button>
           )
         })}
 
-        {!isLoading && tab === 'comment' && notifications.map((it) => {
+        {!isLoading && tab === 'comment' && shownList.map((it) => {
           const isThank = it.notiType === 'thank'
           const isAdopt = it.notiType === 'adopt'
           const isRespond = it.notiType === 'respond'
@@ -243,48 +282,59 @@ export default function Messages() {
                 : isLike
                   ? null
                   : NotiCommentIcon
-          const title = isThank
-            ? `${it.actorName} 采纳并感谢了你`
-            : isAdopt
-              ? `${it.actorName} 采纳了你的帮助`
-              : isRespond
-                ? `${it.actorName} 响应了你的帖子`
-                : isLike
-                  ? `${it.actorName} 赞了你的帖子`
-                  : `${it.actorName} 回复了你`
+          const title = notificationTitle(it)
           const showContent = !isThank && !isAdopt && !isRespond && !isLike
           return (
             <button
               key={`n-${it.notificationId}`}
               type="button"
+              className={`nh-conversation-card nh-notification-card${it.read ? '' : ' is-unread'}`}
+              aria-label={!it.read ? `未读通知，${title}，${showContent ? `${it.content}，` : ''}${it.postTitle}，${formatTime(it.createdAt)}` : undefined}
               onClick={() => openComment(it)}
-              style={{
-                ...rowBtn,
-                background: it.read ? 'transparent' : 'color-mix(in srgb, var(--color-primary) 8%, transparent)',
-              }}
+              style={rowBtn}
             >
-              <span style={{ width: 8, height: 8, borderRadius: 4, flexShrink: 0, background: it.read ? 'transparent' : 'var(--color-primary)' }} />
-              <span style={{ ...avatar, background: 'var(--color-bg-accent)', color: 'var(--color-primary)' }}>
-                {isLike
-                  ? <HeartIcon size={22} filled />
-                  : <NotiIcon size={22} />}
+              <span className="nh-conversation-avatar nh-notification-avatar" style={avatar} aria-hidden>
+                <span className="nh-conversation-avatar-face">
+                  {isLike
+                    ? <HeartIcon size={22} filled />
+                    : <NotiIcon size={22} />}
+                </span>
+                {!it.read && <span className="nh-conversation-unread" />}
               </span>
-              <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                <span style={{ display: 'block', fontWeight: it.read ? 500 : 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
-                <span style={{ display: 'block', fontSize: 12, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span className="nh-conversation-copy">
+                <span className="nh-conversation-topline">
+                  <span className="nh-conversation-name nh-notification-name" style={{ fontWeight: it.read ? 650 : 750 }}>{title}</span>
+                  <span className="nh-conversation-time">{formatTime(it.createdAt)}</span>
+                </span>
+                <span className="nh-conversation-preview">
                   {showContent
                     ? `${it.content.slice(0, 20)}${it.content.length > 20 ? '…' : ''} · ${it.postTitle}`
                     : it.postTitle}
                 </span>
               </span>
-              <span style={{ fontSize: 11, color: 'var(--color-text-muted)', flexShrink: 0 }}>{formatTime(it.createdAt)}</span>
             </button>
           )
         })}
 
-        {!isLoading && list.length > 0 && (
+        {!isLoading && (list.length > 0 || (filtering && active.hasNextPage)) && (
           <div ref={sentinelRef} style={{ textAlign: 'center', padding: 16, color: 'var(--color-text-muted)', fontSize: 12 }}>
-            {active.isFetchingNextPage ? '加载中…' : !active.hasNextPage ? '没有更多了' : ''}
+            {active.isFetchNextPageError ? (
+              <div role="status">
+                <p>加载更多失败，已有内容已保留</p>
+                <Button variant="secondary" loading={active.isFetchingNextPage} disabled={active.isFetching && !active.isFetchingNextPage} onClick={() => active.fetchNextPage()}>重试加载更多</Button>
+              </div>
+            ) : filtering && active.hasNextPage ? (
+              <div>
+                <Button
+                  variant="secondary"
+                  loading={active.isFetchingNextPage}
+                  disabled={active.isFetching && !active.isFetchingNextPage}
+                  onClick={() => active.fetchNextPage()}
+                  style={{ borderRadius: 999 }}
+                >加载更多后继续查找</Button>
+                {active.isFetchingNextPage && <p role="status">加载中…</p>}
+              </div>
+            ) : active.isFetchingNextPage ? '加载中…' : !active.hasNextPage ? '没有更多了' : ''}
           </div>
         )}
       </div>
@@ -298,7 +348,6 @@ export default function Messages() {
         }
         @media (prefers-reduced-motion: reduce) {
           .nh-msg-panel { animation: none !important; }
-          .nh-msg-seg-thumb { transition: none !important; }
         }
       `}</style>
       <BottomNav />
@@ -306,31 +355,21 @@ export default function Messages() {
   )
 }
 
-function SegTab({ active, onClick, label, badge }) {
+/** 缺省插画仅由代码绘制轻量问候气泡，不替换任何真人头像或生成虚构会话。 */
+function MessageHello() {
+  return <div className="nh-message-hello" aria-hidden><span>hi</span><span>hi</span><span>hi</span></div>
+}
+
+function SegTab({ active, onClick, label, badge, id }) {
   return (
     <button
       type="button"
+      id={id}
       role="tab"
+      aria-controls="nh-message-panel"
       aria-selected={active}
       onClick={onClick}
-      style={{
-        position: 'relative',
-        zIndex: 1,
-        border: 'none',
-        borderRadius: 10,
-        minHeight: 40,
-        padding: '0 12px',
-        cursor: 'pointer',
-        fontSize: 14,
-        fontWeight: active ? 700 : 600,
-        background: 'transparent',
-        color: active ? 'var(--color-primary)' : 'var(--color-text-muted)',
-        transition: 'color 180ms ease, font-weight 180ms ease',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 6,
-      }}
+      className="nh-message-tab"
     >
       {label}
       {badge ? (
@@ -345,7 +384,7 @@ function SegTab({ active, onClick, label, badge }) {
             lineHeight: '18px',
             textAlign: 'center',
             background: 'var(--color-danger)',
-            color: 'var(--color-on-primary)',
+            color: 'var(--color-on-danger)',
             transition: 'background 180ms ease, color 180ms ease',
           }}
         >
@@ -356,19 +395,14 @@ function SegTab({ active, onClick, label, badge }) {
   )
 }
 
-const linkBtn = {
-  border: 'none', background: 'transparent', color: 'var(--color-text-muted)',
-  fontSize: 13, fontWeight: 600, cursor: 'pointer', minHeight: 36,
-}
 const rowBtn = {
-  display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-  padding: '12px 16px', border: 'none', borderBottom: '1px solid var(--color-border)',
-  background: 'transparent', color: 'var(--color-text)', cursor: 'pointer',
+  display: 'flex', alignItems: 'center', width: '100%',
+  color: 'var(--color-text)', cursor: 'pointer',
 }
 const avatar = {
-  width: 44, height: 44, borderRadius: 22, flexShrink: 0,
+  flexShrink: 0,
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-  background: 'var(--color-primary)', color: 'var(--color-on-primary)', fontSize: 18, fontWeight: 700,
+  fontSize: 20, fontWeight: 700,
 }
 
 function formatTime(ts) {

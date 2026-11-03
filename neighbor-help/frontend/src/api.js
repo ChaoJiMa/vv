@@ -50,6 +50,15 @@ function post(path, body, options = {}) {
   return request(path, { method: 'POST', body: JSON.stringify(body || {}), ...options })
 }
 
+/** 公开注册能力查询：旧服务的 401/404 表示尚未支持，不按登录失效清除当前会话。 */
+async function getRegistrationOptions() {
+  const response = await fetch(BASE + '/auth/registration-options', { headers: { Accept: 'application/json' }, cache: 'no-store' })
+  if (response.status === 401 || response.status === 404) return { inviteCodeSupported: false }
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok || body.code !== 200) throw new Error('暂时无法确认邀请码是否可用，请稍后重试')
+  return { inviteCodeSupported: body.data?.inviteCodeSupported === true }
+}
+
 // 图片上传:走 multipart/form-data,不能用 post()(它强制 application/json)。
 // 不手动设 Content-Type —— 让浏览器自动带上 multipart boundary。
 // 可选 dims 作服务端解析失败时的宽高兜底。返回 { key, width?, height? }。
@@ -136,7 +145,8 @@ export const api = {
   // 图片:上传单张返回 { key, width?, height? };imgUrl 把 key 拼成可访问的代理 URL
   uploadImage,
   imgUrl: (key) => `${BASE}/api/img/${key}?v=2`,
-  register: (body) => post('/auth/register', body),
+  register: (body, options) => post('/auth/register', body, options),
+  getRegistrationOptions,
   loginWithPassword: (body) => post('/auth/login', body),
   loginWithCode: (code) => post('/auth/wechat', { code }),
   setToken: setSessionToken,

@@ -45,6 +45,8 @@ npx wrangler deploy
 - 由旧版 `schema.sql` 手动建库、没有迁移记录的数据库：确认现有结构已包含 `0013` 的功能后，仅执行 `npx wrangler d1 execute neighbor-help-db --remote --file=migrations/0014_image_deletions.sql`。不要直接补跑整个迁移链：历史 `0002` 会删除并重建用户、帖子和评论表。
 - 本地开发使用 `--local` 应用迁移；`schema.sql` 用于结构参考，后续升级使用增量迁移。详见 `worker/migrations/README.md`。
 
+启用本轮可选邀请码时，还需在发布新 Worker 前应用 `0015_registration_invite.sql`。已有环境先核对迁移记录和 `users` 实际列，不能重跑历史建库链；该增量 `ALTER TABLE` 不应手动重复执行。旧前端不传邀请码仍兼容新服务；新前端通过公开注册能力查询识别旧服务，未支持时非空邀请码会就地提示。详见 [注册接口说明](../docs/interfaces/neighbor-help/registration.md) 和 [增量迁移注意事项](worker/migrations/README.md)。
+
 ### 3. 部署前端
 
 ```bash
@@ -78,3 +80,7 @@ cd frontend && npm run dev
 - 闲置转让：转让或免费赠送闲置物品
 - 失物招领：发布丢失或捡到的物品
 - 拼单拼团：组织邻居一起拼外卖/团购
+
+## 浏览与草稿
+
+发现页支持通过 `/discover?type=idle&keyword=台灯` 保留和分享分类搜索条件，并在从详情返回时恢复浏览位置。发帖和编辑自动保存当前标签页的 24 小时文字草稿，离开时可选择保留或放弃；图片改动需重新选择。分页或聊天请求失败可就地重试并保留已有内容。完整使用方式及限制见 [前端说明](frontend/README.md)。
