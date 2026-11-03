@@ -51,3 +51,6 @@
 - 规范摘要（SHA256）：git-workflow.md 为 9A79841B8AD08FA44D9FE14575D0BB301EE3AE05BACB6F73A58A42CAEE58FAC5；AGENTS.md 为 BEC4D4D703BD74910580BCE5D1CB14F90B02D6778B293E0D17E60F6E3E11E3F5；project-dev/SKILL.md 为 4FB0720E705138E04ACBEE6F23708ABB07BE48871D001D2AAD1F1CB0457FFB7B。
 - Java 专属检查不适用；本次没有 Java 源码。未运行线上模型/业务接口、远端迁移或部署；构建提示 Browserslist 数据陈旧，测试工具提示 esbuild 选项弃用，均未导致检查失败。
 - GitHub 连接器连接失败，本机 API 凭据返回 401；外部 PR 创建需要恢复有效认证，不能把本地分支链接当成已创建的 PR。
+
+- 后续复核：GitHub 插件连接恢复并确认仓库写权限，使用插件发布相同文件树；本机 Git 凭据仍失效，不修改全局认证配置。远端审核分支采用 codex/shared-review-agent-learning-neighbor-help，保留原本地分支。
+- 分享前将评测记录中 34 个仅本机存在的链接改为明示的代码路径；最终以实际暂存/提交树核对全部 Markdown 相对链接，不依赖未提交本机产物。
