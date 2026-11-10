@@ -10,11 +10,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import main
-from local_history import HistoryError, HistoryStore
-from report_progress import TurnProgress
-from report_session import Conversation
-import test_analysis as analysis
-import test_privacy as privacy
+from report_assistant.integrations.history import HistoryError, HistoryStore
+from report_assistant.conversation.progress import TurnProgress
+from report_assistant.conversation.session import Conversation
+from support import analysis as analysis
+from support import privacy as privacy
 
 
 class ProgressOutput(io.StringIO):

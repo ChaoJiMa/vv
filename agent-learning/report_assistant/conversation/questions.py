@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import re
 import unicodedata
 
-from report_tools import field_matches_window, is_application_total, time_windows
+from report_assistant.reports.tools import field_matches_window, is_application_total, time_windows
 
 
 def normalize(text):

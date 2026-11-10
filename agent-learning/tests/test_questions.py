@@ -2,9 +2,9 @@
 
 from unittest.mock import patch
 
-import test_privacy as support
-from report_session import Conversation
-from report_tools import LocalReportTools, field_matches_window, time_windows
+from support import privacy as support
+from report_assistant.conversation.session import Conversation
+from report_assistant.reports.tools import LocalReportTools, field_matches_window, time_windows
 
 
 def natural_tools():
@@ -178,7 +178,7 @@ class NaturalQuestionTests(support.NoExternalIO):
         self.assertEqual(client.requests, [])
         conversation.answer("分析指数是多少", client, "synthetic-model")
         self.assertEqual(len(client.requests), 2)
-        support.OutboundTests.assert_private_absent(self, client.requests)
+        support.assert_private_absent(self, client.requests)
 
     def test_failed_history_save_does_not_commit_selected_fields(self):
         history = type("SyntheticHistory", (), {"read": lambda self, scope: [], "append": lambda *args: None})()

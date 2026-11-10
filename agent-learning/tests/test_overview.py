@@ -1,69 +1,27 @@
 """整份报告的顺序、完整读取、简洁输出、失败原子性及真实SDK内存回归。"""
 
+from support.overview import overview_tools, OverviewClient
+
 from copy import deepcopy
 import json
 from types import SimpleNamespace as NS
 from unittest.mock import patch
 
-import test_analysis as analysis
-import test_model_provider as providers
-import test_privacy as support
-from local_history import HistoryError
-from report_analysis import AnalysisContext, AnalysisFailure, MIXED_INSTRUCTION
-from report_service import HOTLINE, service_reply
-from report_overview import OverviewValidationError
-from report_privacy import PrivacyError
-from report_questions import is_report_overview
-from report_session import Conversation
-from report_tools import LocalReportTools
+from support import analysis as analysis
+from support import providers as providers
+from support import privacy as support
+from report_assistant.integrations.history import HistoryError
+from report_assistant.conversation.analysis import AnalysisContext, AnalysisFailure, MIXED_INSTRUCTION
+from report_assistant.conversation.service import HOTLINE, service_reply
+from report_assistant.conversation.overview import OverviewValidationError
+from report_assistant.security.privacy import PrivacyError
+from report_assistant.conversation.questions import is_report_overview
+from report_assistant.conversation.session import Conversation
+from report_assistant.reports.tools import LocalReportTools
 
 
-def overview_tools(count=3, fields=1, reverse=False):
-    """构造模块目录与模板顺序可独立变化的虚构报告，不读取真实数据文件。"""
-    order, catalog = support.fixtures(61.25)
-    catalog["fields"] = []
-    modules, report = [], order["report_data"]["report"]
-    for i in range(count):
-        mid, name = i + 20, "测试模块" + chr(65 + i % 26)
-        modules.append({"moduleId": mid, "moduleName": name})
-        for j in range(fields):
-            key = f"item_{i}_{j}"
-            report[key] = i + j
-            catalog["fields"].append({"module_id": mid, "module_name": name,
-                                      "name": "申请次数", "path": "report." + key, "window": "近7天", "frontend_processing": "直接输出原值"})
-    order["report_data"]["template"]["modules"] = modules[::-1] if reverse else modules
-    return LocalReportTools(order, catalog)
 
 
-class OverviewClient:
-    """根据实际批准的输入生成协议响应，可在边界注入失败或不可信输出。"""
-
-    def __init__(self, mutate=None):
-        self.requests, self.mutate = [], mutate
-        self.chat = NS(completions=NS(create=self.create))
-
-    def create(self, **options):
-        self.requests.append(deepcopy(options))
-        try:
-            payload = json.loads(options["messages"][-1]["content"])
-        except ValueError:
-            payload = {}
-        if not payload.get("modules"):
-            stage = "route"
-            value = {"route": "report", "use_previous": False, "scope": "overview"}
-        elif "facts" in payload["modules"][0]:
-            stage = "modules"
-            value = {"modules": [{"module_ref": m["module_ref"],
-                                  "text": "本模块登记了申请信息，可结合周期变化了解申请情况。",
-                                  "sources": [f["field_ref"] for f in m["facts"]]}
-                                 for m in reversed(payload["modules"])]}
-        else:
-            stage = "summary"
-            value = {"text": "综合各模块，主要可关注申请记录及周期变化，未提供的信息仍需进一步核对。",
-                     "sources": payload["modules"][0]["sources"]}
-        if self.mutate:
-            value = self.mutate(stage, value, payload, len(self.requests))
-        return analysis.response(json.dumps(value, ensure_ascii=False))
 
 
 class OverviewTests(support.NoExternalIO):
@@ -204,7 +162,7 @@ class OverviewTests(support.NoExternalIO):
         self.assertIn("1,000次", answer)
 
     def test_thousands_separator_does_not_approve_changed_or_malformed_numbers(self):
-        from report_projection import check_answer_numbers
+        from report_assistant.security.answer_validation import check_answer_numbers
         for text in ("1,001次", "10,00次", "1,000,00次", "1,000.5次"):
             with self.subTest(text=text), self.assertRaises(PrivacyError):
                 check_answer_numbers(text, [{"status": "provided", "value": 1000}])
@@ -223,21 +181,21 @@ class OverviewTests(support.NoExternalIO):
         self.assertEqual(len(client.requests), 2)
 
     def test_date_separators_and_padding_preserve_the_complete_date(self):
-        from report_projection import check_answer_numbers
+        from report_assistant.security.answer_validation import check_answer_numbers
         for source in ("2024-05-07", "2024/5/7", "2024.05.07", "2024年05月07日", "2024-05-07T08:09:10"):
             for text in ("日期2024年5月7日", "日期2024-5-7", "日期2024/05/07", "日期2024.5.7"):
                 with self.subTest(source=source, text=text):
                     check_answer_numbers(text, [{"status": "provided", "value": source}])
 
     def test_changed_date_cannot_reuse_other_source_numbers(self):
-        from report_projection import check_answer_numbers
+        from report_assistant.security.answer_validation import check_answer_numbers
         facts = [{"status": "provided", "value": ["2024-05-07", 6, 31]}]
         for text in ("2024年7月5日", "2024年6月7日", "2024年5月31日", "2025年5月7日", "2024年5月7日，金额999元"):
             with self.subTest(text=text), self.assertRaises(PrivacyError):
                 check_answer_numbers(text, facts)
 
     def test_date_normalization_does_not_change_signed_values(self):
-        from report_projection import check_answer_numbers
+        from report_assistant.security.answer_validation import check_answer_numbers
         facts = [{"status": "provided", "value": ["2024-05-07", -19]}]
         check_answer_numbers("日期2024年5月7日，变动-19元", facts)
         for text in ("变动19元", "日期2024年5月7日，变动19元", "日期2024年5月7日，变动-5元"):
@@ -258,7 +216,7 @@ class OverviewTests(support.NoExternalIO):
         self.assertIn("成功率显示为0%", answer)
 
     def test_percentage_requires_exact_display_source_not_plain_number_or_scaling(self):
-        from report_projection import check_answer_numbers
+        from report_assistant.security.answer_validation import check_answer_numbers
         check_answer_numbers("成功率为32%。", [{"status": "provided", "value": "32%"}])
         for text, value in (("成功率0%", 0), ("成功率32%", 0.32), ("成功率31%", "32%")):
             with self.subTest(text=text, value=value), self.assertRaises(PrivacyError):
@@ -484,11 +442,11 @@ class OverviewTests(support.NoExternalIO):
                 self.assertEqual(client.requests, [])
                 self.assertIn("改用本地", answer)
                 self.assertIsNone(conversation.analysis_context)
-        with patch("report_overview.MAX_PAYLOAD_CHARS", 10):
+        with patch("report_assistant.conversation.overview.MAX_PAYLOAD_CHARS", 10):
             _, client, answer = self.run_overview()
             self.assertEqual(client.requests, [])
             self.assertIn("改用本地", answer)
-        with patch("report_overview.MAX_BATCHES", 1):
+        with patch("report_assistant.conversation.overview.MAX_BATCHES", 1):
             _, client, answer = self.run_overview(tools=overview_tools(count=9))
             self.assertEqual(client.requests, [])
             self.assertIn("改用本地", answer)
@@ -525,7 +483,7 @@ class OverviewTests(support.NoExternalIO):
 
 class OverviewSDKTests(support.NoExternalIO):
     def test_deepseek_and_sol_support_the_module_and_summary_json_protocol(self):
-        for provider in (providers.DeepSeekTests, providers.OpenAIProviderTests):
+        for provider in (providers.DeepSeekProtocol, providers.OpenAIProtocol):
             with self.subTest(provider=provider.__name__):
                 fake, requests = OverviewClient(), []
                 def handler(request):

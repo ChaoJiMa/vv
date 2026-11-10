@@ -3,12 +3,13 @@
 from copy import deepcopy
 import json
 
-from report_display import HIDDEN, MISSING, UNCONFIRMED, display_dependencies, display_field
-from report_analysis import AnalysisStrategy
-from report_privacy import PrivacyError
-from report_projection import FactProjection, QuestionGuard
-from report_tools import LocalReportTools
-import test_privacy as support
+from report_assistant.reports.display import HIDDEN, MISSING, UNCONFIRMED, display_dependencies, display_field
+from report_assistant.conversation.analysis import AnalysisStrategy
+from report_assistant.security.privacy import PrivacyError
+from report_assistant.reports.projection import FactProjection
+from report_assistant.security.question_guard import QuestionGuard
+from report_assistant.reports.tools import LocalReportTools
+from support import privacy as support
 
 
 def field(path, rule, enum='', mid=9, name='展示结果'):
@@ -55,7 +56,7 @@ class DisplayRuleTests(support.NoExternalIO):
                 strategy._check_text(text)
 
     def test_negated_borrowing_and_overdue_share_only_one_negative_scope(self):
-        from report_overview import ReportOverview
+        from report_assistant.conversation.overview import ReportOverview
         strategy = AnalysisStrategy(projection_with({}, []).tools)
         overview = ReportOverview(strategy.tools, strategy.projection, strategy._check_text, json.loads)
         facts = {'f1': {'status': 'missing'}}

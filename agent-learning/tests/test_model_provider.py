@@ -1,5 +1,9 @@
 """DeepSeek 的真实 SDK 内存协议回归；使用虚构凭据且禁止外部网络。"""
 
+from support.providers import DeepSeekProtocol, OpenAIProtocol
+
+from report_assistant.runtime import models as model_runtime
+
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 import io
 import json
@@ -11,35 +15,17 @@ from unittest.mock import patch
 import httpx
 
 import main
-import test_analysis as support
-import test_privacy as privacy
-from report_model import DEEPSEEK_DEFAULT_MODEL, OPENAI_BASE_URL, OPENAI_DEFAULT_MODEL, DeepSeekClient, OpenAIResponsesClient, openai_base_url
-from report_service import SERVICE_REPLIES
-from report_session import Conversation
+from support import analysis as support
+from support import privacy as privacy
+from report_assistant.integrations.model import DEEPSEEK_DEFAULT_MODEL, OPENAI_BASE_URL, OPENAI_DEFAULT_MODEL, DeepSeekClient, OpenAIResponsesClient, openai_base_url
+from report_assistant.conversation.service import SERVICE_REPLIES
+from report_assistant.conversation.session import Conversation
 
 
-class DeepSeekTests(privacy.NoExternalIO):
+class DeepSeekTests(DeepSeekProtocol, privacy.NoExternalIO):
     """检查 SDK 参数、工具往返、权限出口、失败分类和终端厂商选择。"""
 
-    def client(self, handler):
-        """使用固定官网 URL 与内存传输，退出测试时统一释放 SDK 和 HTTP 连接。"""
-        stack = ExitStack()
-        self.addCleanup(stack.close)
-        transport = stack.enter_context(httpx.Client(
-            transport=httpx.MockTransport(handler), trust_env=False, follow_redirects=False,
-        ))
-        return stack.enter_context(DeepSeekClient("SYNTHETIC_DEEPSEEK_KEY", transport))
 
-    def response(self, result):
-        """将已有脚本响应转成真实 SDK 可解析的 HTTP JSON，不手写另一套工具协议。"""
-        body = json.loads(json.dumps(result, default=vars))
-        body.update(id="synthetic", created=1, model=DEEPSEEK_DEFAULT_MODEL)
-        for choice in body["choices"]:
-            choice.update(index=0)
-            choice["message"]["role"] = "assistant"
-            for call in choice["message"].get("tool_calls") or []:
-                call["type"] = "function"
-        return httpx.Response(200, json=body)
 
     def test_service_route_pins_endpoint_and_sends_only_selected_key(self):
         requests = []
@@ -91,7 +77,7 @@ class DeepSeekTests(privacy.NoExternalIO):
         for payload in wire:
             self.assertEqual(payload["thinking"], {"type": "disabled"})
             self.assertNotIn("reasoning_content", json.dumps(payload))
-        support.AnalysisTests.assert_no_private(self, wire)
+        support.assert_no_private(self, wire)
         before = len(wire)
         answer = conversation.answer("姓名张三，身份证110101199001011234", self.client(handler), DEEPSEEK_DEFAULT_MODEL)
         self.assertIn("本轮已留在本地", answer)
@@ -138,8 +124,8 @@ class DeepSeekTests(privacy.NoExternalIO):
             stack.enter_context(patch.object(main, "configure_private_logging"))
             stack.enter_context(patch.object(main, "default_history_path", return_value=Path(tmp) / "history.sqlite3"))
             stack.enter_context(patch.object(main.LocalReportTools, "demo", return_value=support.analysis_tools()))
-            deepseek = stack.enter_context(patch.object(main, "DeepSeekClient"))
-            zhipu = stack.enter_context(patch.object(main, "ZhipuAiClient"))
+            deepseek = stack.enter_context(patch.object(model_runtime, "DeepSeekClient"))
+            zhipu = stack.enter_context(patch.object(model_runtime, "ZhipuAiClient"))
             stack.enter_context(patch("builtins.input", side_effect=["你好", "exit"]))
             output = io.StringIO()
             with redirect_stdout(output), redirect_stderr(output):
@@ -162,31 +148,10 @@ class DeepSeekTests(privacy.NoExternalIO):
             history.assert_not_called()
 
 
-class OpenAIProviderTests(privacy.NoExternalIO):
+class OpenAIProviderTests(OpenAIProtocol, privacy.NoExternalIO):
     """真实 SDK 的 Responses 内存验证；不读取本机密钥或 Codex 身份。"""
 
-    def client(self, handler, base_url=None):
-        """创建显式OpenAI出口，网络仅由内存handler接收。"""
-        stack = ExitStack()
-        self.addCleanup(stack.close)
-        transport = stack.enter_context(httpx.Client(
-            transport=httpx.MockTransport(handler), trust_env=False, follow_redirects=False,
-        ))
-        return stack.enter_context(OpenAIResponsesClient("SYNTHETIC_OPENAI_KEY", transport, base_url=base_url))
 
-    def response(self, result):
-        """把既有脚本工具响应转换为 Responses 格式，并附上必须丢弃的推理内容。"""
-        message = result.choices[0].message
-        output = [{"type": "reasoning", "id": "rs_synthetic", "summary": [],
-                   "encrypted_content": "SYNTHETIC_PRIVATE_REASONING"}]
-        for call in message.tool_calls or []:
-            output.append({"type": "function_call", "id": "fc_" + call.id, "call_id": call.id,
-                           "name": call.function.name, "arguments": call.function.arguments, "status": "completed"})
-        if message.content is not None:
-            output.append({"type": "message", "id": "msg_synthetic", "role": "assistant", "status": "completed",
-                           "content": [{"type": "output_text", "text": message.content, "annotations": []}]})
-        return httpx.Response(200, json={"id": "resp_synthetic", "object": "response", "created_at": 1,
-                                        "model": OPENAI_DEFAULT_MODEL, "status": "completed", "error": None, "output": output})
 
     def test_sol_uses_responses_and_keeps_json_route_stateless(self):
         requests = []
@@ -260,7 +225,7 @@ class OpenAIProviderTests(privacy.NoExternalIO):
         serialized = json.dumps(wire)
         for forbidden in ("SYNTHETIC_PRIVATE_REASONING", "reasoning_content", "encrypted_content", "resp_synthetic", "fc_c1"):
             self.assertNotIn(forbidden, serialized)
-        support.AnalysisTests.assert_no_private(self, wire)
+        support.assert_no_private(self, wire)
         before = len(wire)
         conversation.answer("姓名张三，身份证110101199001011234", client, OPENAI_DEFAULT_MODEL)
         self.assertEqual(len(wire), before)
@@ -319,8 +284,8 @@ class OpenAIProviderTests(privacy.NoExternalIO):
                 stack.enter_context(patch.object(main, "configure_private_logging"))
                 stack.enter_context(patch.object(main, "default_history_path", return_value=Path(tmp) / "history.sqlite3"))
                 stack.enter_context(patch.object(main.LocalReportTools, "demo", return_value=support.analysis_tools()))
-                sdk = stack.enter_context(patch.object(main, "OpenAIResponsesClient"))
-                deepseek = stack.enter_context(patch.object(main, "DeepSeekClient"))
+                sdk = stack.enter_context(patch.object(model_runtime, "OpenAIResponsesClient"))
+                deepseek = stack.enter_context(patch.object(model_runtime, "DeepSeekClient"))
                 stack.enter_context(patch("builtins.input", side_effect=["exit"]))
                 output = io.StringIO()
                 with redirect_stdout(output), redirect_stderr(output):

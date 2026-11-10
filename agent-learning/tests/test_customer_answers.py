@@ -3,14 +3,15 @@
 from copy import deepcopy
 import json
 
-import test_analysis as analysis
-import test_overview as overview
-import test_privacy as support
-from report_privacy import PrivacyError
-from report_projection import FactProjection, QuestionGuard
-from report_score import score_family
-from report_session import Conversation
-from report_tools import LocalReportTools
+from support import analysis as analysis
+from support import overview as overview
+from support import privacy as support
+from report_assistant.security.privacy import PrivacyError
+from report_assistant.reports.projection import FactProjection
+from report_assistant.security.question_guard import QuestionGuard
+from report_assistant.reports.score import score_family
+from report_assistant.conversation.session import Conversation
+from report_assistant.reports.tools import LocalReportTools
 
 
 def score_tools(value=31, theme=3, config="", missing=False, private_name=None):

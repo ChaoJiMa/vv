@@ -6,11 +6,12 @@ from pathlib import Path
 import re
 import unicodedata
 
-from report_redaction import collect_literals, protected_path, PERSONAL_LABEL
-from report_score import describe_score
-from report_display import MISSING, UNCONFIRMED, display_dependencies, display_field
+from report_assistant.security.redaction import collect_literals, protected_path, PERSONAL_LABEL
+from report_assistant.reports.score import describe_score
+from report_assistant.reports.display import MISSING, UNCONFIRMED, display_dependencies, display_field
 
-DATA_DIR = Path(__file__).with_name("data")
+# 代码移入包后仍锚定项目级data，不随当前工作目录或包内目录改变数据来源。
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
 # 本地时间匹配允许目录中实际存在的周期；不扩大模型出口的时间枚举。
 _NUMBERS = {"一": 1, "一个": 1, "七": 7, "两": 2, "二": 2, "三": 3,

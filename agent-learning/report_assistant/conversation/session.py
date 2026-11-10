@@ -2,12 +2,12 @@
 
 from datetime import datetime, timezone
 
-from report_privacy import TEMPLATES, approved_request, choose_template
-from report_questions import LocalQuery, LocalQuestionResolver
-from report_analysis import AnalysisContext, AnalysisFailure, AnalysisStrategy
-from report_privacy import PrivacyError
-from report_service import local_service_topic, service_reply
-from report_score import score_family
+from report_assistant.security.privacy import TEMPLATES, approved_request, choose_template
+from report_assistant.conversation.questions import LocalQuery, LocalQuestionResolver
+from report_assistant.conversation.analysis import AnalysisContext, AnalysisFailure, AnalysisStrategy
+from report_assistant.security.privacy import PrivacyError
+from report_assistant.conversation.service import local_service_topic, service_reply
+from report_assistant.reports.score import score_family
 
 
 class Conversation:

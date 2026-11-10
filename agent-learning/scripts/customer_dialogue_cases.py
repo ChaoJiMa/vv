@@ -3,7 +3,7 @@
 
 def dialogue_cases():
     """覆盖改口、指代、催促、礼貌收尾及报告与客服共问，复用既有虚构报告。"""
-    from scripts.customer_eval_cases import Case, Step
+    from scripts.eval_support.contracts import Case, Step
 
     def count(question, field='nonbank_M1_count', required=(('8次', '8 次', '八次'),)):
         return Step(question, fields=(field,), required=required, max_chars=120)

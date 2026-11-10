@@ -1,5 +1,7 @@
 """登录协议、错误脱敏及 CLI 联通路径；凭据虚构，禁止真实网络。"""
 
+from report_assistant.runtime import models as model_runtime
+
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 import io
 import json
@@ -11,11 +13,12 @@ from unittest.mock import patch
 import httpx
 
 import main
-from report_api import MY_REPORTS_PATH, REPORT_DATA_PATH, ReportApi, select_report
-from report_auth import LOGIN_PATH, TEST_CODE_PATH, ReportAuth, login_from_env
-from report_http import ReportApiError, TEST_API_BASE_URL
-from report_tools import LocalReportTools
-from test_privacy import NoExternalIO, PRIVATE_VALUE, fixtures
+from report_assistant.ui.report_selection import select_report
+from report_assistant.integrations.api import MY_REPORTS_PATH, REPORT_DATA_PATH, ReportApi
+from report_assistant.integrations.auth import LOGIN_PATH, TEST_CODE_PATH, ReportAuth, login_from_env
+from report_assistant.integrations.http import ReportApiError, TEST_API_BASE_URL
+from report_assistant.reports.tools import LocalReportTools
+from support.privacy import NoExternalIO, PRIVATE_VALUE, fixtures
 
 
 MOBILE = "13800000000"
@@ -134,7 +137,7 @@ class LoginTests(NoExternalIO):
 
     def test_existing_token_does_not_trigger_login(self):
         with patch.dict(os.environ, {"REPORT_API_BASE_URL": TEST_API_BASE_URL, "REPORT_USER_TOKEN": TOKEN}, clear=True), \
-                patch("report_api.login_from_env") as login:
+                patch("report_assistant.integrations.api.login_from_env") as login:
             api = ReportApi.from_env(httpx.MockTransport(lambda request: None))
             self.addCleanup(api.close)
             login.assert_not_called()
@@ -143,8 +146,8 @@ class LoginTests(NoExternalIO):
     def test_prompted_sms_code_uses_hidden_input_and_closes_login_client(self):
         with patch.dict(os.environ, {"REPORT_LOGIN_MODE": "sms"}, clear=True), \
                 patch("builtins.input", return_value=MOBILE), \
-                patch("report_auth.getpass", return_value=SMS_CODE) as secret, \
-                patch("report_auth.ReportAuth") as auth:
+                patch("report_assistant.integrations.auth.getpass", return_value=SMS_CODE) as secret, \
+                patch("report_assistant.integrations.auth.ReportAuth") as auth:
             auth.return_value.login.return_value = TOKEN
             self.assertEqual(login_from_env(TEST_API_BASE_URL), TOKEN)
             secret.assert_called_once()
@@ -160,11 +163,12 @@ class LoginTests(NoExternalIO):
             self.assertIsNone(select_report(api))
             prompt.assert_not_called()
         self.assertIn("暂无可用报告", output.getvalue())
+        self.assertNotIn("REPORT_LOGIN_MOBILE", output.getvalue())
 
     def test_cli_uses_automatic_login_and_reports_empty_account(self):
         # 复用已有日志恢复逻辑，避免本测试永久关闭其他测试的日志。
-        from test_transports import StartupTests
-        StartupTests.preserve_loggers(self)
+        from support.privacy import preserve_loggers
+        preserve_loggers(self)
 
         def respond(request):
             data = (SMS_CODE if request.url.path == TEST_CODE_PATH else
@@ -179,7 +183,7 @@ class LoginTests(NoExternalIO):
             resources.enter_context(patch.object(main, "load_dotenv"))
             resources.enter_context(patch.object(main, "default_history_path", return_value=Path(tmp) / "history.sqlite3"))
             resources.enter_context(patch.object(ReportApi, "from_env", side_effect=lambda: original(httpx.MockTransport(respond))))
-            sdk = resources.enter_context(patch.object(main, "ZhipuAiClient"))
+            sdk = resources.enter_context(patch.object(model_runtime, "ZhipuAiClient"))
             resources.enter_context(patch("builtins.input", side_effect=AssertionError("Unexpected prompt")))
             output = io.StringIO()
             with redirect_stdout(output), redirect_stderr(output):

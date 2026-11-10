@@ -6,13 +6,14 @@ from types import SimpleNamespace as NS
 
 import httpx
 
-import test_analysis as analysis
-import test_model_provider as providers
-import test_privacy as support
-from report_model import DEEPSEEK_DEFAULT_MODEL
-from report_projection import FactProjection, QuestionGuard
-from report_tools import LocalReportTools
-from report_session import Conversation
+from support import analysis as analysis
+from support import providers as providers
+from support import privacy as support
+from report_assistant.integrations.model import DEEPSEEK_DEFAULT_MODEL
+from report_assistant.reports.projection import FactProjection
+from report_assistant.security.question_guard import QuestionGuard
+from report_assistant.reports.tools import LocalReportTools
+from report_assistant.conversation.session import Conversation
 
 
 def scope_fixture():
@@ -164,8 +165,8 @@ class ReportScopeTests(support.NoExternalIO):
 class SDKReportScopeTests(support.NoExternalIO):
     """复用已有真实 SDK 内存传输，验证嵌套脱敏结果经过最终序列化仍保持边界。"""
 
-    client = providers.DeepSeekTests.client
-    response = providers.DeepSeekTests.response
+    client = providers.DeepSeekProtocol.client
+    response = providers.DeepSeekProtocol.response
 
     def test_real_sdk_sends_filtered_case_records(self):
         tools = LocalReportTools(*scope_fixture())

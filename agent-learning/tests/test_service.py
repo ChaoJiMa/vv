@@ -9,12 +9,12 @@ from unittest.mock import patch
 import httpx
 from zai import ZhipuAiClient
 
-import test_analysis as support
-import test_privacy as privacy
-from local_history import HistoryError
-from report_analysis import AnalysisContext, AnalysisStrategy, OUT_OF_SCOPE_REPLY
-from report_service import CONTACT_REPLY, HOTLINE, SERVICE_EMAIL, SERVICE_REPLIES, local_service_topic
-from report_session import Conversation
+from support import analysis as support
+from support import privacy as privacy
+from report_assistant.integrations.history import HistoryError
+from report_assistant.conversation.analysis import AnalysisContext, AnalysisStrategy, OUT_OF_SCOPE_REPLY
+from report_assistant.conversation.service import CONTACT_REPLY, HOTLINE, SERVICE_EMAIL, SERVICE_REPLIES, local_service_topic
+from report_assistant.conversation.session import Conversation
 
 
 class ServiceTests(privacy.NoExternalIO):
@@ -103,7 +103,8 @@ class ServiceTests(privacy.NoExternalIO):
     def test_policies_do_not_invent_missing_fields_report_count_or_source_endorsements(self):
         self.assertIn("不代表报告中没有", SERVICE_REPLIES["identity"])
         self.assertIn("不能据此确定", SERVICE_REPLIES["report_list"])
-        self.assertIn("/orders", SERVICE_REPLIES["report_list"])
+        self.assertIn("报告列表", SERVICE_REPLIES["report_list"])
+        self.assertNotIn("/orders", SERVICE_REPLIES["report_list"])
         self.assertIn("没有可据以判断的统一", SERVICE_REPLIES["application_frequency"])
         for term in ("国资系", "来源合规", "无风险", "非常健康", "贷款一定通过"):
             self.assertNotIn(term, "".join(SERVICE_REPLIES.values()))

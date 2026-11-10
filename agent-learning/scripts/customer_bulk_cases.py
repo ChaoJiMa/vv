@@ -9,7 +9,7 @@ import random
 import re
 import unicodedata
 
-from scripts.customer_eval_cases import Case, Step
+from scripts.eval_support.contracts import Case, Step
 
 
 @dataclass(frozen=True)

@@ -20,8 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv
-from main import configure_private_logging
-from report_session import Conversation
+from report_assistant.runtime.logging import configure_private_logging
+from report_assistant.conversation.session import Conversation
 from scripts.customer_bulk_cases import bulk_cases
 from scripts.customer_eval_cases import synthetic_tools
 from scripts.evaluate_customer import (MeteredClient, ObservedAnalysis, fingerprint, judge,

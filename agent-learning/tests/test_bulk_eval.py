@@ -12,9 +12,11 @@ from scripts.customer_bulk_cases import bulk_cases, question_key
 from scripts.customer_eval_cases import synthetic_tools
 from scripts.evaluate_bulk import (case_hash, continuation_cases, load_completed,
                                    output_lock, summary, supervise)
-from report_privacy import PrivacyError
-from report_projection import QuestionGuard, check_answer_numbers, normalized
-from report_analysis import AnalysisStrategy
+from report_assistant.security.privacy import PrivacyError
+from report_assistant.security.question_guard import QuestionGuard
+from report_assistant.security.answer_validation import check_answer_numbers
+from report_assistant.security.text import normalized
+from report_assistant.conversation.analysis import AnalysisStrategy
 
 
 class BulkEvaluationTests(unittest.TestCase):

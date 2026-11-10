@@ -1,5 +1,9 @@
 """用真实 SDK + 内存 HTTP 传输验证出口；不读取配置、不连接外部服务。"""
 
+from support.privacy import preserve_loggers
+
+from report_assistant.runtime import models as model_runtime
+
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 import io
 import json
@@ -13,12 +17,12 @@ import httpx
 from zai import ZhipuAiClient
 
 import main
-import test_privacy as support
-from report_api import MY_REPORTS_PATH, REPORT_DATA_PATH, ReportApi, ReportApiError
-from report_privacy import TOOL_RECEIPT
-from report_session import Conversation
-from report_tools import LocalReportTools
-from test_privacy import NoExternalIO, PRIVATE_ID, PRIVATE_META, PRIVATE_VALUE, fixtures
+from support import privacy as support
+from report_assistant.integrations.api import MY_REPORTS_PATH, REPORT_DATA_PATH, ReportApi, ReportApiError
+from report_assistant.security.privacy import TOOL_RECEIPT
+from report_assistant.conversation.session import Conversation
+from report_assistant.reports.tools import LocalReportTools
+from support.privacy import NoExternalIO, PRIVATE_ID, PRIVATE_META, PRIVATE_VALUE, fixtures
 
 
 class ModelTransportTests(NoExternalIO):
@@ -57,7 +61,7 @@ class ModelTransportTests(NoExternalIO):
             self.assertIn(PRIVATE_VALUE, conversation.answer("分析指数是多少", client, "synthetic-model"))
             conversation.answer("这个指数的数据从哪里来？", client, "synthetic-model")
             self.assertEqual(len(requests), 4)
-            support.OutboundTests.assert_private_absent(self, requests)
+            support.assert_private_absent(self, requests)
             self.assertEqual(requests[1]["body"]["messages"][-1]["content"], TOOL_RECEIPT)
             for request in requests:
                 self.assertNotIn("token", request["headers"])
@@ -99,7 +103,7 @@ class ModelTransportTests(NoExternalIO):
             self.assertIn(PRIVATE_VALUE, answer)
             self.assertEqual(len(requests), 1)
             self.assertEqual(captured.getvalue(), "")
-            support.OutboundTests.assert_private_absent(self, requests)
+            support.assert_private_absent(self, requests)
 
 
 class BusinessTransportTests(NoExternalIO):
@@ -166,21 +170,7 @@ class BusinessTransportTests(NoExternalIO):
 
 
 class StartupTests(NoExternalIO):
-    def preserve_loggers(self):
-        names = {"httpx", "httpcore", "zai", "zai.core._http_client", "httpcore.connection"}
-        names.update(name for name in logging.root.manager.loggerDict
-                     if name.startswith(("httpx.", "httpcore.", "zai.")))
-        for name in names:
-            logger = logging.getLogger(name)
-            handlers, level, propagate, disabled = logger.handlers[:], logger.level, logger.propagate, logger.disabled
-
-            def restore(logger=logger, handlers=handlers, level=level, propagate=propagate, disabled=disabled):
-                logger.handlers = handlers
-                logger.setLevel(level)
-                logger.propagate = propagate
-                logger.disabled = disabled
-
-            self.addCleanup(restore)
+    preserve_loggers = preserve_loggers
 
     def test_existing_child_log_handlers_cannot_bypass_private_logging(self):
         self.preserve_loggers()
@@ -205,7 +195,7 @@ class StartupTests(NoExternalIO):
             dotenv = resources.enter_context(patch.object(main, "load_dotenv"))
             resources.enter_context(patch.object(main, "default_history_path", return_value=path))
             resources.enter_context(patch.object(main.LocalReportTools, "demo", return_value=self.tools()))
-            sdk = resources.enter_context(patch.object(main, "ZhipuAiClient"))
+            sdk = resources.enter_context(patch.object(model_runtime, "ZhipuAiClient"))
             resources.enter_context(patch("builtins.input", side_effect=["分析指数是多少", "/history", "exit"]))
             captured = io.StringIO()
             with redirect_stdout(captured), redirect_stderr(captured):
@@ -214,9 +204,11 @@ class StartupTests(NoExternalIO):
             sdk.assert_not_called()
             self.assertIn(PRIVATE_VALUE, captured.getvalue())
             self.assertNotIn(PRIVATE_VALUE.encode(), path.read_bytes())
+            for internal_hint in ('/find', '/pick', '/orders', '/history', 'REPORT_EXTERNAL_MODEL='):
+                self.assertNotIn(internal_hint, captured.getvalue())
 
     def test_external_mode_pins_endpoint_and_never_passes_business_token(self):
-        import test_analysis as analysis_support
+        from support import analysis as analysis_support
 
         self.preserve_loggers()
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as resources:
@@ -229,7 +221,7 @@ class StartupTests(NoExternalIO):
             resources.enter_context(patch.object(main, "load_dotenv"))
             resources.enter_context(patch.object(main, "default_history_path", return_value=Path(tmp) / "history.sqlite3"))
             resources.enter_context(patch.object(main.LocalReportTools, "demo", return_value=self.tools()))
-            sdk = resources.enter_context(patch.object(main, "ZhipuAiClient"))
+            sdk = resources.enter_context(patch.object(model_runtime, "ZhipuAiClient"))
             client = analysis_support.report_client(text="当前字段提供了报告原文，需结合其他字段查看。")
             sdk.return_value.__enter__.return_value = client
             resources.enter_context(patch("builtins.input", side_effect=[

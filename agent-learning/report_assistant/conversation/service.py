@@ -2,7 +2,7 @@
 
 import re
 
-from report_projection import normalized
+from report_assistant.security.text import normalized
 
 
 # 联系方式与时段来自用户于2026-10-30提供的客服话术，不推导退款政策或处理时效。
@@ -47,16 +47,16 @@ SERVICE_REPLIES = {
     "identity": (
         "小贝不会通过外部AI读取或展示您的姓名、身份证号等个人信息，"
         "这不代表报告中没有这些字段。您可以在本人报告页面核实，"
-        "或在本地输入 /find 姓名、/find 身份证 查找已登记字段。请不要把证件号码发到AI对话中。"
+        "请不要把证件号码发到AI对话中；需要核实时，可联系人工客服。"
     ),
     "report_list": (
         "当前对话只绑定已选中的这份报告，小贝不能据此确定您名下共有多少份报告。"
-        "在业务报告模式下，可输入 /orders 重新查看可选报告；"
+        "报告数量请以账号下的报告列表为准；"
         f"也可以拨打 {HOTLINE} 请人工协助核实。"
     ),
     "attention": (
         "您想查询报告中名为“关注内容”的栏目，还是让我总结这份报告需要留意的地方？"
-        "查询栏目可输入 /find 关注内容；整体解读可说“分析我的报告”。"
+        "您可以直接告诉我具体栏目名称，或说“帮我总结需要留意的地方”。"
     ),
 }
 
@@ -90,12 +90,15 @@ def service_reply(topic):
     return SERVICE_REPLIES[topic]
 
 
-def service_replies(topics):
+def service_replies(topics, *, local_complete=False):
     """组合已验证的多个客服主题，保留办理边界，热线联系方式只显示一次。
 
     单主题继续返回原固定文案，保持现有调用契约；不允许模型传入自定义答复。
+    默认仍限制模型主题至3项；仅程序完整识别的本地诉求可组合封闭知识全集，
+    以免第4项被静默截断，并统一去重联系方式。此参数不进入模型工具协议。
     """
-    if (not isinstance(topics, (list, tuple)) or not 1 <= len(topics) <= 3
+    limit = len(SERVICE_REPLIES) if local_complete is True else 3
+    if (not isinstance(topics, (list, tuple)) or not 1 <= len(topics) <= limit
             or not all(type(topic) is str and topic in SERVICE_REPLIES for topic in topics)
             or len(set(topics)) != len(topics)):
         raise ValueError('客服主题列表无效。')
@@ -124,3 +127,20 @@ def service_replies(topics):
                 contact_shown = True
         parts.append(text.strip())
     return '\n\n'.join(parts)
+
+
+def append_service_answer(report_answer, topics):
+    """追加可信客服知识；仅在报告已明确说过同一封闭限制时去掉知识中的重复首句。
+
+    不删除或改写模型报告正文，不碰数字、否定范围、办理办法或联系方式。
+    未知措辞宁可重复，不能用宽泛相似度把必要说明删掉。
+    """
+    reply = service_replies(topics, local_complete=True)
+    if 'report_list' in topics:
+        repeated = re.search(
+            r'(?:^|[。！？\n])\s*(?:您)?(?:账号下|名下)的报告总数(?:目前)?'
+            r'(?:无法|不能)(?:通过|从)(?:当前这份|当前|这份)报告(?:中)?确认[。！]', report_answer)
+        if repeated:
+            prefix = SERVICE_REPLIES['report_list'].split('。', 1)[0] + '。'
+            reply = reply.replace(prefix, '', 1)
+    return report_answer + ('\n\n' if report_answer else '') + reply.strip()

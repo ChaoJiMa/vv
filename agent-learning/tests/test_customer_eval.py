@@ -7,13 +7,13 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import test_analysis as analysis
+from support import analysis as analysis
 
-from report_analysis import AnalysisContext
-from report_privacy import PrivacyError
-from report_projection import assertion_text, check_answer_numbers
-from report_session import Conversation
-from report_service import HOTLINE, service_replies
+from report_assistant.conversation.analysis import AnalysisContext
+from report_assistant.security.privacy import PrivacyError
+from report_assistant.security.answer_validation import assertion_text, check_answer_numbers
+from report_assistant.conversation.session import Conversation
+from report_assistant.conversation.service import HOTLINE, service_replies
 from scripts.customer_eval_cases import Step, cases, synthetic_tools
 from scripts.evaluate_customer import judge, safe_answer, write_json
 

@@ -8,7 +8,11 @@
 
 ## 客服持续模拟评测
 
-客服共同规则保存在 `report_customer_rules.py`，由具体指标、模块小结和整体总结共用。
+客服共同规则保存在 `report_assistant/conversation/rules.py`，由具体指标、模块小结和整体总结共用。
+面向用户的正常问答和启动提示不展示命令行、斜杠操作或配置变量；需要核实时用普通语言说明查看报告或联系人工。内部调试兼容入口不作为客户操作步骤推荐，模型生成的相关命令会被回答校验拒绝。
+2026-11-10增加来源约束的量词规范、自然短答、账号报告总数重复说明去重，以及模块重点和已展示关键事实清单。
+含账号授权、结构整理及独立网络代理的离线验证与实连范围见[同一开发记录](../docs/development/agent-learning/2026-11-02-ten-thousand-evaluation.md)。此前API Key路线确认429/credit_balance_exhausted，不能据此判断订阅额度。当前本机已完成本应用ChatGPT账号授权，gpt-6.1-sol官方完整响应验证成功；账号路线的小范围实连覆盖客服语义路由、指标/周期追问和模块/整体总结，未完成新版本全量语义验收或真实业务报告问答；下述历史成绩不代替本轮范围。重启客服加载本地改动和已授权账号。
+第二轮职责整理版本曾完成485项离线测试和3组4轮虚构实连（12次请求），均通过并逐轮开发复核。后续兼容复查修复了自定义聊天网关影响账号注销的遗漏：当前486项离线测试通过，35轮固定虚构脚本的重构前后回答/来源/请求载荷完全一致；此次小修未重复实连，不混用版本成绩。题库预期、固定提示词、原校验函数与历史问答保持，正式semantic_review仍待完成。
 只回答页面已确认的结果；不解释底层值、编码和计算过程，不把缺失当零，
 不混用次数、机构数和周期，不承诺贷款、退款或已经接通人工。
 区间及“以上/以下”保留范围含义：既不确认范围内的某个精确值，也不排除它的可能性。
@@ -40,6 +44,17 @@
 同问多项客服问题可以组合答复；同时问报告指标和客服事项时，先答报告事实，再附本地客服说明。
 整份分析与客服共问时，各批小结和整体总结同样只解释报告，避免模型先生成客服说明再重复追加。
 自动断言只能检查部分事实和表达要求，仍须阅读回答核对语义、完整性和体验。
+2026-11-04首批精准回答修复增加高置信问题子项核对：程序按当前报告登记元数据确认指标、周期和口径，
+结论前在原预算内补读遗漏来源；对明确的结果问法，若模型漏答或把已有值说成缺失，使用同一批已核验展示结果逐项组织短答。
+纯客服与报告混合诉求分别核对，程序完整识别的多项封闭客服主题不会因模型少选或只选三项而静默遗漏，联系方式统一去重；
+明确报告结果超过六项时先逐项核验，再合并排版。未知、歧义、开放解释或“是否频繁”等判断仍保留原语义处理。
+无值的手机业务泛称、展示列表序号及保持区间边界的整年/月等价表达按受限规则检查，实际号码、凭据和无来源事实继续拦截。
+严格确定的在网/运营商结果查找（可含其他明确指标）遇到模型措辞校验失败时，可丢弃草稿并按本轮已核验事实提供全部结果；原始结构、全部引用及敏感内容仍须检查，
+开放解释、推断或追加未知诉求不使用这个保底。
+模块总结请求附带程序计算的全局/批次范围；没有已确认结果的模块按真实缺失或展示无法确认状态提供本地短说明，
+避免末批单模块被误写成整份报告仅有该模块。该修复版431项离线测试通过；135例连续三轮自动通过404/405会话，另1条为已确认的判题误报，开发助手复核405个会话轮次通过。
+三轮包含一次服务故障经原有界复测恢复，不代表新版万题全量或正式真人验收。回归成绩与限制以
+[万题评测与精准回答记录](../docs/development/agent-learning/2026-11-02-ten-thousand-evaluation.md)为准，重启客服加载更新。
 简明表达专项限制常用短答长度，并检查基础信息模块是否夹带无关总体结论；这些只用于评测，不新增运行时回退条件。
 连续对话专项覆盖用户改口、跨机构追问、报告与客服共问、感谢收尾；评测同时检查同一回答重复热线或邮箱，不把这些表达检查加入客户运行时回退。
 开发助手复核会注明执行者，不冒充真人用户体验验收或生产环境验收。
@@ -105,13 +120,13 @@ REPORT_DATA_SOURCE=demo
 REPORT_EXTERNAL_MODEL=off
 ```
 
-`off` 模式不需要模型密钥，也不会创建模型客户端。开启 AI 时，设置 `REPORT_EXTERNAL_MODEL=on`，再按下表选择厂商；默认仍为智谱。配置只在启动时读取，修改后退出旧进程并重启；终端的同名环境变量优先于 `.env`。启动提示会显示实际厂商、型号及报告内容外发范围。业务接口和模型分别使用独立 HTTP 客户端，不共享业务 token，关闭环境代理和自动重定向；模型请求关闭自动重试，失败仅回退本地，不自动转给另一厂商。
+`off` 模式不需要模型密钥，也不会创建模型客户端。开启 AI 时，设置 `REPORT_EXTERNAL_MODEL=on`，再按下表选择厂商；默认仍为智谱。配置只在启动时读取，修改后退出旧进程并重启；终端的同名环境变量优先于 `.env`。客服、评测和账号维护共用`runtime.config.ModelSettings`、`runtime.models`和`runtime.logging`，配置对象的repr不含密钥和代理地址。主入口显式允许交互授权，后台评测禁止弹窗，关闭模型不创建授权或推理连接。启动提示会显示实际厂商、型号及报告内容外发范围。业务接口和模型分别使用独立 HTTP 客户端，不共享业务 token，关闭环境代理和自动重定向；模型请求关闭自动重试，失败仅回退本地，不自动转给另一厂商。
 
 | `REPORT_MODEL_PROVIDER` | 密钥配置 | 型号配置及默认值 | 模型出口 |
 |---|---|---|---|
 | `zhipu`（默认） | `ZHIPU_API_KEY` | `ZHIPU_MODEL=glm-5.3-flash` | 智谱标准 API |
 | `deepseek` | `DEEPSEEK_API_KEY` | `DEEPSEEK_MODEL=deepseek-flash` | DeepSeek 官方 API |
-| `openai` | `OPENAI_API_KEY` | `OPENAI_MODEL=gpt-6.1-sol` | 默认官方Responses API，可用 `OPENAI_BASE_URL` 指定兼容网关 |
+| `openai` | `OPENAI_AUTH_MODE=chatgpt`使用本应用账号授权；`api_key`使用`OPENAI_API_KEY` | `OPENAI_MODEL=gpt-6.1-sol` | 账号授权固定官方Responses API；API Key模式可配置兼容网关 |
 
 例如在本机被 Git 忽略的 `.env` 中设置：
 
@@ -124,7 +139,13 @@ DEEPSEEK_MODEL=deepseek-flash
 
 真实密钥只保存在本机 `.env`，不要提交到代码或填写到 `.env.example`。智谱与DeepSeek出口固定；OpenAI允许操作者显式配置 `OPENAI_BASE_URL`，未设置或留空使用官方地址，不读取 `ZAI_BASE_URL`。DeepSeek使用OpenAI SDK的兼容协议，明确关闭思考，具体指标请求最多1800 tokens、30秒超时，模块与整体总结请求使用8192 tokens、90秒；支持工具调用与JSON路由，适配器不回传思维链。具体接口和验证边界见 [模型接入说明](../docs/interfaces/agent-learning/model-providers.md) 与 [模型开发记录](../docs/development/agent-learning/2026-10-31-deepseek-provider.md)。
 
-使用 GPT-6.1 Sol 时改为 `REPORT_MODEL_PROVIDER=openai`，在本机 `.env` 配置 `OPENAI_API_KEY` 和 `OPENAI_MODEL=gpt-6.1-sol`。适配器使用 Responses API、`reasoning.effort=low`、8192 tokens及 `store=false`；路由和具体问题每次请求30秒超时，整份报告的模块与整体总结每次90秒，不代表整轮问答总时限。每次重新提供已校验的问题和工具执行摘要，不续接供应商响应、不回传明文或加密推理内容。此方式不保留供应商推理状态，真实分类与分析质量仍需实连评估，`store=false` 也不等于零留存承诺。
+使用 GPT-6.1 Sol 时选择 `REPORT_MODEL_PROVIDER=openai` 和 `OPENAI_MODEL=gpt-6.1-sol`。当前本机按用户要求采用`OPENAI_AUTH_MODE=chatgpt`，首次启动打开浏览器，在本机账号页选择“Continue with ChatGPT”，由本人完成官方登录及订阅额度授权；无需填写API Key。不读取或复制Codex登录缓存，Java登录和报告权限继续独立处理。再次启动复用本应用授权并在临近过期时刷新；后台评测只复用已完成的授权，不弹窗或自动切回API Key。
+
+账号凭据在`%LOCALAPPDATA%\ReportAssistant\chatgpt-auth.sqlite3`中经当前Windows用户DPAPI加密，按验证身份与签发client_id隔离，注册、切换和刷新不混用账号。模型请求固定官方HTTPS出口，网络代理仅作显式连接转发；令牌不进入`.env`、历史、评测答案或日志。维护入口`scripts/chatgpt_account.py`支持`--sign-in`打开账号选择/新增页面、`--sign-out`撤销当前会话并清除本机令牌、`--verify`发送一次无报告固定短句验证；这些操作不作为终端客户问答指引展示。退出只清当前账号令牌，保留注册和本机host ID；远端撤销未确认时显示固定状态，可在ChatGPT设置中断开应用。
+
+账号路线遵循官方预览：Responses使用`store=false`、`stream=true`，系统约束转为developer消息，本地函数置于`report_assistant` namespace；不发送不支持的`max_output_tokens`，不开放托管工具。仅在`response.completed`后将完整结果交给原引用/隐私/数值校验，不把增量直接显示给客户。原30/90秒请求预算保留，另设4096事件、2000000字节的本地流读取上限；这不能保证服务端输出用量精确封顶。授权、用量或服务失败不重试、不改模型、不切换计费路线。官方说明目前面向开源/本地应用，付费或远程托管上线需另行确认资格；参见[账号授权](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)及[预览限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)。
+
+保留的API Key兼容模式需显式设置`OPENAI_AUTH_MODE=api_key`并配置`OPENAI_API_KEY`，按API项目额度计费。未配置授权方式时为兼容旧调用者沿用api_key，不推断或读取Codex缓存。此路线仍用非流式Responses、`reasoning.effort=low`、8192 tokens及`store=false`。两条路线都逐请求重建经校验的工具执行摘要，不续接供应商响应、不回传明文或加密推理内容。真实分类和分析质量仍需各路线实连验证；`store=false`不等于零留存承诺。
 
 使用用户指定的兼容网关时，额外设置基础地址（以下为虚构示例）：
 
@@ -132,12 +153,19 @@ DEEPSEEK_MODEL=deepseek-flash
 REPORT_EXTERNAL_MODEL=on
 REPORT_MODEL_PROVIDER=openai
 OPENAI_MODEL=gpt-6.1-sol
+OPENAI_AUTH_MODE=api_key
 OPENAI_BASE_URL=https://gateway.example.invalid/v1
 ```
 
-基础地址不要包含 `/responses`、内嵌用户名密码、查询串或片段；客户端会追加 `/responses`。地址在业务登录前检查，仍只使用 `OPENAI_API_KEY`，不会自动使用DeepSeek密钥、业务token或Codex凭据。网关须兼容Responses的JSON与函数工具协议，失败回退本地，不自动转官方地址。选择自定义地址后启动提示显示“OpenAI兼容网关”。HTTP地址可按指定配置使用，但传输不加密；HTTPS可保护传输。
+官方API需要经本机网络代理访问时，可单独配置`OPENAI_PROXY_URL`（例如`http://127.0.0.1:7890`，使用实际本机端口）。它只作用于OpenAI模型及其独立账号授权HTTP连接，不改变`OPENAI_BASE_URL`，不共享给Java业务接口，不自动读取系统或环境代理；浏览器使用本机浏览器自身的网络设置。地址不得包含代理用户名、密码、路径或查询串。TLS验证及禁止重定向保持。未设置时按原方式连接。
+
+API Key模式的基础地址不要包含 `/responses`、内嵌用户名密码、查询串或片段；客户端会追加 `/responses`。地址在业务登录前检查，不会自动使用DeepSeek密钥、业务token或Codex凭据。账号模式拒绝兼容网关。API Key网关须兼容Responses的JSON与函数工具协议，失败回退本地，不自动转官方地址。选择自定义地址后启动提示显示“OpenAI兼容网关”。HTTP地址可按指定配置使用，但传输不加密；HTTPS可保护传输。
 
 Codex是开发工具；其登录状态不是本项目的API凭据。2026-10-31按用户要求，本机已选择 `openai/gpt-6.1-sol` 并配置用户指定网关。此前官方直连超时；本轮通过网关鉴权、型号检查、语义客服路由及虚构报告模块总结实测，最终客服与模块总结共3次请求成功，194项离线回归通过。未读取真实报告。退出旧终端后重启读取新配置；密钥只填写本机 `.env`。
+
+2026-11-10按用户最新要求，本机配置已切换为`gpt-6.1-sol`官方Responses直连，基础地址为`https://api.openai.com/v1`，项目API key保留原值，没有借用Codex登录。一次官方型号校验返回连接错误，尚未验证密钥及模型权限；DNS与443端口可达不代表完整API请求成功。17项模型适配离线检查通过，真实问答仍待连接恢复后验证；上述10月31日网关成绩仅为历史记录。重启后加载新配置。
+
+此前API Key路线经显式本机代理收到HTTP429/credit_balance_exhausted、类型insufficient_quota，没有成功模型正文；该结果只代表当时API组织额度，不代表ChatGPT/Codex订阅额度。2026-11-10后续用户明确要求改账号授权，按上文新路线处理；账号授权与在线问答的实际验证范围持续记录在[同一开发记录](../docs/development/agent-learning/2026-11-02-ten-thousand-evaluation.md)，不能沿用历史API或网关成绩宣称通过。
 
 `glm-5.3-flash`、`glm-5.3-flashx` 和 `glm-5.3-flashx-legal` 使用开启思考的请求参数，单次输出预算为 8192 tokens、响应超时为 90 秒，兼顾思考与最终正文；思维链不进入后续请求或本地历史。其他模型沿用关闭思考、1800 tokens 和 30 秒超时的参数。最多5轮工具请求，第6轮只根据已读取事实生成结论；工具调用数或事实数达到预算时也提前结束查询并生成结论，不扩大总请求预算。模型兼容性及实际验证范围见 [AI 分析开发记录](../docs/development/agent-learning/2026-10-30-ai-analysis-strategy.md)。
 
@@ -263,23 +291,48 @@ cd D:\vv\agent-learning
 
 ## 文件分工
 
+业务代码已按职责整理到`report_assistant/`包，根目录仅保留`main.py`入口，既有启动方式不变：
+
+```text
+report_assistant/
+├─ conversation/  问答编排、总结、目标识别和客服表达
+├─ reports/       报告快照、展示转换、评分及事实投影
+├─ integrations/  模型、Java接口与本地加密历史
+├─ security/      隐私协议、输入守卫、身份/周期/时长与数字校验
+├─ runtime/       公共配置、模型资源装配与隐私日志
+└─ ui/            终端报告选择与展示交互
+```
+
+`data/`、`.env`、`scripts/`、`tests/`和历史`.eval/`产物保留原位置。包导入不启动模型或登录；报告资料从项目级`data/`定位，不依赖当前工作目录。
+Python调用方应使用新包路径；旧根目录业务模块不再保留同名副本。历史`.eval/`辅助脚本保留原样，如需再次执行应先更新导入并使用新产物目录。
+评测指纹递归覆盖业务包及脚本，并计入相对路径；目录迁移会产生新版本，不将历史成绩当作新版本覆盖。
+`scripts/eval_support/`保存Case/Step协议与虚构报告，题目集合不互相借用数据结构；`tests/support/`保存测试报告、模拟客户端和出站断言，测试文件不再互相导入。安全校验仍以`security.answer_validation`作为统一入口，专门的身份、周期和时长逻辑分别在同目录的`answer_identity`、`answer_periods`、`answer_durations`中维护。原提示词与工具协议放入`conversation.analysis_protocol`，具体问题的轮次状态、补读、工具执行与结论处理由`conversation.focused`负责，策略仍控制唯一请求出口和来源检查。
+
 | 文件 | 职责 |
 |---|---|
-| `main.py` | 配置、终端命令、独立客户端、关闭敏感日志、固定错误提示 |
-| `report_model.py` | DeepSeek 与 OpenAI Responses 的固定出口和协议适配，不读取业务凭据 |
-| `report_analysis.py` | AI语义路由、通用工具循环、最小追问上下文、引用与数字检查 |
-| `report_projection.py` | 问题检查、脱敏报告投影、不透明引用及字段解释 |
-| `report_redaction.py` | 四类个人信息及凭据识别、已知值收集和本地文本过滤 |
-| `report_privacy.py` | 兼容旧调用的完整问句白名单、封闭意图和模板协议 |
-| `report_questions.py` | 本地口语、关键词、别名、窗口与字段追问识别，不授予模型外发资格 |
-| `report_session.py` | 策略选择、本地回退、加密保存成功后提交会话状态 |
-| `report_tools.py` | 本地字段检索、绑定报告快照、固定路径取值、字段规则展示 |
-| `report_display.py` | 复现已核实的页面显示规则、组合依赖及缺失语义，保留未知规则边界 |
-| `report_score.py` | 已核实页面主评分的取整、当前模板分档与简短客服说明 |
-| `local_history.py` | Windows DPAPI 加密、SQLite 持久化、按报告读取历史 |
-| `report_api.py` | 业务 token、报告列表、选择复核及正文 ID 校验 |
-| `report_auth.py` | 测试验证码、H5 登录、终端输入及内存 token |
-| `report_http.py` | 网关校验、独立业务请求及固定错误提示 |
+| `main.py` | 终端启动编排、报告绑定与固定错误提示，调用公共配置/模型工厂 |
+| `report_assistant/runtime/` | 不可变模型配置、交互/后台授权策略、独立客户端与日志配置 |
+| `report_assistant/ui/report_selection.py` | 终端分页与报告选择，只将当前页选项交给业务客户端复核 |
+| `report_assistant/integrations/model.py` | DeepSeek 与 OpenAI Responses 的固定出口和协议适配，不读取业务凭据 |
+| `report_assistant/integrations/chatgpt_auth.py` | 本应用独立ChatGPT授权、账号注册隔离、DPAPI存储与令牌轮换 |
+| `report_assistant/conversation/analysis.py` | AI语义路由、唯一受控请求出口与回答来源检查 |
+| `report_assistant/conversation/analysis_protocol.py` | 固定提示词、工具schema、JSON协议、错误与最小追问上下文 |
+| `report_assistant/conversation/focused.py` | 本轮工具预算、缺项补读、批次执行与确定结果收尾，不共享跨轮事实 |
+| `report_assistant/reports/projection.py` | 受控报告目录、页面事实投影与不透明引用 |
+| `report_assistant/security/question_guard.py` | 自然问题及外发载荷的个人信息守卫 |
+| `report_assistant/security/answer_validation.py` | 回答校验统一入口及数字/百分比/日期来源核对，协调专门的身份/周期/时长模块 |
+| `report_assistant/security/text.py` | 无业务依赖的文本归一化及协议字符串收集 |
+| `report_assistant/security/redaction.py` | 四类个人信息及凭据识别、已知值收集和本地文本过滤 |
+| `report_assistant/security/privacy.py` | 兼容旧调用的完整问句白名单、封闭意图和模板协议 |
+| `report_assistant/conversation/questions.py` | 本地口语、关键词、别名、窗口与字段追问识别，不授予模型外发资格 |
+| `report_assistant/conversation/session.py` | 策略选择、本地回退、加密保存成功后提交会话状态 |
+| `report_assistant/reports/tools.py` | 本地字段检索、绑定报告快照、固定路径取值、字段规则展示 |
+| `report_assistant/reports/display.py` | 复现已核实的页面显示规则、组合依赖及缺失语义，保留未知规则边界 |
+| `report_assistant/reports/score.py` | 已核实页面主评分的取整、当前模板分档与简短客服说明 |
+| `report_assistant/integrations/history.py` | Windows DPAPI 加密、SQLite 持久化、按报告读取历史 |
+| `report_assistant/integrations/api.py` | 业务 token、报告列表、选择复核及正文 ID 校验 |
+| `report_assistant/integrations/auth.py` | 测试验证码、H5 登录、终端输入及内存 token |
+| `report_assistant/integrations/http.py` | 网关校验、独立业务请求及固定错误提示 |
 | `tests/test_auth.py` | 自动登录、凭证隔离、异常脱敏、空列表启动、报告重选提示及翻页测试 |
 | `tests/test_themes.py` | 多版本规则和模块隔离、报告切换、模型消息隔离、动态键与候选路径、同提交导入测试 |
 | `tests/test_privacy.py` | 虚构报告、输入隔离、多轮历史、越权参数、加密历史测试 |

@@ -11,12 +11,12 @@ from unittest.mock import patch
 import httpx
 
 import main
-import test_privacy as support
-from report_api import MY_REPORTS_PATH, ReportApi
-from report_session import Conversation
-from report_tools import LocalReportTools, UnsupportedReportTheme, read_report_path
+from support import privacy as support
+from report_assistant.integrations.api import MY_REPORTS_PATH, ReportApi
+from report_assistant.conversation.session import Conversation
+from report_assistant.reports.tools import LocalReportTools, UnsupportedReportTheme, read_report_path
 from scripts.import_report_fields import AUTHORITATIVE, OTHER_SUPPLEMENT, SUPPLEMENT, build_catalog, import_fields
-from test_privacy import FakeClient, NoExternalIO, fixtures
+from support.privacy import FakeClient, NoExternalIO, fixtures
 
 
 THEMES = (1, 2, 3, 4, 5, 6, 27, 28, 40, 50, 51, 52)
@@ -115,7 +115,7 @@ class ThemeSelectionTests(NoExternalIO):
             client = FakeClient()
             Conversation(LocalReportTools(order, bundle)).answer("分析指数是多少", client, "synthetic-model")
             serialized.append(client.requests)
-            support.OutboundTests.assert_private_absent(self, client.requests)
+            support.assert_private_absent(self, client.requests)
             self.assertNotIn("SYNTHETIC_THEME_VALUE", json.dumps(client.requests))
         self.assertTrue(all(requests == serialized[0] for requests in serialized))
 

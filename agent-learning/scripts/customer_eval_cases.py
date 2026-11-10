@@ -1,76 +1,15 @@
 """客服评测专用虚构报告与独立题库；不读取业务报告、目录文件或用户历史。"""
 
-from dataclasses import dataclass
-
-from report_tools import LocalReportTools
-
-
-@dataclass(frozen=True)
-class Step:
-    """一轮问答的预期；词组每组命中一个，并独立检查事实引用与完整客服主题。"""
-
-    question: str
-    topic: str = ""
-    required: tuple = ()
-    forbidden: tuple = ()
-    fields: tuple = ()
-    kind: str = "report"
-    max_chars: int = 500
+from scripts.eval_support.contracts import Case, Step
+from scripts.eval_support.fixtures import synthetic_tools
 
 
-@dataclass(frozen=True)
-class Case:
-    """独立会话及其连续问题；每个Case重建报告，避免跨题残留上下文。"""
-
-    id: str
-    category: str
-    steps: tuple
-    score: float = 69.5
-    unconfirmed_education: bool = False
-    with_report_date: bool = False
-    display_rules: bool = False
 
 
-def synthetic_tools(score=69.5, unconfirmed_education=False, with_report_date=False, display_rules=False):
-    """返回纯内存、明确虚构的严谨版报告，覆盖展示值与来源口径差异。"""
-    if display_rules:
-        from scripts.customer_display_cases import display_tools
-        return display_tools()
-    modules = [(5, "报告分析指数"), (9, "非银行申请"), (10, "银行申请"),
-               (20, "逾期记录"), (21, "借贷统计"), (22, "学历信息")]
-    rows = [
-        (5, "报告分析指数", "BRS_RS_00001", "", score, "直接输出原值", ""),
-        (9, "非银行申请次数", "nonbank_D7_count", "近7天", 0, "直接输出原值", ""),
-        (9, "非银行申请次数", "nonbank_M1_count", "近1月", 8, "直接输出原值", ""),
-        (9, "非银行申请机构数", "nonbank_M1_orgs", "近1月", 3, "直接输出原值", ""),
-        (9, "非银行申请次数", "nonbank_M3_count", "近3月", None, "直接输出原值", ""),
-        (9, "非银行申请次数", "nonbank_M6_count", "近6月", None, "直接输出原值", "missing"),
-        (9, "非银行夜间申请次数", "nonbank_night", "近1月", "", "直接输出原值", ""),
-        (9, "非银行申请档位", "sample_D7_gear", "近7天", 4, "档位模块：经 getGear 显示档位", ""),
-        (10, "银行申请次数", "bank_M1_count", "近1月", 2, "直接输出原值", ""),
-        (10, "银行申请机构数", "bank_M1_orgs", "近1月", 1, "直接输出原值", ""),
-        (20, "逾期记录数", "overdue_count", "近1年", None, "直接输出原值", ""),
-        (21, "未结清余额", "loan_balance", "", "1000至2000元", "直接输出原值", ""),
-        (22, "学历", "education", "", "4", "函数switch严格匹配字符串编码", '"4" → 本科\n严格字符串匹配；其他／空值 → -。'),
-    ]
-    # 独立日期变式保留原题的引用顺序；必须实际提供日期，不能用空报告代替回归。
-    if with_report_date:
-        modules.append((23, "报告概览"))
-        rows.append((23, "报告查询日期", "report_query_date", "", "2024-05-07", "直接输出原值", ""))
-    names = dict(modules)
-    fields, report = [], {}
-    for mid, name, key, window, value, rule, enum in rows:
-        if key == 'education' and unconfirmed_education:
-            rule = '显示需要另一个字段，当前尚未核实全部依赖'
-        fields.append({"module_id": mid, "module_name": names[mid], "name": name,
-                       "path": "report." + key, "window": window,
-                       "frontend_processing": rule, "enum_mapping": "" if enum == "missing" else enum})
-        if enum != "missing":
-            report[key] = value
-    order = {"order_id": "EVAL_SYNTHETIC_ORDER", "report_id": "EVAL_SYNTHETIC_REPORT", "is_demo": False,
-             "report_data": {"report": report, "template": {"theme": 3, "config": "",
-                 "modules": [{"moduleId": mid, "moduleName": name} for mid, name in modules]}}}
-    return LocalReportTools(order, {"theme": 3, "theme_name": "严谨版", "fields": fields})
+
+
+
+
 
 
 def cases():

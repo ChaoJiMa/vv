@@ -23,16 +23,15 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import httpx
 from dotenv import load_dotenv
-from zai import ZhipuAiClient
 
-from main import configure_private_logging
-from report_analysis import AnalysisFailure, AnalysisStrategy, OUT_OF_SCOPE_REPLY
-from report_model import DeepSeekClient, OpenAIResponsesClient
-from report_projection import assertion_text, negative_zero_text
-from report_service import HOTLINE, SERVICE_EMAIL, service_reply
-from report_session import Conversation
+from report_assistant.runtime.logging import configure_private_logging
+from report_assistant.runtime.config import ModelSettings
+from report_assistant.runtime.models import create_model_client
+from report_assistant.conversation.analysis import AnalysisFailure, AnalysisStrategy, OUT_OF_SCOPE_REPLY
+from report_assistant.security.answer_validation import assertion_text, negative_zero_text
+from report_assistant.conversation.service import HOTLINE, SERVICE_EMAIL, service_reply
+from report_assistant.conversation.session import Conversation
 from scripts.customer_eval_cases import cases, synthetic_tools
 
 
@@ -42,37 +41,28 @@ def stamp():
 
 
 def fingerprint():
-    """代码、题库与模型配置共同定版；不将密钥和网关地址写入记录。"""
+    """根入口、完整业务包、题库/脚本和模型配置共同定版，不读取密钥。
+
+    迁移后的子包必须递归覆盖；相对路径参与哈希，避免不同目录同名文件混淆，
+    同时使同一份源码复制到不同绝对工作区后仍保持相同指纹。
+    """
     digest = hashlib.sha256()
-    for path in sorted([*ROOT.glob('*.py'), *Path(__file__).parent.glob('*.py')]):
-        digest.update(path.name.encode())
+    paths = [*ROOT.glob('*.py'), *(ROOT / 'report_assistant').rglob('*.py'),
+             *(ROOT / 'scripts').rglob('*.py')]
+    for path in sorted(paths, key=lambda p: p.relative_to(ROOT).as_posix()):
+        digest.update(path.relative_to(ROOT).as_posix().encode('utf-8'))
+        digest.update(b'\0')
         digest.update(path.read_bytes())
-    for name in ('REPORT_MODEL_PROVIDER', 'OPENAI_MODEL', 'ZHIPU_MODEL', 'DEEPSEEK_MODEL', 'OPENAI_BASE_URL'):
+        digest.update(b'\0')
+    for name in ('REPORT_MODEL_PROVIDER', 'OPENAI_AUTH_MODE', 'OPENAI_MODEL', 'ZHIPU_MODEL', 'DEEPSEEK_MODEL', 'OPENAI_BASE_URL', 'OPENAI_PROXY_URL'):
         digest.update(os.getenv(name, '').encode())
     return digest.hexdigest()[:16]
 
 
 def model_client(stack):
-    """仅加载被选厂商的模型配置；不读取业务文件，也不借用其他厂商凭据。"""
-    provider = os.getenv('REPORT_MODEL_PROVIDER', 'zhipu').strip().lower()
-    names = {'openai': ('OPENAI_API_KEY', 'OPENAI_MODEL', 'gpt-6.1-sol'),
-             'deepseek': ('DEEPSEEK_API_KEY', 'DEEPSEEK_MODEL', 'deepseek-flash'),
-             'zhipu': ('ZHIPU_API_KEY', 'ZHIPU_MODEL', 'glm-5.3-flash')}
-    if provider not in names:
-        raise ValueError('不支持的模型厂商')
-    key_name, model_name, default = names[provider]
-    key, model = os.getenv(key_name, '').strip(), os.getenv(model_name, default).strip()
-    if not key or not model:
-        raise ValueError('未配置模型密钥或型号')
-    transport = stack.enter_context(httpx.Client(trust_env=False, follow_redirects=False, timeout=30.0))
-    if provider == 'openai':
-        client = OpenAIResponsesClient(key, transport, base_url=os.getenv('OPENAI_BASE_URL'))
-    elif provider == 'deepseek':
-        client = DeepSeekClient(key, transport)
-    else:
-        client = ZhipuAiClient(api_key=key, base_url='https://open.bigmodel.cn/api/paas/v4',
-                              http_client=transport, timeout=30.0, max_retries=0)
-    return stack.enter_context(client), provider, model
+    """复用公共配置和模型装配；评测保持非交互，不打开浏览器或读取业务报告。"""
+    settings = ModelSettings.from_env()
+    return create_model_client(stack, settings, interactive=False), settings.provider, settings.model
 
 
 class MeteredClient:

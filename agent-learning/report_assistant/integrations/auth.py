@@ -12,7 +12,7 @@ import re
 
 import httpx
 
-from report_http import ReportApiError, TEST_API_BASE_URL, post_data, validate_gateway
+from report_assistant.integrations.http import ReportApiError, TEST_API_BASE_URL, post_data, validate_gateway
 
 
 # 路径包含网关的服务前缀：/report 转发验证码服务，/useragent 转发用户服务。

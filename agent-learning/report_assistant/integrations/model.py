@@ -1,11 +1,13 @@
-"""模型协议适配：使用显式厂商或网关地址，复用受控消息，不读取业务身份或Codex登录。"""
+"""模型协议适配：隔离厂商密钥与本应用账号授权，复用受控消息，不读取Codex登录。"""
 
 import json
 import re
+import time
+import httpx
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
-from openai import OpenAI
+from openai import OpenAI, APIStatusError, APITimeoutError
 
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
@@ -37,6 +39,38 @@ def openai_base_url(value=None):
     except ValueError:
         raise ValueError(message) from None
     return value.rstrip("/")
+
+
+def openai_proxy_url(value=None):
+    """校验显式网络代理地址；不接收凭据、路径或查询串，不自动采用系统代理。
+
+    网络代理只转发HTTPS连接，不改变官方API基础地址或目标模型。
+    错误使用固定提示，避免把操作者填写的敏感URL带入终端或日志。
+    """
+    message = 'OpenAI网络代理地址格式无效。'
+    if value is None or isinstance(value, str) and not value.strip():
+        return None
+    if not isinstance(value, str) or re.search(r'[\x00-\x20\x7f\\]', value):
+        raise ValueError(message)
+    try:
+        parts = urlsplit(value)
+        if (parts.scheme not in {'http', 'https'} or not parts.hostname or not parts.port
+                or parts.username is not None or parts.password is not None
+                or parts.path not in {'', '/'} or '?' in value or '#' in value):
+            raise ValueError(message)
+    except ValueError:
+        raise ValueError(message) from None
+    return value.rstrip('/')
+
+
+def model_http_client(provider, *, proxy_url=None, timeout=30.0):
+    """创建模型专属HTTP客户端；代理仅限显式OpenAI配置，始终保留TLS校验与环境隔离。"""
+    options = {'trust_env': False, 'follow_redirects': False, 'timeout': timeout}
+    if provider == 'openai':
+        proxy = openai_proxy_url(proxy_url)
+        if proxy:
+            options['proxy'] = proxy
+    return httpx.Client(**options)
 
 
 class IsolatedOpenAI(OpenAI):
@@ -138,7 +172,15 @@ class OpenAIResponsesClient:
                 # 原问题和投影JSON保持原样；不把网关异常或响应内容加进下一次请求。
                 index = next((i for i, item in enumerate(request["input"]) if item["role"] == "user"), len(request["input"]))
                 request["input"].insert(index, {"role": "user", "content": "Return a JSON object."})
-        response = self._client.responses.create(**request)
+        response = self._complete(request)
+        return self._translate(response)
+
+    def _complete(self, request):
+        """API Key模式沿用非流式Responses；账号模式覆盖此协议边界。"""
+        return self._client.responses.create(**request)
+
+    def _translate(self, response):
+        """仅从完整响应提取正文与受控函数调用，不向客户暴露推理或半截答案。"""
         if response.status != "completed" or response.error:
             return SimpleNamespace(choices=[])
         texts, calls, refused = [], [], False
@@ -168,3 +210,72 @@ class OpenAIResponsesClient:
     def __exit__(self, *_):
         """退出时关闭 SDK，不缓存模型响应或推理内容。"""
         self._client.close()
+
+
+class ChatGPTPlanClient(OpenAIResponsesClient):
+    """官方ChatGPT计划授权适配；每次只从本应用凭据管理器取得访问令牌。"""
+
+    def __init__(self, account, http_client, *, base_url=None):
+        """固定官方出口，禁止把OAuth令牌发给兼容网关；不读取OPENAI_API_KEY。"""
+        if openai_base_url(base_url) != OPENAI_BASE_URL:
+            raise ValueError('ChatGPT账号授权仅支持官方模型接口。')
+        self.account = account
+        super().__init__('chatgpt-plan-no-api-key', http_client, base_url=OPENAI_BASE_URL)
+
+    def _complete(self, request):
+        """使用预览支持的流式协议；完成前丢弃增量，失败和断流不伪装成功。
+
+        不支持服务端max_output_tokens，改以原请求时限、事件数与输出字节上限中止，
+        不增加会话请求/工具预算；客户端限额不能保证服务端用量精确封顶。
+        """
+        from report_assistant.integrations.chatgpt_auth import ChatGPTAuthError
+        try:
+            token = self.account.access_token()
+        except ChatGPTAuthError:
+            # 复用业务层已有服务故障保护；异常中不含原授权错误或任何令牌。
+            self._service_error(401)
+        request = {**request, 'stream': True}
+        request.pop('max_output_tokens', None)
+        request['input'] = [{**item, 'role': 'developer' if item['role'] == 'system' else item['role']}
+                            for item in request['input']]
+        if request.get('tools'):
+            request['tools'] = [{'type': 'namespace', 'name': 'report_assistant',
+                                 'description': '当前报告的受控本地只读工具', 'tools': request['tools']}]
+        request['extra_headers'] = {'Authorization': 'Bearer ' + token}
+        started, size, completed = time.monotonic(), 0, None
+        with self._client.responses.create(**request) as stream:
+            for count, event in enumerate(stream, 1):
+                if time.monotonic() - started > request['timeout']:
+                    raise APITimeoutError(request=httpx.Request('POST', OPENAI_BASE_URL + '/responses'))
+                # 只计量事件，不写出原事件、思维链、原始错误或增量答案。
+                size += len(event.model_dump_json().encode('utf-8'))
+                if count > 4096 or size > 2_000_000:
+                    self._service_error(502)
+                if event.type in {'response.failed', 'error'}:
+                    self._service_error(429)
+                if event.type == 'response.incomplete':
+                    return SimpleNamespace(status='incomplete', error=None, output=[])
+                if event.type == 'response.completed':
+                    completed = event.response
+                    break
+        if completed is None:
+            self._service_error(502)
+        for item in completed.output:
+            if item.type == 'function_call' and (
+                    getattr(item, 'namespace', None) not in {None, 'report_assistant'}
+                    or getattr(item, 'status', None) in {'in_progress', 'incomplete'}):
+                self._service_error(502)
+        return completed
+
+    def _service_error(self, status):
+        """使用固定SDK错误接入既有停止保护，不将远端错误或授权信息交给会话层。"""
+        response = httpx.Response(status, request=httpx.Request('POST', OPENAI_BASE_URL + '/responses'))
+        raise APIStatusError('模型账号或服务暂不可用。', response=response, body=None) from None
+
+
+def openai_auth_mode(value=None):
+    """启动配置选择账号或API Key；未配置沿用旧调用者，当前本机显式切为账号模式。"""
+    mode = (value or 'api_key').strip().lower()
+    if mode not in {'api_key', 'chatgpt'}:
+        raise ValueError('OpenAI授权方式配置无效。')
+    return mode
