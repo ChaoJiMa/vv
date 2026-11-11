@@ -1,15 +1,12 @@
-/** 页面吸顶栏：含 iOS 安全区，背景毛玻璃 */
+/** 页面吸顶栏：由全局 chrome 类对齐顶部柔光和安全区，不依赖 iOS 的 fixed 背景附件。 */
 export default function StickyHeader({ children, className = '', style, zIndex = 20 }) {
   return (
     <header
-      className={className}
+      className={`nh-page-chrome-top ${className}`.trim()}
       style={{
         position: 'sticky',
         top: 0,
         zIndex,
-        background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
         borderBottom: '1px solid var(--color-border)',
         ...style,
       }}

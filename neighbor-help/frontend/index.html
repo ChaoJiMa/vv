@@ -1,16 +1,67 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- 保留安全区适配，同时允许邻居使用浏览器缩放阅读。 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <!-- 内容延伸进安全区；顶/底栏颜色由 theme-color（ThemeProvider 按主题动态更新）决定 -->
+    <!-- 独立 Web App 的状态栏允许页面底色延伸，Safari 工具栏另由 theme-color 提示。 -->
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="theme-color" content="#fff8f2" />
-    <meta name="theme-color" content="#1a1614" media="(prefers-color-scheme: dark)" />
-    <!-- 预加载登录页标题字体子集,避免标题入场时字体换帧(FOUT)造成的卡顿 -->
-    <link rel="preload" href="/fonts/kaixin-subset.woff2" as="font" type="font/woff2" crossorigin />
+    <meta name="theme-color" content="" />
+    <!-- 基础底色只在此定义，首帧、业务页面和浏览器栏共同读取；不等待 React 或样式包下载。 -->
+    <style id="nh-page-theme">
+      :root {
+        --color-bg: #f9f9f9;
+        /* 注册头图、安全区与浏览器提示共用色源；表单和输入随当前主题选择中性底色。 */
+        --registration-hero-start: #fff08c;
+        --registration-hero-end: #ffe47b;
+        --registration-form-bg: #ffffff;
+        --registration-input-bg: #f3f3f3;
+        /* 柔光只落在四角，中央透出单色基础底；页面与固定栏复用这一张画布。 */
+        --page-glow:
+          radial-gradient(ellipse 70% 48% at 0% 0%, rgba(249, 225, 244, 0.42) 0%, rgba(249, 225, 244, 0) 75%),
+          radial-gradient(ellipse 70% 46% at 100% 0%, rgba(249, 229, 211, 0.33) 0%, rgba(249, 229, 211, 0) 75%),
+          radial-gradient(ellipse 70% 46% at 0% 100%, rgba(246, 225, 213, 0.375) 0%, rgba(246, 225, 213, 0) 75%),
+          radial-gradient(ellipse 70% 48% at 100% 100%, rgba(249, 227, 207, 0.4) 0%, rgba(249, 227, 207, 0) 75%);
+        color-scheme: light;
+      }
+      :root[data-theme="dark"] {
+        --color-bg: #201e25;
+        --registration-hero-start: #d4b75e;
+        --registration-hero-end: #bea14e;
+        --registration-form-bg: var(--color-bg);
+        --registration-input-bg: var(--color-surface);
+        --page-glow:
+          radial-gradient(ellipse 70% 48% at 0% 0%, rgba(87, 57, 87, 0.08) 0%, rgba(87, 57, 87, 0) 75%),
+          radial-gradient(ellipse 70% 46% at 100% 0%, rgba(100, 69, 48, 0.06) 0%, rgba(100, 69, 48, 0) 75%),
+          radial-gradient(ellipse 70% 46% at 0% 100%, rgba(104, 65, 72, 0.05) 0%, rgba(104, 65, 72, 0) 75%),
+          radial-gradient(ellipse 70% 48% at 100% 100%, rgba(112, 79, 54, 0.07) 0%, rgba(112, 79, 54, 0) 75%);
+        color-scheme: dark;
+      }
+      html, body { background-color: var(--color-bg); }
+      #root { background-color: transparent; }
+      @media (max-width: 480px) {
+        html[data-page-chrome="registration"],
+        html[data-page-chrome="registration"] body { background-color: var(--registration-hero-start); }
+      }
+    </style>
+    <script>
+      // 在首帧前恢复手动主题；存储被禁用或旧值无效时跟随系统。
+      (() => {
+        let mode = 'system'
+        try { mode = localStorage.getItem('nh-theme') || 'system' } catch { /* 存储不可用 */ }
+        const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+        document.documentElement.dataset.theme = mode === 'dark' || (mode !== 'light' && systemDark) ? 'dark' : 'light'
+        // 注册深链首帧也先提示头图起色；React 挂载后由页面申请接管，普通页面同步会清理该临时标记。
+        const registration = /^\/login\/?$/.test(window.location.pathname) && new URLSearchParams(window.location.search).get('view') === 'register'
+        if (registration) document.documentElement.dataset.pageChrome = 'registration'
+        const color = getComputedStyle(document.documentElement).getPropertyValue(registration ? '--registration-hero-start' : '--color-bg').trim()
+        document.querySelector('meta[name="theme-color"]').setAttribute('content', color)
+      })()
+    </script>
+    <!-- 品牌与页面标题共用 v2 完整文案子集；首屏预加载，门控就绪后再显示文字。 -->
+    <link rel="preload" href="/fonts/kaixin-display-v2.woff2" as="font" type="font/woff2" crossorigin />
     <title>邻里互助</title>
   </head>
   <body>

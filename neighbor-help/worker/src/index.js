@@ -53,7 +53,7 @@ app.notFound(() => fail(CODE.NOT_FOUND, '接口不存在'))
 app.onError(() => fail(CODE.SERVER_ERROR, '服务器内部错误'))
 
 // 导出 fetch(HTTP)+ scheduled(定时任务)。
-// scheduled:定时对账 R2 图片孤儿(无帖子引用且超过宽限期的对象),兜底删帖/编辑时的漏网清理。
+// scheduled:统一清理无帖子/头像引用且超过宽限期的 R2 图片。
 // 触发频率见 wrangler.toml 的 [triggers] crons。
 export default {
   fetch: app.fetch,

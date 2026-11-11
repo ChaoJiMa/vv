@@ -1,0 +1,143 @@
+/* 注册表单沿用主题文字和按钮；独立输入底色在浅色为浅灰，深色复用全局中性 surface。 */
+.nh-registration {
+  width: 100%;
+  max-width: 340px;
+  margin: 0 auto;
+  color: var(--color-text);
+}
+.nh-registration-intro {
+  margin: 0 0 24px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.nh-registration fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.nh-registration-field { margin-bottom: 18px; }
+.nh-registration-field > label {
+  display: block;
+  margin: 0 0 8px 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.nh-registration-input-wrap {
+  display: flex;
+  align-items: center;
+  min-height: 54px;
+  padding: 0 5px 0 18px;
+  /* 常态只用底色区分输入区域；保留 1px 占位，聚焦和报错时字段尺寸不变。 */
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--registration-input-bg);
+}
+.nh-registration-input-wrap:focus-within {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.nh-registration-input-wrap--error { border-color: var(--color-danger); }
+.nh-registration-input-wrap input {
+  width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  padding: 10px 12px 10px 0;
+  box-sizing: border-box;
+  border: 0;
+  outline: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.nh-registration-eye {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.nh-registration-eye:active { background: var(--color-category-lost-soft); }
+.nh-registration-hint,
+.nh-registration-error {
+  display: block;
+  margin: 6px 4px 0;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.nh-registration-hint { color: var(--color-text-muted); }
+.nh-registration-error { color: var(--color-danger); }
+.nh-registration-api-error {
+  margin: 8px 0 16px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--color-category-help-soft);
+}
+.nh-registration-link {
+  display: inline;
+  min-height: 44px;
+  padding: 0 3px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.nh-registration-retry { margin: -4px 0 8px; font-size: 12px; }
+.nh-registration-policies,
+.nh-registration-login {
+  margin: 8px 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+  text-align: center;
+}
+.nh-registration-submit {
+  width: 100%;
+  min-height: 52px;
+  margin-top: 8px;
+  padding: 12px 20px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.nh-registration button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
+}
+.nh-registration-submit:active { background: var(--color-primary-pressed); }
+.nh-registration fieldset:disabled { cursor: wait; }
+.nh-registration button:disabled,
+.nh-registration fieldset:disabled button { cursor: wait; }
+.nh-registration fieldset:disabled .nh-registration-submit {
+  background: var(--color-disabled-bg);
+  color: var(--color-disabled-text);
+}
+.nh-registration-policy { padding: 0 0 4px; }
+.nh-registration-policy h3 { margin: 18px 0 8px; font-size: 15px; }
+.nh-registration-policy h3:first-child { margin-top: 0; }
+.nh-registration-policy p { margin: 0 0 14px; font-size: 13px; line-height: 1.8; }
+.nh-registration-policy-drawer .MuiIconButton-root { min-width: 44px; min-height: 44px; }
+@media (prefers-reduced-motion: reduce) {
+  .nh-registration-policy-drawer .MuiDrawer-paper,
+  .nh-registration-policy-drawer .MuiBackdrop-root { transition: none !important; }
+}

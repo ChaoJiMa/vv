@@ -1,0 +1,86 @@
+/* 缩小胶囊与注册入口的间隔，并等量下移组起点：仅登录按钮下移24px，链接和页底说明位置不变。 */
+.nh-login-actions {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 16px;
+  width: 100%;
+  max-width: 340px;
+  margin-top: calc(23.5svh + 24px);
+}
+
+/* 长屏由 auto 吃掉余量，说明贴近页底；短屏保留最小间隔后随文档自然滚动。 */
+.nh-login-note {
+  flex-shrink: 0;
+  margin: auto 0 0;
+  padding-top: 8px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+@media (max-height: 700px) {
+  .nh-login-actions { margin-top: 100px; }
+}
+
+/* 入口与提交显式配对前景/底色，避免 MUI 默认状态过渡造成颜色反转或禁用态低对比。 */
+.nh-login-entry {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 52px;
+  padding: 12px 48px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.nh-login-entry:hover,
+.nh-login-entry:active {
+  background: var(--color-primary-pressed);
+  color: var(--color-on-primary);
+  box-shadow: var(--shadow-card);
+}
+.nh-login-submit {
+  width: 100%;
+  min-height: 52px;
+  padding: 12px 20px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.nh-login-submit:hover:not(:disabled),
+.nh-login-submit:active:not(:disabled) {
+  background: var(--color-primary-pressed);
+  color: var(--color-on-primary);
+}
+.nh-login-submit:disabled {
+  background: var(--color-disabled-bg);
+  color: var(--color-disabled-text);
+  cursor: default;
+}
+.nh-login-entry:focus-visible,
+.nh-login-submit:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
+}
+/* Portal 根节点使用登录页专用类，不依赖 :has，也不改变其他页面抽屉的动效。 */
+@media (prefers-reduced-motion: reduce) {
+  .nh-login-drawer .MuiDrawer-paper,
+  .nh-login-drawer .MuiBackdrop-root {
+    animation: none !important;
+    transition: none !important;
+  }
+}

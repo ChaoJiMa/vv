@@ -1,0 +1,14 @@
+{
+  "description": "最终简洁小角色图集：4列分类、3行不同轮廓/表情，共12种；当前固定默认形象，无自动轮换。",
+  "file": "gummy-neighbors-personas.webp",
+  "size": [1448, 1086],
+  "cellSize": [362, 362],
+  "backgroundSize": "400% 300%",
+  "columns": { "help": 0, "idle": 1, "lost": 2, "group": 3 },
+  "defaultVariants": { "help": 0, "idle": 2, "lost": 1, "group": 2 },
+  "variants": [
+    { "index": 0, "label": "俏皮", "characters": ["挥手小三角", "侧目软四边形", "好奇细水滴", "扁平小软团"] },
+    { "index": 1, "label": "灵动", "characters": ["害羞细豆", "调皮圆三角", "眨眼小三角", "思考小软块"] },
+    { "index": 2, "label": "暖心", "characters": ["满足小扁团", "仰望水滴", "开心小软豆", "两位小邻居"] }
+  ]
+}

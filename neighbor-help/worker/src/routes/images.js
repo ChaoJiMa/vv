@@ -48,6 +48,7 @@ images.post('/upload', authRequired, async (c) => {
   await c.env.IMAGES.put(key, buf, {
     httpMetadata: { contentType: check.mime },
     customMetadata: {
+      ownerId: userId,
       ...(width && height ? { width: String(width), height: String(height) } : {}),
     },
   })
@@ -57,22 +58,33 @@ images.post('/upload', authRequired, async (c) => {
   })
 })
 
-// GET /api/img/:key —— 公开读图代理。key 唯一且内容不可变,强缓存一年。
+// GET /api/img/:key —— 每次重验证，删除声明提交后即停止提供对象。
 images.get('/img/:key', async (c) => {
   const key = c.req.param('key')
   if (!isValidKey(key)) return c.notFound()
-  const obj = await c.env.IMAGES.get(key)
+  const deleted = await c.env.DB.prepare('SELECT 1 FROM image_deletions WHERE image_key=?').bind(key).first()
+  if (deleted) return new Response(null, { status: 404, headers: { 'Cache-Control': 'no-store' } })
+  // 只转发 If-None-Match；由 R2 处理弱 ETag、列表与通配符，命中时不读取正文。
+  const ifNoneMatch = c.req.header('If-None-Match')
+  const obj = await c.env.IMAGES.get(key, ifNoneMatch
+    ? { onlyIf: new Headers({ 'If-None-Match': ifNoneMatch }) }
+    : undefined)
   if (!obj) return c.notFound()
   // 优先用存储时记录的 contentType,回退按扩展名推断
   const ext = key.split('.').pop()
   const fallback = Object.keys(MIME_EXT).find(m => MIME_EXT[m] === ext) || 'application/octet-stream'
   const contentType = obj.httpMetadata?.contentType || fallback
+  const headers = {
+    'Content-Type': contentType,
+    'Cache-Control': 'public, no-cache',
+    'X-Content-Type-Options': 'nosniff',
+    ...(obj.httpEtag ? { ETag: obj.httpEtag } : {}),
+  }
+  if (!('body' in obj)) {
+    return new Response(null, { status: 304, headers })
+  }
   return new Response(obj.body, {
-    headers: {
-      'Content-Type': contentType,
-      'Cache-Control': 'public, max-age=31536000, immutable',
-      'X-Content-Type-Options': 'nosniff',
-    },
+    headers,
   })
 })
 
