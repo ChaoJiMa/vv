@@ -175,7 +175,9 @@ class FocusedReportRun:
         results, rebuilt = [], []
         for call_id, name, args in pending:
             if name == "list_report_modules":
-                result = {"modules": list(self.strategy.projection.modules.values()), "coverage": MODULE_COVERAGE}
+                # 模块列表是独立工具回执，不能沿用旧“个人资料留本地”的覆盖说明。
+                coverage = self.strategy.projection.coverage if self.strategy.guard.allow_personal else MODULE_COVERAGE
+                result = {"modules": list(self.strategy.projection.modules.values()), "coverage": coverage}
             elif name == "list_report_fields":
                 result = self.strategy.projection.catalog(**args)
                 self.exposed.update(f["field_ref"] for f in result["fields"])

@@ -13,8 +13,8 @@ from report_assistant.reports.score import score_family
 class Conversation:
     """一份报告对应一个会话，按策略管理完整本地历史和最小模型上下文。"""
 
-    def __init__(self, tools, history=None, strategy="template"):
-        """绑定本地报告工具，可选从加密存储恢复该报告最近的完整问答。"""
+    def __init__(self, tools, history=None, strategy="template", *, allow_personal=False):
+        """绑定当前报告；终端显式开放个人资料，旧Python调用默认保留原过滤契约。"""
         self.tools = tools
         self.history = history
         # public_history 只放 PublicRequest 枚举；local_history 可含个人信息，
@@ -29,7 +29,7 @@ class Conversation:
             raise ValueError("未知问答策略。")
         # 默认参数保留旧Python调用契约；终端入口显式使用analysis，新策略可被独立回归。
         self.strategy = strategy
-        self.analysis = AnalysisStrategy(tools) if strategy == "analysis" else None
+        self.analysis = AnalysisStrategy(tools, allow_personal=allow_personal) if strategy == "analysis" else None
         self.analysis_context = None
         # 重启后只恢复用户可回看的本地历史。模型上下文从空白开始。
 
@@ -45,7 +45,7 @@ class Conversation:
     def answer(self, question, client=None, model=None):
         """按策略生成一轮答案；只有加密保存成功才提交内存及追问上下文。
 
-        analysis模式允许过滤四类个人信息后的报告事实参与模型分析；以下保留的template分支
+        analysis模式按本会话allow_personal授权提供当前报告事实；以下保留的template分支
         仍在本地取值前结束模型调用。保存失败由main停止处理，不生成明文备用。
         """
         if not isinstance(question, str) or not question.strip() or len(question) > 2000:
@@ -93,16 +93,20 @@ class Conversation:
         context, notice, answer = None, "", None
         query = LocalQuery()
         local_command = question.strip().startswith("/") or question.strip().startswith("选择第")
-        # 完整常见客服短句在本地回复；身份标签查询也不必带着原文进入模型。
-        # 复合问题不截断，仍由既有隐私检查和语义路由处理。
+        # 完整客服短句在本地回复；已开放的个人资料查询进入报告流程，不复用旧拒答。
+        # 复合问题不截断，仍执行本会话凭据检查、语义路由和事实来源校验。
         service_topic = None if local_command else local_service_topic(question)
+        if service_topic == 'identity' and self.analysis.guard.allow_personal:
+            service_topic = None
         if service_topic:
-            answer = service_reply(service_topic)
+            answer = service_reply(service_topic, allow_personal=self.analysis.guard.allow_personal)
         if answer is None and client is not None and not local_command:
             try:
                 self.analysis.guard.question(question)
             except PrivacyError:
-                notice = "问题含可能的个人信息，本轮已留在本地；请去掉个人信息后再让AI分析。"
+                notice = ("问题含可能的登录凭据，本轮已留在本地；请去掉凭据后重新提问。"
+                          if self.analysis.guard.allow_personal else
+                          "问题含可能的个人信息，本轮已留在本地；请去掉个人信息后再让AI分析。")
             else:
                 try:
                     answer, context = self.analysis.answer(question, client, model, self.analysis_context)

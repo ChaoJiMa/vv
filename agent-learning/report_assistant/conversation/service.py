@@ -83,14 +83,19 @@ def local_service_topic(question):
     return next((topic for topic, pattern in LOCAL_SERVICE_PATTERNS.items() if re.fullmatch(pattern, text)), None)
 
 
-def service_reply(topic):
+def service_reply(topic, *, allow_personal=False):
     """仅按封闭主题返回固定知识；未知主题拒绝，避免模型注入任意业务事实。"""
     if type(topic) is not str or topic not in SERVICE_REPLIES:
         raise ValueError("未知客服主题。")
-    return SERVICE_REPLIES[topic]
+    text = SERVICE_REPLIES[topic]
+    if allow_personal and topic == 'appeal':
+        text = text.replace('不要在AI对话里发送身份证号等信息。', '小贝可以解释当前报告，但不能代替人工核验或修改资料。')
+    if allow_personal and topic == 'identity':
+        text = '小贝可以帮您查询当前报告中的个人资料；如需核实身份或更正资料，请联系人工客服。'
+    return text
 
 
-def service_replies(topics, *, local_complete=False):
+def service_replies(topics, *, local_complete=False, allow_personal=False):
     """组合已验证的多个客服主题，保留办理边界，热线联系方式只显示一次。
 
     单主题继续返回原固定文案，保持现有调用契约；不允许模型传入自定义答复。
@@ -98,24 +103,26 @@ def service_replies(topics, *, local_complete=False):
     以免第4项被静默截断，并统一去重联系方式。此参数不进入模型工具协议。
     """
     limit = len(SERVICE_REPLIES) if local_complete is True else 3
+    def reply(topic):
+        return service_reply(topic, allow_personal=allow_personal)
     if (not isinstance(topics, (list, tuple)) or not 1 <= len(topics) <= limit
             or not all(type(topic) is str and topic in SERVICE_REPLIES for topic in topics)
             or len(set(topics)) != len(topics)):
         raise ValueError('客服主题列表无效。')
     if len(topics) == 1:
-        return service_reply(topics[0])
+        return reply(topics[0])
     # 退款/申诉本身已包含完整人工联系方式，无需再重复一段“转人工”引导。
     if 'human' in topics and any(topic in topics for topic in ('appeal', 'refund')):
         topics = [topic for topic in topics if topic != 'human']
         if len(topics) == 1:
-            return service_reply(topics[0])
+            return reply(topics[0])
     parts, contact_shown = [], False
-    full_contact = any(CONTACT_REPLY in service_reply(topic) for topic in topics)
+    full_contact = any(CONTACT_REPLY in reply(topic) for topic in topics)
     for topic in topics:
-        text = service_reply(topic)
+        text = reply(topic)
         # 来源和报告列表还含行内热线：其他主题已提供联系渠道时，只压缩这句固定引导。
         # 不删除业务边界，不改写模型文本；来源单问继续保留原固定回复。
-        if topic == 'data_source' and any(HOTLINE in service_reply(other) for other in topics if other != topic):
+        if topic == 'data_source' and any(HOTLINE in reply(other) for other in topics if other != topic):
             text = text.replace(f'需要进一步确认时，可拨打 {HOTLINE} 联系人工核实。',
                                 '需要进一步确认时，可联系人工核实。')
         if topic == 'report_list' and full_contact:
@@ -129,13 +136,13 @@ def service_replies(topics, *, local_complete=False):
     return '\n\n'.join(parts)
 
 
-def append_service_answer(report_answer, topics):
+def append_service_answer(report_answer, topics, *, allow_personal=False):
     """追加可信客服知识；仅在报告已明确说过同一封闭限制时去掉知识中的重复首句。
 
     不删除或改写模型报告正文，不碰数字、否定范围、办理办法或联系方式。
     未知措辞宁可重复，不能用宽泛相似度把必要说明删掉。
     """
-    reply = service_replies(topics, local_complete=True)
+    reply = service_replies(topics, local_complete=True, allow_personal=allow_personal)
     if 'report_list' in topics:
         repeated = re.search(
             r'(?:^|[。！？\n])\s*(?:您)?(?:账号下|名下)的报告总数(?:目前)?'

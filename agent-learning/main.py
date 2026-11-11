@@ -1,4 +1,4 @@
-"""报告查询助手：AI理解分析，程序提供当前报告内经个人信息过滤的事实。"""
+"""报告查询助手：AI理解当前授权报告，凭据过滤与来源校验由程序执行。"""
 
 from contextlib import ExitStack
 import os
@@ -23,7 +23,8 @@ from report_assistant.reports.tools import LocalReportTools, UnsupportedReportTh
 
 def new_conversation(tools, history=None):
     """绑定一份报告创建会话；重建时清空模型上下文及本地字段选择状态。"""
-    conversation = Conversation(tools, history, strategy="analysis")
+    # 用户已明确允许当前报告个人资料参与模型解读；业务授权和凭据保护仍独立执行。
+    conversation = Conversation(tools, history, strategy="analysis", allow_personal=True)
     print("报告查询助手（演示数据）" if tools.is_demo else "报告查询助手（当前报告）")
     return conversation
 
@@ -112,7 +113,7 @@ def main():
                 raise ValueError("数据来源不受支持。")
             client = create_model_client(stack, settings, account=account)
             conversation = new_conversation(tools, history)
-            print(f"问题及按需读取的报告内容会发送至{provider_name}（{model}）；姓名、证件、手机号、地址已过滤。" if client else "当前根据已选报告回答您的问题。")
+            print(f"问题及按需读取的报告内容（含个人资料）会发送至{provider_name}（{model}）；登录凭据不会发送。" if client else "当前根据已选报告回答您的问题。")
             print("您好，我是小贝。请直接告诉我您想了解的报告内容。", flush=True)
             while True:
                 # input收到完整一行才进入问答；明确回车操作，便于区分未发送与处理等待。

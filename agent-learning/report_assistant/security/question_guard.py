@@ -4,16 +4,18 @@ import json
 import re
 
 from report_assistant.security.privacy import PrivacyError
-from report_assistant.security.redaction import NAME_LIST, REDACTED, protected_key, redact_text
+from report_assistant.security.redaction import NAME_LIST, REDACTED, protected_key, redact_text, CREDENTIAL, LABELED_CREDENTIAL
 from report_assistant.security.text import normalized
 from report_assistant.security.answer_validation import (CONTACT, IDENTITY, INJECTION, NUMBER, SAFE_LABEL, SHORT_IDENTIFIER, has_identity_label)
 
 
 class QuestionGuard:
-    """仅检查四类个人信息及凭据；其他报告文字不因出现在报告中而被拦截。"""
+    """检查本会话禁止发送的数据；个人资料可授权开放，凭据始终禁止。"""
 
-    def __init__(self, tools):
-        self._private = tools.private_literals()
+    def __init__(self, tools, *, allow_personal=False):
+        """按本会话授权决定是否过滤个人资料；凭据识别始终启用。"""
+        self.allow_personal = allow_personal
+        self._private = tools.private_literals(allow_personal=True) if allow_personal else tools.private_literals()
         short = {literal for literal in self._private if SHORT_IDENTIFIER.fullmatch(literal)}
         self._private_text = self._private - short
         self._private_numbers = tuple(literal for literal in self._private if len(literal) > 3 and NUMBER.fullmatch(literal))
@@ -23,9 +25,17 @@ class QuestionGuard:
     def question(self, text):
         """返回可发送的规范化自然问题；不通过时拒绝，不使用模型协助脱敏。"""
         text = normalized(text).strip()
-        if not text or len(text) > 2000 or self.contains_private(text) or has_identity_label(text) or CONTACT.search(text):
+        if not text or len(text) > 2000 or self.contains_private(text) or self.blocked_label(text) or self.blocked_contact(text):
             raise PrivacyError("问题包含可能的身份或凭据，请去掉个人信息后重新提问。")
         return text
+
+    def blocked_label(self, text, **kwargs):
+        """开放个人资料后只拒绝凭据标签；旧模式保留来源感知的身份泛称规则。"""
+        return bool(CREDENTIAL.search(normalized(text))) if self.allow_personal else has_identity_label(text, **kwargs)
+
+    def blocked_contact(self, text):
+        """真实个人号码可按授权外发，密钥/JWT样式仍不允许进入动态内容。"""
+        return bool(re.search(r'(?:sk-|eyJ)[A-Za-z0-9_-]{12,}', normalized(text), re.I)) if self.allow_personal else bool(CONTACT.search(text))
 
     def contains_private(self, text):
         text = normalized(text).casefold()
@@ -37,7 +47,9 @@ class QuestionGuard:
         问题仍用严格子串检查；报告文字和明细须先经过本地递归过滤。
         """
         text = normalized(text).casefold()
-        return any(literal in text for literal in self._private_text) or bool(self._short_pattern and self._short_pattern.search(text)) or bool(CONTACT.search(text))
+        return (any(literal in text for literal in self._private_text)
+                or bool(self._short_pattern and self._short_pattern.search(text))
+                or self.blocked_contact(text) or bool(LABELED_CREDENTIAL.search(text)))
 
     def contains_analysis_private(self, text):
         """正文保留身份文本/较长标识检查；短数字交给来源与数字核验，避免把统计值当身份。
@@ -50,7 +62,7 @@ class QuestionGuard:
     def statistic_is_private(self, number):
         """禁止个人号码混入统计值；其他业务编号不因长度或重复出现被排除。"""
         text = str(number)
-        return any(literal in text for literal in self._private_numbers) or bool(CONTACT.search(text))
+        return any(literal in text for literal in self._private_numbers) or self.blocked_contact(text)
 
     def redact(self, value, parent=""):
         """返回脱敏副本，递归保留其他字段；不修改本地报告或借模型执行过滤。
@@ -60,11 +72,11 @@ class QuestionGuard:
         """
         if isinstance(value, dict):
             wrapper = "present" in value and set(value) <= {"path", "present", "value"}
-            return {redact_text(str(key), self._private): self.redact(child, f"{parent}.{key}")
+            return {redact_text(str(key), self._private, allow_personal=self.allow_personal): self.redact(child, f"{parent}.{key}")
                     for key, child in value.items()
-                    if not (wrapper and key == "path") and not protected_key(key, parent)}
+                    if not (wrapper and key == "path") and not protected_key(key, parent, allow_personal=self.allow_personal)}
         if isinstance(value, list):
-            names = NAME_LIST.fullmatch(parent.rsplit(".", 1)[-1])
+            names = not self.allow_personal and NAME_LIST.fullmatch(parent.rsplit(".", 1)[-1])
             return [REDACTED if names and not isinstance(child, (dict, list)) else self.redact(child, parent) for child in value]
         if isinstance(value, str):
             if value.lstrip().startswith(("{", "[")):
@@ -74,7 +86,7 @@ class QuestionGuard:
                     pass
                 else:
                     return json.dumps(self.redact(nested, parent), ensure_ascii=False, allow_nan=False)
-            return redact_text(value, self._private)
+            return redact_text(value, self._private, allow_personal=self.allow_personal)
         if type(value) in (int, float) and self.statistic_is_private(value):
             return REDACTED
         return value
@@ -136,6 +148,7 @@ class QuestionGuard:
         if not isinstance(text, str):
             return None
         text = normalized(text)
-        if not SAFE_LABEL.fullmatch(text) or self._contains_payload_private(text) or IDENTITY.search(text) or CONTACT.search(text) or INJECTION.search(text):
+        identity = CREDENTIAL.search(text) if self.allow_personal else IDENTITY.search(text)
+        if not SAFE_LABEL.fullmatch(text) or self._contains_payload_private(text) or identity or self.blocked_contact(text) or INJECTION.search(text):
             return None
         return text

@@ -225,7 +225,7 @@ class StartupTests(NoExternalIO):
             client = analysis_support.report_client(text="当前字段提供了报告原文，需结合其他字段查看。")
             sdk.return_value.__enter__.return_value = client
             resources.enter_context(patch("builtins.input", side_effect=[
-                "分析指数是多少", "分析指数为68，姓名张三", "exit",
+                "分析指数是多少", "分析指数为68，token=SYNTHETIC_BUSINESS_TOKEN", "exit",
             ]))
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 self.assertEqual(main.main(), 0)

@@ -12,6 +12,7 @@ from report_assistant.security.text import normalized
 from report_assistant.conversation.questions import normalize
 from report_assistant.reports.score import score_family
 from report_assistant.conversation.service import local_service_topic
+from report_assistant.conversation.data_policy import excluded_personal_clause, declared_personal_clause, personal_target_text
 from report_assistant.reports.tools import field_matches_window, time_windows
 
 
@@ -186,7 +187,11 @@ class QuestionTargets:
         report_parts = []
         only_service = bool(parts)
         for text in parts:
+            if projection.guard.allow_personal and (excluded_personal_clause(text) or declared_personal_clause(text)):
+                continue
             local = local_service_topic(text)
+            if local == 'identity' and projection.guard.allow_personal:
+                local = None
             topics = [local] if local and local != 'attention' else [topic for topic, pattern in _SERVICE.items() if pattern.fullmatch(text)]
             if topics:
                 for topic in topics:
@@ -304,6 +309,15 @@ class QuestionTargets:
             # 同一句仍可能并列学历、余额等其他类型，不能命中申请后就提前收尾。
             matched_application = True
         selectors = []
+        if self.projection.guard.allow_personal:
+            # 只在已授权的当前报告目录中补齐个人资料目标，不赋予任意路径访问权。
+            personal_text = personal_target_text(text)
+            for query, label in ((r'姓名|名字', r'姓名|名字'),
+                                 (r'身份证|证件|护照', r'身份证|证件|护照'),
+                                 (r'手机号|手机号码|电话号码', r'手机号|手机号码|电话号码'),
+                                 (r'住址|地址', r'住址|地址')):
+                if re.search(query, personal_text):
+                    selectors.append(lambda item, pattern=label: bool(re.search(pattern, item['public']['name'])))
         if re.search(r'分数|评分|分析指数|风险指数|得分|多少分', text):
             selectors.append(lambda item: bool(score_family(item['local'], self.tools.theme)))
         if re.search(r'逾期.{0,12}(?:记录|条|数)|(?:几条|多少条).{0,8}逾期', text):

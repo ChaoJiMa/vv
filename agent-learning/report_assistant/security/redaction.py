@@ -1,4 +1,4 @@
-"""报告出站过滤：仅移除姓名、证件、手机号、地址，以及运行所需凭据。"""
+"""报告出站过滤：凭据始终过滤，四类个人资料根据会话授权决定是否开放。"""
 
 import json
 import re
@@ -14,7 +14,9 @@ REDACTED = "【已隐藏个人信息】"
 NAME_LIST = re.compile(r"^(?:personList|pnameList)$", re.I)
 PERSON_CONTEXT = re.compile(r"person|owner|representative|contact|borrower|applicant|customer|member|个人|人员|联系人|法人", re.I)
 ORGANIZATION_CONTEXT = re.compile(r"company|enterprise|organization|institution|court|bank|platform|公司|企业|机构|法院|银行|平台", re.I)
-LABELED_CREDENTIAL = re.compile(r"(?:验证码|密码|密钥|token|authorization|cookie|secret|password|api[_ -]?key)\s*[:：=]\s*[^\s，,；;。\n]+", re.I)
+# 备注可能用中文赋值，也可能带Bearer前缀；必须一起消费凭据，避免只隐藏前缀后残留值。
+LABELED_CREDENTIAL = re.compile(r"(?:验证码|密码|密钥|token|authorization|cookie|secret|password|api[_ -]?key)"
+                                r"\s*(?:[:：=]|是|为)\s*(?:Bearer\s+)?[^\s，,；;。\n]+", re.I)
 
 
 def normalize(text):
@@ -22,13 +24,15 @@ def normalize(text):
     return "".join(c for c in unicodedata.normalize("NFKC", str(text)) if unicodedata.category(c) != "Cf")
 
 
-def protected_key(key, parent=""):
+def protected_key(key, parent="", *, allow_personal=False):
     """识别四类字段和凭据；机构、法院等实体的名称仍可用于报告分析。
 
     parent 用于区分 company.name 与 person.name；不把 report_id、案件 code
-    或婚姻学历等其他报告字段当作个人信息。
+    或婚姻学历等其他报告字段当作个人信息。allow_personal=True时仅识别凭据键。
     """
     text = normalize(key)
+    if allow_personal:
+        return bool(CREDENTIAL.search(text))
     compact = re.sub(r"[^a-z0-9]", "", text.casefold())
     if PERSONAL_LABEL.search(text) or CREDENTIAL.search(text):
         return True
@@ -45,21 +49,21 @@ def protected_key(key, parent=""):
     return compact in {"pname", "personname", "fullname", "realname", "username", "customername", "applicantname", "borrowername", "contactname", "legalpersonname", "legalperson", "idnumber", "certno", "certnum", "certnumber", "certificate", "certificateid", "certificateno", "certificatenumber", "credentialno", "idno", "tel", "cell", "province", "city", "county", "district", "street", "village", "postcode", "zipcode"}
 
 
-def protected_path(path):
+def protected_path(path, *, allow_personal=False):
     """按路径片段识别受保护字段，同时兼容数组和候选路径。"""
     parts = re.findall(r"[\w]+", path)
-    return any(protected_key(part, ".".join(parts[:index])) for index, part in enumerate(parts))
+    return any(protected_key(part, ".".join(parts[:index]), allow_personal=allow_personal) for index, part in enumerate(parts))
 
 
-def collect_literals(value, *, parent="", protected=False):
-    """只收集受保护字段的原值；普通文字、业务编号与统计数值不再加入禁发集合。"""
+def collect_literals(value, *, parent="", protected=False, allow_personal=False):
+    """收集当前策略仍禁止发送的字段值；开放个人资料时集合仅包含凭据。"""
     result = set()
     if isinstance(value, dict):
         for key, child in value.items():
-            result.update(collect_literals(child, parent=f"{parent}.{key}", protected=protected or protected_key(key, parent)))
+            result.update(collect_literals(child, parent=f"{parent}.{key}", protected=protected or protected_key(key, parent, allow_personal=allow_personal), allow_personal=allow_personal))
     elif isinstance(value, list):
         for child in value:
-            result.update(collect_literals(child, parent=parent, protected=protected or bool(NAME_LIST.fullmatch(parent.rsplit(".", 1)[-1]) and not isinstance(child, (dict, list)))))
+            result.update(collect_literals(child, parent=parent, protected=protected or bool(not allow_personal and NAME_LIST.fullmatch(parent.rsplit(".", 1)[-1]) and not isinstance(child, (dict, list))), allow_personal=allow_personal))
     elif isinstance(value, str) and not protected and value.lstrip().startswith(("{", "[")):
         # 某些接口把 JSON 明细存成字符串；解析后同样收集姓名等已知原值。
         try:
@@ -67,7 +71,7 @@ def collect_literals(value, *, parent="", protected=False):
         except (ValueError, TypeError):
             pass
         else:
-            result.update(collect_literals(nested, parent=parent))
+            result.update(collect_literals(nested, parent=parent, allow_personal=allow_personal))
     elif protected and value is not None and type(value) is not bool:
         text = normalize(value).casefold().strip()
         if text:
@@ -75,13 +79,14 @@ def collect_literals(value, *, parent="", protected=False):
     return result
 
 
-def redact_text(text, literals):
-    """本地替换已知个人值及常见带标签信息，不请求模型协助脱敏。"""
+def redact_text(text, literals, *, allow_personal=False):
+    """按策略本地替换受保护值；开放个人资料仍处理已知凭据及带标签凭据。"""
     text = normalize(text)
     for literal in sorted(literals, key=len, reverse=True):
         # 短数字仅替换独立值，避免姓名为数字时破坏日期或普通金额。
         pattern = r"(?<![\w.])" + re.escape(literal) + r"(?![\w.])" if re.fullmatch(r"\d{1,3}", literal) else re.escape(literal)
         text = re.sub(pattern, REDACTED, text, flags=re.I)
-    text = PERSONAL_NUMBER.sub(REDACTED, text)
-    text = LABELED_VALUE.sub(REDACTED, text)
+    if not allow_personal:
+        text = PERSONAL_NUMBER.sub(REDACTED, text)
+        text = LABELED_VALUE.sub(REDACTED, text)
     return LABELED_CREDENTIAL.sub(REDACTED, text)

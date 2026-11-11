@@ -23,6 +23,7 @@ from report_assistant.conversation.analysis_protocol import (
 )
 from report_assistant.conversation.wording import natural_missing_text
 from report_assistant.conversation.questions import is_report_overview
+from report_assistant.conversation.data_policy import personal_protocol
 from report_assistant.conversation.overview import MAX_MODULES, OVERVIEW_PROTOCOL, OverviewBudgetError, OverviewValidationError, ReportOverview
 
 
@@ -31,9 +32,9 @@ from report_assistant.conversation.overview import MAX_MODULES, OVERVIEW_PROTOCO
 class AnalysisStrategy:
     """每轮独立执行，返回答案与待提交上下文；持久化由Conversation负责。"""
 
-    def __init__(self, tools):
+    def __init__(self, tools, *, allow_personal=False):
         self.tools = tools
-        self.guard = QuestionGuard(tools)
+        self.guard = QuestionGuard(tools, allow_personal=allow_personal)
         self.projection = FactProjection(tools, self.guard)
 
     def _request(self, client, model, messages, tools=None, json_mode=False, overview=False):
@@ -48,8 +49,13 @@ class AnalysisStrategy:
             options.update(tools=tools, tool_choice="auto")
         if json_mode:
             options["response_format"] = {"type": "json_object"}
+        protocol = PROTOCOL_STRINGS | (OVERVIEW_PROTOCOL if overview else set())
+        if self.guard.allow_personal:
+            # 旧调用的提示词不变；当前入口使用与授权范围一致的固定协议，防止模型继续隐私拒答。
+            options = personal_protocol(options, protocol)
+            protocol |= {personal_protocol(text, protocol) for text in protocol}
         try:
-            self.guard.check_payload(options, trusted_strings=PROTOCOL_STRINGS | self.projection.protocol_strings() | {model} | (OVERVIEW_PROTOCOL if overview else set()))
+            self.guard.check_payload(options, trusted_strings=protocol | self.projection.protocol_strings() | {model})
         except PrivacyError:
             raise AnalysisFailure("payload") from None
         try:
@@ -96,6 +102,10 @@ class AnalysisStrategy:
                 raise PrivacyError("路由格式无效。")
         except PrivacyError:
             raise AnalysisFailure("route") from None
+        if self.guard.allow_personal and route['route'] == 'service' and 'identity' in topics:
+            # 原identity主题只解释隐私边界；新授权下真实字段查询必须进入报告事实流程。
+            route = {'route': 'report', 'use_previous': False, 'scope': 'focused',
+                     'service_topics': [topic for topic in topics if topic != 'identity']}
         # 本地只校正有确定依据的遗漏；未识别片段仍由原语义流程处理。
         # 纯客服必须覆盖全部实质分句，不能仅凭“没有识别到报告字段”就截断混合问题。
         if targets.service_only:
@@ -114,17 +124,18 @@ class AnalysisStrategy:
             # 固定热线属于可信产品文案，不走用于模型自由文本的长号码拦截。
             return OUT_OF_SCOPE_REPLY, None
         service_topics = list(dict.fromkeys([*targets.service_topics, *route.get('service_topics', [])]))
+        if self.guard.allow_personal:
+            service_topics = [topic for topic in service_topics if topic != 'identity']
         if route.get("scope") == "overview":
             answer, context = self._overview(safe_question, client, model, mixed=bool(service_topics))
         else:
             answer, context = self._report(safe_question, client, model, previous if route["use_previous"] else None,
                                            mixed=bool(service_topics), targets=targets)
         if service_topics:
-            answer = append_service_answer(answer, service_topics)
+            answer = append_service_answer(answer, service_topics, allow_personal=self.guard.allow_personal)
         return answer, context
 
-    @staticmethod
-    def _service_answers(topics):
+    def _service_answers(self, topics):
         """组合本地已确认的完整诉求；模型数组仍在进入此处前按最多3项校验。
 
         本地交叉核对可能补出第4项，不能清空或截断。只组合封闭知识全集，
@@ -134,7 +145,7 @@ class AnalysisStrategy:
                 or not all(type(topic) is str and topic in SERVICE_REPLIES for topic in topics)
                 or len(set(topics)) != len(topics)):
             raise AnalysisFailure('route')
-        return service_replies(topics, local_complete=True)
+        return service_replies(topics, local_complete=True, allow_personal=self.guard.allow_personal)
 
     @staticmethod
     def _service_topics(topics):
@@ -196,7 +207,7 @@ class AnalysisStrategy:
     def _check_sourced_text(self, text, source_facts):
         """最终呈现按本段实际引用授予无值泛称许可；无手机来源时关闭旧短语豁免通道。"""
         phone_context = self._has_phone_source(source_facts)
-        if isinstance(text, str) and not phone_context and re.search(r'手机(?:号码|号)', normalized(text)):
+        if not self.guard.allow_personal and isinstance(text, str) and not phone_context and re.search(r'手机(?:号码|号)', normalized(text)):
             raise PrivacyError('手机业务泛称没有本段来源。')
         self._check_text(text, phone_metric_context=phone_context)
 
@@ -208,7 +219,7 @@ class AnalysisStrategy:
         if re.search(r'/(?:orders|find|pick|history|help)\b|```(?:bash|sh|shell|powershell|cmd)\b|'
                      r'(?:运行|执行|输入)\s*[`“\"]?(?:python(?:\.exe)?|pip|powershell|cmd(?:\.exe)?|curl)\b', text, re.I):
             raise PrivacyError('回答包含面向内部操作的命令。')
-        if self.guard.contains_analysis_private(text) or CONTACT.search(text) or has_identity_label(
+        if self.guard.contains_analysis_private(text) or self.guard.blocked_contact(text) or self.guard.blocked_label(
                 text, allow_phone_reference=True, phone_metric_context=phone_metric_context) or re.search(r"https?://|[\x00-\x08\x0b-\x1f\x7f]|审批.{0,8}(通过|概率)|授信概率|保证.{0,5}(贷款|下款)|必然导致", text):
             raise PrivacyError("回答未通过本地检查。")
         # 仅有统计值和引用不足以支持整体信用评价、正常申请间隔或无风险保证。

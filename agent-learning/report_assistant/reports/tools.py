@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import unicodedata
 
-from report_assistant.security.redaction import collect_literals, protected_path, PERSONAL_LABEL
+from report_assistant.security.redaction import collect_literals, protected_path, PERSONAL_LABEL, CREDENTIAL
 from report_assistant.reports.score import describe_score
 from report_assistant.reports.display import MISSING, UNCONFIRMED, display_dependencies, display_field
 
@@ -267,21 +267,22 @@ class LocalReportTools:
                 seen.add(key)
         return result
 
-    def private_literals(self):
-        """本地收集四类个人信息及凭据，供出站过滤；其他报告文字不再一律禁发。
+    def private_literals(self, *, allow_personal=False):
+        """本地收集禁发字段；allow_personal=True时仅收集凭据，默认兼容原过滤。
 
         目录标签可识别业务缩写路径中的姓名、证件等字段，补足仅凭 JSON 键
         无法识别的情况。结果仅在内存使用，不能写入日志或模型消息。
         """
-        literals = collect_literals(self._order["report_data"]["report"])
-        literals.update(collect_literals({key: value for key, value in self._order.items() if key != "report_data"}))
+        literals = collect_literals(self._order["report_data"]["report"], allow_personal=allow_personal)
+        literals.update(collect_literals({key: value for key, value in self._order.items() if key != "report_data"}, allow_personal=allow_personal))
         for field in self._catalog["fields"]:
             path = field.get("path")
-            if path and (protected_path(path) or PERSONAL_LABEL.search(field.get("name", ""))):
+            labels = CREDENTIAL if allow_personal else PERSONAL_LABEL
+            if path and (protected_path(path, allow_personal=allow_personal) or labels.search(field.get("name", ""))):
                 # 只收集实际原值，不将读取包装中的 path/present 当作个人信息。
                 raw = read_report_path(self._order["report_data"], path)
                 if raw["present"]:
-                    literals.update(collect_literals(raw.get("value"), protected=True))
+                    literals.update(collect_literals(raw.get("value"), protected=True, allow_personal=allow_personal))
         return frozenset(literals)
 
     def search_report_fields(self, query, module_id=None):

@@ -25,7 +25,7 @@
 | [整份报告按模块总结](development/agent-learning/2026-10-31-module-overview.md) | 从报告首模块顺序归纳、独立整体总结、完整字段投影、取消字段清单及验证范围 |
 | [小贝客服与解读话术](development/agent-learning/2026-10-30-xiaobei-service-conversation.md) | 客服主题、隐藏内部字段与依据、分数及当前模板区间解释、离线与Sol验证 |
 | [客服持续模拟评测](development/agent-learning/2026-10-31-customer-evaluation.md) | 共享规则、逐题记录、校验误判及页面显示修正、简明客服与明细归纳、同版本连续验证 |
-| [万次不同问题模拟](development/agent-learning/2026-11-02-ten-thousand-evaluation.md) | 原版10000会话、精准回答修复；自然表达、职责整理与账号授权，复查486项离线通过及35轮差分一致，分版本实连范围见记录 |
+| [万次不同问题模拟](development/agent-learning/2026-11-02-ten-thousand-evaluation.md) | 原版10000会话、精准回答修复及账号授权；11月11日开放个人资料并修复5类遗漏，502项离线通过，最新实连连接中断，历史成绩与当前范围分开记载 |
 | [DeepSeek与GPT-6.1 Sol接入](development/agent-learning/2026-10-31-deepseek-provider.md) | 厂商切换、独立密钥、自定义网关、Responses与JSON兼容、Sol在线验证 |
 | [注释和规范建设记录](development/agent-learning/2026-10-30-comments-and-skill.md) | 中文注释、项目级 skill 及验证证据 |
 | [Java 接口对接说明](interfaces/agent-learning/java-business-api.md) | 验证码、登录、报告列表及正文接口契约 |
