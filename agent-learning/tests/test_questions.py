@@ -143,7 +143,7 @@ class NaturalQuestionTests(support.NoExternalIO):
                 with self.subTest(strategy=strategy, question=question):
                     conversation = Conversation(natural_tools(), strategy=strategy)
                     answer = conversation.answer(question)
-                    self.assertIn("请告诉我您想了解报告中的哪一项内容" if strategy == "analysis" else "可以逐项查看", answer)
+                    self.assertIn("整体分析暂未完成" if strategy == "analysis" else "可以逐项查看", answer)
                     self.assertNotIn("未找到该指标", answer)
                     self.assertEqual(conversation.last_fields, [])
 

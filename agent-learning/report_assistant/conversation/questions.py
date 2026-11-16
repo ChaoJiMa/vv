@@ -47,12 +47,15 @@ DEFINITION_WORDS = ("什么意思", "含义", "解释", "规则", "怎么算", "
 
 @dataclass
 class LocalQuery:
-    """本地候选、操作与提示；scope 保存同指标的跨周期候选以支持后续换窗口。"""
+    """本地候选、操作与提示；issue区分可安全复用的周期澄清与普通未命中。"""
 
     fields: list = field(default_factory=list)
     scope: list = field(default_factory=list)
     operation: str = "both"
     message: str = ""
+    # 与旧诊断message分开；此出口只含客户可读澄清，不包含命令、目录内部字段或原始值。
+    clarification: str = ""
+    issue: str = ""
 
 
 class LocalQuestionResolver:
@@ -80,13 +83,19 @@ class LocalQuestionResolver:
         if len(matches) == 1:
             scope = self.metric_scope(matches[0])
         message = ""
+        clarification = ""
         if not matches:
             message = self.guidance(
                 "当前报告的已登记字段中未找到该指标或指定周期；不能据此判断为0或不存在记录。"
             )
+            issue = 'no_match'
         elif len(matches) > 6:
             message = f"共有 {len(matches)} 个候选，本次显示前6项；请补充模块、字段名或周期缩小范围。"
-        return LocalQuery(matches[:6], scope, operation, message)
+            clarification = '匹配到多项不同结果，请补充模块、指标或周期，以免回答混用。'
+            issue = 'multiple_matches'
+        else:
+            issue = ''
+        return LocalQuery(matches[:6], scope, operation, message, clarification, issue)
 
     def metric_scope(self, chosen):
         """字段选择后只在同模块、同字段名内切换周期，不借用别的机构或模块。"""
@@ -117,10 +126,14 @@ class LocalQuestionResolver:
 
         # 自然月与日期范围不能擅自替换为滚动窗口；多周期比较也不能只取其中一个。
         if re.search(r"上个?月|去年|今年|本月|这个月|上周|本周|\d{4}[-/年]\d{1,2}", text):
-            return LocalQuery(message="当前仅按资料登记的滚动周期查询，不能把自然月或日期区间换算成近1个月。请明确一个周期，例如近7天、近1个月。")
+            return LocalQuery(message="当前仅按资料登记的滚动周期查询，不能把自然月或日期区间换算成近1个月。请明确一个周期，例如近7天、近1个月。",
+                              clarification='报告中的滚动周期不能直接当作自然月或具体日期区间，请明确您需要查询的统计周期。',
+                              issue='calendar')
         windows = time_windows(text)
         if len(windows) > 1:
-            return LocalQuery(message="这次提到了多个统计周期，请每次指定一个周期，避免混用口径。")
+            return LocalQuery(message="这次提到了多个统计周期，请每次指定一个周期，避免混用口径。",
+                              clarification='本次未能完成多个统计周期的查询，请分别指定一个周期，以免混用结果。',
+                              issue='multiple_windows')
         window = windows[0] if windows else "unspecified"
         reference = r"(?:这个字段|这个数值|这个指标|这个指数|这一项|这个|这项|这|它)"
         followup = re.fullmatch(r"(?:那|那么)?" + reference + r"?(?:呢|是什么意思|什么意思|是啥意思|啥意思|含义|解释一下|怎么理解|怎么算|是怎么算的|怎么算出来的|为什么是0|为什么这么低|为什么这么高|的数据从哪里来|数据从哪里来|的含义|的展示规则)", text)
@@ -130,10 +143,13 @@ class LocalQuestionResolver:
         window_followup = re.fullmatch(r"(?:那|那么)?(?:最近|过去|近)?(?:\d+|十二|十五|一个|[一二两三六七半])(?:个月|天|周|月|年)(?:的)?(?:呢|是多少|有多少次)?", text)
         if followup or value_followup or window_followup or inference_followup:
             if not previous or not previous.fields:
-                return LocalQuery(message=self.guidance("请先说明“这个”指哪个字段，或先选定一个候选。"))
+                return LocalQuery(message=self.guidance("请先说明“这个”指哪个字段，或先选定一个候选。"),
+                                  clarification='请说明“这个”指报告中的哪一项指标，我再继续为您解读。',
+                                  issue='referent')
             if window_followup:
                 return self._result(previous.scope, window, "both")
-            return LocalQuery(previous.fields, previous.scope, "both" if value_followup else "definition")
+            return LocalQuery(previous.fields, previous.scope, "both" if value_followup else "definition",
+                              issue='safe_inference_followup' if inference_followup else '')
 
         if any(word in text for word in ("能不能贷", "能贷款吗", "能贷多少", "通过率", "审批概率", "能批吗", "能下款吗")):
             return LocalQuery(message=self.guidance("报告字段不能确定审批结果或可贷额度。可以继续查询申请、逾期、案件等具体记录。"))

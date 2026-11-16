@@ -1,5 +1,6 @@
 """整份报告解读：按模板顺序覆盖模块，校验引用后输出模块小结和整体总结。"""
 
+from decimal import Decimal, InvalidOperation
 import json
 import re
 
@@ -18,6 +19,8 @@ MODULES_PER_REQUEST = 8
 FIELDS_PER_REQUEST = 256
 MAX_PAYLOAD_CHARS = 100000
 MAX_BATCHES = 32
+QUANTITY_NUMBER = r'-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?'
+QUANTITY_TOKEN = QUANTITY_NUMBER + r'\s*(?:次|家|条|档(?!位))'
 MODULE_PROMPT = CUSTOMER_RULES + """你是贝融报告助手“小贝🐚”。用户要整份报告的模块总结，不是字段清单。
 按提供的模块顺序，每个模块只写一段简洁中文，直接概括本模块的主要结果，默认一句话；确有关键记录或缺失需要说明时才补第二句，不为凑两句话添加提醒。
 每个模块只讨论本模块事实，不提前评价或引用其他模块；跨模块的综合放在最后的整体总结。
@@ -46,12 +49,18 @@ scope.stage=summary才授权综合全部小结；全报告模块范围以scope.m
 数字仅能来自所引小结；不要写最低档、低位、无风险、信用良好或没有逾期等未经证实的判断。"""
 MODULE_PROMPT += "\nfocus_fields仅提示本模块值得保留的已登记指标，不是风险排序；先核实这些结果，再概括其他信息，不能遗漏用户明确关心的内容。"
 SUMMARY_PROMPT += "\n先用一两句综合已确认的主要结果，避免按模块名称重列目录。key_facts是已在模块小结中展示并核验的关键事实，包含指标、周期、单位与状态；按问题选择重点，不把它们机械抄成清单。次要缺失不挤占已知结果，关键缺口集中简短说明一次；仅在确有需要时给一次具体下一步。不凭金额大小或长窗口总数推断严重程度、原因或趋势。"
+MODULE_PROMPT += '\nscope.is_partial为true时只授权用户选中的模块，module_count是所选范围大小，report_module_count是报告实际目录大小；不得评价未选模块或声称所选范围就是整份报告，范围计数不能当业务结果。'
+SUMMARY_PROMPT += '\nscope.is_partial为true时仅总结所选模块，不对整份报告或未选模块作结论；本段将显示为所选模块总结，范围计数不是业务指标。'
+MODULE_PROMPT += '\n统计周期优先沿用事实给出的周期原文，不能把“近两年”等统计窗口改写成“已持续两年”等个人或事件时长；时长结果保留页面展示的原范围与边界。'
+MODULE_NUMERIC_RETRY_PROMPT = MODULE_PROMPT + '\n本次只重新生成给出的一个模块。上一次小结的数字、比例、周期或时长未能通过来源核对；不要重复上一次文字。正文每个数字、比例、周期和时长都须由本条sources中的对应字段及其展示范围支持，漏引时补齐准确字段引用，无法确定时省略该表述。统计周期请直接使用字段给出的周期原文，不改写为“几年内”“几年来”或个人已持续的时长。不得引用其他模块、换算或猜测数字。仍只返回一个modules条目的规定JSON结构。'
+SUMMARY_NUMERIC_RETRY_PROMPT = SUMMARY_PROMPT + '\n本次只重新生成整体总结。上一次总结的数字、比例、周期或时长未能通过已展示模块小结的来源核对；不要重复上一次文字。只能复述本条sources实际引用的小结已出现的数字与周期，无法确定时省略，不补写原字段值、模块计数或新换算。仍只返回规定的text和sources结构。'
 OVERVIEW_PROTOCOL = string_leaves({
-    "prompts": [MODULE_PROMPT, SUMMARY_PROMPT], "question": "", "modules": [],
+    "prompts": [MODULE_PROMPT, MODULE_NUMERIC_RETRY_PROMPT, SUMMARY_PROMPT,
+                SUMMARY_NUMERIC_RETRY_PROMPT], "question": "", "modules": [],
     "module_ref": "", "name": "", "facts": [], "text": "", "sources": [], "unavailable_modules": [],
     "focus_fields": [], "key_facts": [], "field_ref": "", "window": "", "unit": "", "status": "",
     "scope": {"stage": ["modules", "summary"], "module_count": 0,
-              "confirmed_module_count": 0, "batch_module_count": 0},
+              "confirmed_module_count": 0, "batch_module_count": 0, "is_partial": True, "report_module_count": 0},
 })
 
 
@@ -80,19 +89,20 @@ class OverviewValidationError(PrivacyError):
         "总结的模块范围与报告不一致。": ("scope", "将局部模块范围误作整份报告范围"),
         "整体总结不能引用未展示的字段。": ("sources", "引用了未在模块小结中使用的来源"),
         "回答包含未验证数字。": ("numbers", "包含来源未支持的数字或比例"),
-        "回答包含不一致的周期复述。": ("numbers", "包含来源未支持的数字或比例"),
-        "phone时长声明没有具名phone指标来源。": ("numbers", "包含来源未支持的数字或比例"),
-        "phone声明的数值或范围角色未获同指标来源支持。": ("numbers", "包含来源未支持的数字或比例"),
-        "手机时长关系含未知实质词或其他主体。": ("numbers", "包含来源未支持的数字或比例"),
-        "手机设备使用时间不能冒充账户在网时长。": ("numbers", "包含来源未支持的数字或比例"),
-        "未确认的号码指代不能绑定手机时长。": ("numbers", "包含来源未支持的数字或比例"),
-        "回答将手机时长来源用于其他明确主体。": ("numbers", "包含来源未支持的数字或比例"),
-        "回答包含尚未支持的复合时长区间。": ("numbers", "包含来源未支持的数字或比例"),
-        "回答包含尚未支持的复合时长。": ("numbers", "包含来源未支持的数字或比例"),
-        "回答包含无法核验的中文时长。": ("numbers", "包含来源未支持的数字或比例"),
-        "回答改变了同指标时长来源的数值或范围边界。": ("numbers", "包含来源未支持的数字或比例"),
-        "回答中的中文时长没有同指标来源。": ("numbers", "包含来源未支持的数字或比例"),
-        "回答改变了时长来源的范围边界。": ("numbers", "包含来源未支持的数字或比例"),
+        "回答的数字量词与引用指标不一致。": ("numbers", "数量单位与对应指标不一致"),
+        "回答包含不一致的周期复述。": ("numbers", "统计周期复述与来源不一致"),
+        "phone时长声明没有具名phone指标来源。": ("numbers", "时长或范围与对应指标来源不一致"),
+        "phone声明的数值或范围角色未获同指标来源支持。": ("numbers", "时长或范围与对应指标来源不一致"),
+        "手机时长关系含未知实质词或其他主体。": ("numbers", "时长或范围与对应指标来源不一致"),
+        "手机设备使用时间不能冒充账户在网时长。": ("numbers", "时长或范围与对应指标来源不一致"),
+        "未确认的号码指代不能绑定手机时长。": ("numbers", "时长或范围与对应指标来源不一致"),
+        "回答将手机时长来源用于其他明确主体。": ("numbers", "时长或范围与对应指标来源不一致"),
+        "回答包含尚未支持的复合时长区间。": ("numbers", "时长或范围与对应指标来源不一致"),
+        "回答包含尚未支持的复合时长。": ("numbers", "时长或范围与对应指标来源不一致"),
+        "回答包含无法核验的中文时长。": ("numbers", "时长或范围与对应指标来源不一致"),
+        "回答改变了同指标时长来源的数值或范围边界。": ("numbers", "时长或范围与对应指标来源不一致"),
+        "回答中的中文时长没有同指标来源。": ("numbers", "时长或范围与对应指标来源不一致"),
+        "回答改变了时长来源的范围边界。": ("numbers", "时长或范围与对应指标来源不一致"),
         "手机业务泛称没有本段来源。": ("sources", "来源未支持本段手机业务表述"),
         "总结包含没有依据的分档判断。": ("claim", "包含未经支持的分档或逾期判断"),
         "分析结论超出统计事实范围。": ("claim", "包含来源未支持的评价或保证"),
@@ -104,14 +114,14 @@ class OverviewValidationError(PrivacyError):
         "整体总结不允许额外工具。": ("tool", "返回了不允许的额外工具调用"),
     }
 
-    def __init__(self, error, stage, batch=0, position=0):
-        """错误仅用于查固定映射；未知异常不回显，序号也不包含业务标识。"""
+    def __init__(self, error, stage, batch=0, position=0, *, partial=False):
+        """错误仅用于查固定映射；局部范围另标明所选总结，未知异常不回显。"""
         self.code, label = self.REASONS.get(str(error), ("validation", "结构或正文未通过校验"))
         self.stage = stage if stage in {"prepare", "modules", "summary"} else "prepare"
         self.batch = batch if type(batch) is int and 0 < batch <= MAX_BATCHES else 0
         self.position = position if type(position) is int and 0 < position <= MODULES_PER_REQUEST else 0
         if self.stage == "summary":
-            location = "整体总结"
+            location = "所选模块总结" if partial else "整体总结"
         elif self.stage == "modules":
             location = f"第{self.batch}批模块小结" if self.batch else "模块小结"
             if self.position:
@@ -124,21 +134,32 @@ class OverviewValidationError(PrivacyError):
 class ReportOverview:
     """每次整份报告解读独立执行，引用和事实不跨报告或跨会话共享。"""
 
-    def __init__(self, tools, projection, check_text, parse_json, check_sourced_text=None):
+    def __init__(self, tools, projection, check_text, parse_json, check_sourced_text=None, *, module_ids=None):
         """可选回调只检查本段已验证来源；省略时兼容原四参数文本检查契约。"""
         self.tools, self.projection = tools, projection
         self.check_text, self.parse_json = check_text, parse_json
         self.check_sourced_text = check_sourced_text
+        # 只接受程序从当前模板绑定的模块范围；None保持原全报告契约，空范围不等于全选。
+        self.module_ids = module_ids
 
     def _prepare(self):
         """按模板顺序投影全部可读字段，超预算整轮拒绝；未知模块保留占位。"""
         modules = self.tools.current_modules()
+        if self.module_ids is not None:
+            allowed = {module['module_id'] for module in modules}
+            if (not isinstance(self.module_ids, (tuple, list)) or not self.module_ids
+                    or any(type(value) not in (int, str) or value not in allowed for value in self.module_ids)
+                    or len(set(self.module_ids)) != len(self.module_ids)):
+                raise PrivacyError('所选模块范围无效。')
+            modules = [module for module in modules if module['module_id'] in self.module_ids]
         if len(modules) > MAX_MODULES:
             raise OverviewBudgetError("报告模块超过整体解读预算。")
         groups = {}
+        selected = {module['module_id'] for module in modules}
         for ref, item in self.projection.fields.items():
-            groups.setdefault(item["local"]["module_id"], []).append((ref, item))
-        if len(self.projection.fields) > MAX_FIELDS or any(len(fields) > FIELDS_PER_MODULE for fields in groups.values()):
+            if item['local']['module_id'] in selected:
+                groups.setdefault(item["local"]["module_id"], []).append((ref, item))
+        if sum(map(len, groups.values())) > MAX_FIELDS or any(len(fields) > FIELDS_PER_MODULE for fields in groups.values()):
             raise OverviewBudgetError("报告字段超过整体解读预算。")
         result = []
         for module in modules:
@@ -185,8 +206,7 @@ class ReportOverview:
         if not isinstance(section, dict) or set(section) != {"text", "sources"}:
             raise PrivacyError("模块总结结构无效。")
         text, sources = section["text"], section["sources"]
-        if not isinstance(sources, list) or not sources or not all(type(r) is str and r in facts for r in sources) or len(set(sources)) != len(sources):
-            raise PrivacyError("模块总结引用无效。")
+        self._check_sources(sources, facts)
         if allowed is not None and not set(sources) <= allowed:
             raise PrivacyError("整体总结不能引用未展示的字段。")
         if source_facts is None:
@@ -211,7 +231,13 @@ class ReportOverview:
             raise PrivacyError("模块总结超过450字。")
         if re.search(r"最低档|登记低位|处于低位|无逾期|没有逾期", assertion_text(text)):
             raise PrivacyError("总结包含没有依据的分档判断。")
-        if re.search(r"[\r\n]|(?<![a-zA-Z0-9_])[fm]\d+(?![a-zA-Z0-9_])|field_ref|module_ref|\"sources\"|依据[（(：:]|登记统计字段的原始值|此工具|页面自定义", normalized(text).casefold()):
+        # 提示与JSON必须带内部键，但交付正文不能复述它们；只匹配独立英文词。
+        technical_key = (r'(?<![a-zA-Z0-9_])(?:field_ref|module_ref|sources|window|scope|'
+                         r'focus_fields|key_facts|facts|presentation|status|'
+                         r'module_count|batch_module_count|confirmed_module_count|'
+                         r'report_module_count|is_partial)(?![a-zA-Z0-9_])')
+        if re.search(r"[\r\n]|(?<![a-zA-Z0-9_])[fm]\d+(?![a-zA-Z0-9_])|" + technical_key
+                     + r"|依据[（(：:]|登记统计字段的原始值|此工具|页面自定义", normalized(text).casefold()):
             raise PrivacyError("总结不能包含字段清单或技术引用。")
         if duration_roles is None:
             check_answer_numbers(text, [facts[ref] for ref in sources])
@@ -219,7 +245,136 @@ class ReportOverview:
             # 只交付本段来源的收紧约束；别的模块即使有相同时长也不能授予本段资格。
             roles = {ref: duration_roles[ref] for ref in sources if ref in duration_roles}
             check_answer_numbers(text, [facts[ref] for ref in sources], duration_roles=roles)
+        if source_facts is None:
+            self._check_unit_claims(text, facts, sources)
         return {"text": text.strip(), "sources": sources}
+
+    @staticmethod
+    def _check_sources(sources, facts):
+        """按当前段落的引用白名单检查非空、类型与重复；不授权其他模块字段。"""
+        if (not isinstance(sources, list) or not sources
+                or not all(type(ref) is str and ref in facts for ref in sources)
+                or len(set(sources)) != len(sources)):
+            raise PrivacyError("模块总结引用无效。")
+
+    @staticmethod
+    def _check_unit_claims(text, facts, sources):
+        """仅核对明确数量与次/家/条/档，不猜测结构化明细或无量词结论。
+
+        数字已先通过来源集合检查；这里防止同值的机构数替申请次数背书。
+        完整带单位展示值与文字中的明确数量可作反证，其他复杂值仍留给人工复核。
+        """
+        def scalar(fact):
+            value = fact.get("value")
+            if fact.get("status") != "provided":
+                return None
+            if type(value) is str:
+                # 页面可能直接展示“8家”；只解析完整的受控数量，避免从明细中猜数。
+                match = re.fullmatch(r'(?P<number>' + QUANTITY_NUMBER
+                                     + r')\s*(?:次|家|条|档)?', value.strip())
+                if match is None:
+                    return None
+                value = match["number"].replace(",", "")
+            elif type(value) not in (int, float):
+                return None
+            try:
+                result = Decimal(str(value))
+                return result if result.is_finite() else None
+            except InvalidOperation:
+                return None
+
+        def unit(fact):
+            value = fact.get("value")
+            if type(value) is str:
+                displayed = re.fullmatch(r'(?:' + QUANTITY_NUMBER + r')\s*(?P<unit>次|家|条|档)',
+                                         value.strip())
+                if displayed is not None:
+                    return displayed["unit"]
+            return "档" if fact.get("kind") == "band" and "档位" in str(fact.get("name") or "") else metric_unit(fact)
+
+        def text_units(fact, number):
+            """只认当前引用文本中明确写出的同数值量词，不从结构化明细推算合计。"""
+            value = fact.get("value")
+            if fact.get("status") != "provided" or type(value) is not str:
+                return set()
+            found = re.finditer(r'(?<![\d.,])(?P<number>' + QUANTITY_NUMBER
+                                + r')\s*(?P<unit>次|家|条|档)(?!位)', value)
+            return {match["unit"] for match in found
+                    if Decimal(match["number"].replace(",", "")) == number}
+
+        def supports(name, number, stated_unit):
+            return any(ref in sources and fact.get("name") == name
+                       and ((scalar(fact) == number and unit(fact) == stated_unit)
+                            or stated_unit in text_units(fact, number))
+                       for ref, fact in facts.items())
+
+        # 两项“分别为”有明确顺序，逐项核对；无法可靠拆分的并列句仍保留原校验。
+        paired = re.finditer(r'(?P<labels>[^，,。；;！？!?]+?)\s*(?:分别|依次)\s*(?:为|是)\s*'
+                             r'(?P<first>' + QUANTITY_TOKEN + r')\s*(?:和|与|及|、)\s*'
+                             r'(?P<second>' + QUANTITY_TOKEN + r')', text)
+        for pair in paired:
+            labels = re.split(r'\s*(?:和|与|及|、)\s*', pair["labels"])
+            if len(labels) != 2:
+                continue
+            matched_names = []
+            for label in labels:
+                candidates = [fact["name"] for fact in facts.values()
+                              if isinstance(fact.get("name"), str) and fact["name"]
+                              and label.strip().endswith(fact["name"])]
+                if not candidates:
+                    break
+                matched_names.append(max(candidates, key=len))
+            if len(matched_names) != 2:
+                continue
+            for name, token in zip(matched_names, (pair["first"], pair["second"])):
+                quantity = re.fullmatch(r'(?P<number>' + QUANTITY_NUMBER
+                                        + r')\s*(?P<unit>次|家|条|档)', token)
+                if quantity is None or not supports(name, Decimal(quantity["number"].replace(",", "")),
+                                                    quantity["unit"]):
+                    raise PrivacyError("回答的数字量词与引用指标不一致。")
+
+        claims = re.finditer(r'(?<![\d.,])(?P<number>' + QUANTITY_NUMBER
+                             + r')\s*(?P<unit>次|家|条|档)(?!位)', text)
+        for claim in claims:
+            number, stated_unit = Decimal(claim["number"].replace(",", "")), claim["unit"]
+            matching = [(ref, facts[ref]) for ref in sources if scalar(facts[ref]) == number]
+            # 只有所有同值标量来源都登记了量词，才能由数值与量词作排除判断。
+            if matching and all(unit(fact) for _, fact in matching):
+                if (stated_unit not in {unit(fact) for _, fact in matching}
+                        and not any(stated_unit in text_units(facts[ref], number) for ref in sources)):
+                    raise PrivacyError("回答的数字量词与引用指标不一致。")
+            clause = re.split(r'[，,。；;！？!?]', text[:claim.start()])[-1]
+            # “次数和机构数均为8家”不能因其中一个同值来源确为“家”就放行。
+            if re.search(r'(?:均|都|皆|各)\s*(?:为|是|有|达|达到)?\s*$', clause):
+                candidates = []
+                for name in {fact.get("name") for fact in facts.values()
+                             if isinstance(fact.get("name"), str) and fact.get("name")}:
+                    for label in re.finditer(re.escape(name) + r'(?=\s*(?:和|与|及|、|均|都|皆|各))', clause):
+                        candidates.append((label.start(), label.end(), name))
+                # 长指标名优先，不能让“申请次数”误命中“银行申请次数”的后半段。
+                selected = []
+                for start, end, name in sorted(candidates, key=lambda item: (item[0] - item[1], item[0])):
+                    if all(end <= left or start >= right for left, right, _ in selected):
+                        selected.append((start, end, name))
+                joint_names = {name for _, _, name in selected}
+                if len(joint_names) >= 2 and any(
+                        not supports(name, number, stated_unit) for name in joint_names):
+                    raise PrivacyError("回答的数字量词与引用指标不一致。")
+            if "分别" in clause or "依次" in clause:
+                continue
+            labeled = []
+            for ref, fact in facts.items():
+                name = fact.get("name", "")
+                if (not isinstance(name, str) or not name
+                        or scalar(fact) is None and not text_units(fact, number)):
+                    continue
+                # 只认完整指标名与有限连接词紧邻数量，避免给并列或远距离描述猜归属。
+                tail = re.search(re.escape(name) + r'\s*(?:(?:显示|记录|达到|为|是|有|约|共|合计|[:：])\s*)*$', clause)
+                if tail:
+                    labeled.append((ref, fact))
+            if labeled and not any(supports(fact["name"], number, stated_unit)
+                                   for _, fact in labeled):
+                raise PrivacyError("回答的数字量词与引用指标不一致。")
 
     @staticmethod
     def _focus_fields(module, question):
@@ -252,7 +407,8 @@ class ReportOverview:
             if fact.get('presentation') or not re.search(
                     r'(?<![\d.])' + re.escape(str(value)) + r'(?![\d.])', section['text']):
                 continue
-            unit = metric_unit(fact)
+            unit = ("档" if fact.get("kind") == "band" and "档位" in str(fact.get("name") or "")
+                    else metric_unit(fact))
             if type(value) in (int, float) and unit and not re.search(
                     r'(?<![\d.])' + re.escape(str(value)) + r'\s*' + unit, section['text']):
                 # 原文出现相同数字仍不证明量词正确，不把“8家”编译成已确认的8次。
@@ -269,6 +425,13 @@ class ReportOverview:
         return {"stage": stage, "module_count": len(modules), "batch_module_count": batch_count,
                 "confirmed_module_count": sum(any(f.get("status") == "provided" for f in m["facts"])
                                               for m in modules)}
+
+    def _request_scope(self, modules, stage, batch_count=0):
+        """局部分析另带报告目录大小；原全报告请求保持原四项范围结构。"""
+        scope = self._scope(modules, stage, batch_count)
+        if self.module_ids is not None:
+            scope.update(is_partial=True, report_module_count=len(self.tools.current_modules()))
+        return scope
 
     @staticmethod
     def _scope_asserted(clause, position):
@@ -298,6 +461,44 @@ class ReportOverview:
         """
         # 转折后的肯定单独检查；前一分句的否定不能授权后一句相反的范围结论。
         for clause in re.split(r"[。；;！？，,]|但是|然而|不过|但|实际上|事实上|实则", normalized(text)):
+            if scope.get('is_partial'):
+                whole = re.search(r'(?:整份|整个|全部|全)报告|(?:这份|本份|当前)报告(?=整体|总体|全部|所有|仅有|只有|仅含|仅包含|没有任何|暂无任何)', clause)
+                if whole:
+                    before, after = clause[:whole.start()], clause[whole.end():]
+                    # 否定边界必须覆盖整句；“未分析整份报告”可说，后接实际
+                    # 全报告结论仍须拒绝，不能仅凭前半句中的“未”放行。
+                    negated_action = r'(?:尚未|未|没有|并未|还没|不)(?:被|做|作|进行)?(?:分析|解读|总结|核对|查看|覆盖|评价|判断)(?:过)?'
+                    boundary_before = (re.search(r'(?:尚未|未|没有|并未|还没|不)(?:对)?(?:分析|解读|总结|核对|查看|覆盖|评价|判断)(?:过)?$', before)
+                                       and re.fullmatch(r'(?:的(?:内容|数据|信息|结果))?', after))
+                    boundary_after = re.fullmatch(negated_action, after)
+                    boundary_around = (re.search(r'(?:尚未|未|没有|并未|还没|不)(?:对)?$', before)
+                                       and re.fullmatch(r'(?:作|做|进行)?(?:分析|解读|总结|核对|查看|覆盖|评价|判断|结论)', after))
+                    if (not boundary_before and not boundary_after and not boundary_around
+                            and cls._scope_asserted(clause, whole.start())):
+                        raise PrivacyError('总结的模块范围与报告不一致。')
+                # 局部总结不具有整份目录的计数权限；业务字段碰巧出现相同数字，
+                # 也不能据此把选中范围的模块数说成全报告的模块数。
+                report_count = re.search(
+                    r'(?:这份|本份|当前|该|整份|整个|全部|全)?报告(?:目录|中|里|内)?'
+                    r'(?:一共有|总共有|一共|总共|共有|共计|总计|共|有|设有|包含|包括|分为|划分为)'
+                    r'(?:\d+|[零〇一二两三四五六七八九十百千万]+)(?:个|项)?(?:模块|栏目)', clause)
+                if report_count and cls._scope_asserted(clause, report_count.start()):
+                    raise PrivacyError('总结的模块范围与报告不一致。')
+                # 最终小结同样只能谈选中模块；“未分析其他模块”是边界说明，
+                # “其他模块没有数据/已有结果”则是未经读取的可用性断言。
+                unselected = re.search(r'(?:其他|其它|其余|剩余|别的|未选(?:中)?|未纳入)(?:的)?模块', clause)
+                if unselected:
+                    before, after = clause[:unselected.start()], clause[unselected.end():]
+                    boundary_before = re.search(
+                        r'(?:未|尚未|没有|不)(?:对)?(?:分析|解读|总结|核对|查看|覆盖|评价|判断|涉及)$', before)
+                    boundary_after = re.fullmatch(
+                        r'(?:未|尚未|没有|不)(?:被)?(?:分析|解读|总结|核对|查看|覆盖|评价|判断|涉及)(?:的范围)?', after)
+                    availability = re.search(
+                        r'(?:没有|无|暂无|未提供|缺少|缺失|有|已提供|包含|显示|展示|记录|结果|数据|信息|可用|不可用|完整|不完整)', after)
+                    boundary_only = (bool(boundary_before) and bool(re.fullmatch(r'(?:的(?:结果|数据|信息|内容))?', after)))
+                    if (availability and not boundary_only and not boundary_after
+                            and cls._scope_asserted(clause, unselected.start())):
+                        raise PrivacyError('总结的模块范围与报告不一致。')
             other = re.search(r"(?:其他|其它|其余|别的|剩余|所有|全部|各个|各|部分|有些|某些)(?:的)?模块", clause)
             if scope["stage"] == "modules" and other:
                 availability = re.search(r"(?:无法|不能|难以)(?:判断|确认|核实)|有|无|没|未|已|提供|缺|空|"
@@ -361,15 +562,41 @@ class ReportOverview:
         self._check_scope(section["text"], scope)
         return section, facts
 
+    def _retry_numeric_module(self, module, question, modules, request):
+        """数字类来源校验失败时只重生成当前模块一次；新结果仍通过完整校验。
+
+        原草稿不回传模型，重试只携带当前模块的已投影事实。全轮是否已用重试由
+        调用方控制；这里沿用单模块请求预算、全报告范围和原来源权限。
+        """
+        scope = self._request_scope(modules, "modules", 1)
+        payload = encode({"question": question, "modules": [module], "scope": scope})
+        if len(payload) > MAX_PAYLOAD_CHARS:
+            raise OverviewBudgetError("模块内容超过整体解读预算。")
+        response = request([{"role": "system", "content": MODULE_NUMERIC_RETRY_PROMPT},
+                            {"role": "user", "content": payload}])
+        if response.tool_calls:
+            raise PrivacyError("模块总结不允许额外工具。")
+        value = self.parse_json(response.content)
+        rows = value.get("modules")
+        if set(value) != {"modules"} or not isinstance(rows, list) or len(rows) != 1:
+            raise PrivacyError("模块总结覆盖不完整。")
+        row = rows[0]
+        if not isinstance(row, dict) or set(row) != {"module_ref", "text", "sources"} or not isinstance(row["module_ref"], str):
+            raise PrivacyError("模块总结结构无效。")
+        if row["module_ref"] != module["module_ref"]:
+            raise PrivacyError("模块总结重复或引用其他模块。")
+        return self._module_section(row, module, scope)
+
     def run(self, question, request):
-        """逐批生成模块小结，再单独生成整体总结；最多34次请求（含外部路由）。"""
+        """逐批生成模块小结，再单独生成整体总结；含外部路由最多35次请求。"""
         self._stage, self._batch, self._position = "prepare", 0, 0
         try:
             return self._run(question, request)
         except OverviewBudgetError:
             raise
         except PrivacyError as error:
-            raise OverviewValidationError(error, self._stage, self._batch, self._position) from None
+            raise OverviewValidationError(error, self._stage, self._batch, self._position,
+                                          partial=self.module_ids is not None) from None
 
     def _run(self, question, request):
         """执行完整流程，并只用本地阶段序号定位失败，不持久化被拒绝的模型正文。"""
@@ -378,10 +605,11 @@ class ReportOverview:
             module['focus_fields'] = self._focus_fields(module, question)
         available = [module for module in modules if module["facts"]]
         sections, facts = {}, {}
-        module_scope = self._scope(modules, "modules")
+        module_scope = self._request_scope(modules, "modules")
+        numeric_retry_used = False
         for batch_index, batch in enumerate(self._batches(available, question, module_scope), 1):
             self._stage, self._batch, self._position = "modules", batch_index, 0
-            scope = self._scope(modules, "modules", len(batch))
+            scope = self._request_scope(modules, "modules", len(batch))
             response = request([{"role": "system", "content": MODULE_PROMPT},
                                 {"role": "user", "content": encode({"question": question, "modules": batch,
                                                                   "scope": scope})}])
@@ -393,29 +621,42 @@ class ReportOverview:
                 raise PrivacyError("模块总结覆盖不完整。")
             expected = {module["module_ref"]: module for module in batch}
             seen = set()
+            # 先核完本批所有行的结构和来源；后行明显无效时不浪费一次模型修正。
             for position, row in enumerate(rows, 1):
                 self._position = position
-                if not isinstance(row, dict) or set(row) != {"module_ref", "text", "sources"} or not isinstance(row["module_ref"], str):
+                if (not isinstance(row, dict) or set(row) != {"module_ref", "text", "sources"}
+                        or not isinstance(row["module_ref"], str) or not isinstance(row["text"], str)):
                     raise PrivacyError("模块总结结构无效。")
                 ref = row["module_ref"]
                 if ref not in expected or ref in seen:
                     raise PrivacyError("模块总结重复或引用其他模块。")
-                sections[ref], local_facts = self._module_section(row, expected[ref], scope)
-                facts.update(local_facts)
+                self._check_sources(row["sources"], {fact["field_ref"] for fact in expected[ref]["facts"]})
                 seen.add(ref)
+            for position, row in enumerate(rows, 1):
+                self._position = position
+                ref = row["module_ref"]
+                try:
+                    section, local_facts = self._module_section(row, expected[ref], scope)
+                except PrivacyError as error:
+                    reason = OverviewValidationError.REASONS.get(str(error), ("", ""))[0]
+                    if numeric_retry_used or reason != "numbers":
+                        raise
+                    # 同一前台提示含周期/时长等错误；只给第一处数字类失败一次局部修正。
+                    numeric_retry_used = True
+                    section, local_facts = self._retry_numeric_module(expected[ref], question, modules, request)
+                sections[ref] = section
+                facts.update(local_facts)
         if available:
             self._stage, self._batch, self._position = "summary", 0, 0
             # 仅发送已校验小结，不再发送完整字段值、原始报告或上轮完整答案。
             payload = {"question": question, "modules": [{"module_ref": m["module_ref"], "name": m["name"],
                         **sections[m["module_ref"]]} for m in available],
-                       "scope": self._scope(modules, "summary"),
+                       "scope": self._request_scope(modules, "summary"),
                        "unavailable_modules": [m["name"] for m in modules if not m["facts"]]}
             payload['key_facts'] = self._key_facts(available, sections, facts)
             if len(encode(payload)) > MAX_PAYLOAD_CHARS:
                 raise OverviewBudgetError("整体小结超过总结预算。")
             response = request([{"role": "system", "content": SUMMARY_PROMPT}, {"role": "user", "content": encode(payload)}])
-            if response.tool_calls:
-                raise PrivacyError("整体总结不允许额外工具。")
             cited = {ref for section in sections.values() for ref in section["sources"]}
             # 总结中的数字必须已经出现在已核验小结中，不能从原始字段补写新结论。
             # 只用已核验小结核对数字，但保留原来源的缺失状态。否则“不能按0次理解”
@@ -438,14 +679,39 @@ class ReportOverview:
                 for ref in section["sources"]:
                     summary_roles[ref] = roles
                     summary_sources[ref] = metadata
-            summary = self._validate(self.parse_json(response.content), summary_facts, cited,
-                                     source_facts=summary_sources, duration_roles=summary_roles)["text"]
-            self._check_scope(summary, payload["scope"])
+            def checked_summary(result):
+                """仅使用已核验小结核对来源与范围；纠错请求也走同一出口。"""
+                if result.tool_calls:
+                    raise PrivacyError("整体总结不允许额外工具。")
+                section = self._validate(self.parse_json(result.content), summary_facts, cited,
+                                         source_facts=summary_sources, duration_roles=summary_roles)
+                text = section["text"]
+                # 数字仍只能来自已展示小结；原事实仅用于额外核对已出现数字的指标量词。
+                # 总结中的一个引用代表整条已核验小结，量词也须沿用其来源组。
+                unit_sources = list(dict.fromkeys(
+                    item["field_ref"] for ref in section["sources"] for item in summary_sources[ref]))
+                self._check_unit_claims(text, facts, unit_sources)
+                self._check_scope(text, payload["scope"])
+                return text
+
+            try:
+                summary = checked_summary(response)
+            except PrivacyError as error:
+                reason = OverviewValidationError.REASONS.get(str(error), ("", ""))[0]
+                if numeric_retry_used or reason != "numbers":
+                    raise
+                # 与模块段共用一次预算；重发的只有已校验小结，不带被拒草稿或原事实。
+                numeric_retry_used = True
+                response = request([{"role": "system", "content": SUMMARY_NUMERIC_RETRY_PROMPT},
+                                    {"role": "user", "content": encode(payload)}])
+                summary = checked_summary(response)
         else:
-            summary = "当前报告暂没有可用于自动总结的信息，可以指定您想了解的模块继续核对。"
-        parts = ["小贝按这份报告的模块顺序，为您做个总结："]
+            summary = ("所选模块暂没有可用于自动总结的信息。" if self.module_ids is not None
+                       else "当前报告暂没有可用于自动总结的信息，可以指定您想了解的模块继续核对。")
+        parts = ([f'以下仅解读您选中的{len(modules)}个模块：'] if self.module_ids is not None
+                 else ["小贝按这份报告的模块顺序，为您做个总结："])
         for module in modules:
             text = sections[module["module_ref"]]["text"] if module["facts"] else "该模块暂无可用于自动总结的信息，暂不作判断。"
             parts.append(f"**{module['name']}**\n{text}")
-        parts.append("**整体总结**\n" + summary)
+        parts.append(("**所选模块总结**\n" if self.module_ids is not None else "**整体总结**\n") + summary)
         return ("【演示数据】\n" if self.tools.is_demo else "") + "\n\n".join(parts), tuple(facts)

@@ -78,6 +78,110 @@ class OverviewTests(support.NoExternalIO):
                 _, _, answer = self.run_overview(self.single_value_tools(None), OverviewClient(mutate))
                 self.assertIn("详情：整体总结：包含来源未支持的数字", answer)
 
+    def test_summary_numeric_failure_uses_remaining_single_retry(self):
+        """整体总结也能修正一次漏引，且只发送已校验模块小结。"""
+        def mutate(stage, value, _, request_index):
+            if stage == "summary" and request_index == 2:
+                value["text"] = "申请记录有999999次。"
+            return value
+
+        _, client, answer = self.run_overview(client=OverviewClient(mutate))
+        self.assertIn("**整体总结**", answer)
+        self.assertNotIn("999999", answer)
+        self.assertEqual(len(client.requests), 3)
+        original = json.loads(client.requests[1]["messages"][-1]["content"])
+        retry = json.loads(client.requests[2]["messages"][-1]["content"])
+        self.assertEqual(retry, original)
+        self.assertTrue(all("facts" not in module for module in retry["modules"]))
+
+    def test_summary_cannot_swap_validated_count_units(self):
+        """最终总结也必须保留已核验次数与机构数的指标归属。"""
+        for summary, accepted in (("申请次数为8家。", False),
+                                  ("申请次数和机构数均为8家。", False),
+                                  ("申请次数和机构数分别为8家和8次。", False),
+                                  ("申请次数和机构数分别为8次和8家。", True),
+                                  ("申请次数为8次，机构数为8家。", True)):
+            with self.subTest(summary=summary):
+                source = overview_tools(count=1, fields=2)
+                order, catalog = deepcopy(source._order), deepcopy(source._catalog)
+                catalog['fields'][0]['name'], catalog['fields'][1]['name'] = '申请次数', '机构数'
+                order['report_data']['report']['item_0_0'] = 8
+                order['report_data']['report']['item_0_1'] = 8
+                tools = LocalReportTools(order, catalog)
+
+                def mutate(stage, value, *_):
+                    if stage == 'modules':
+                        value['modules'][0]['text'] = '申请次数为8次，机构数为8家。'
+                    elif stage == 'summary':
+                        value['text'] = summary
+                    return value
+
+                _, client, answer = self.run_overview(tools, OverviewClient(mutate))
+                self.assertEqual('**整体总结**' in answer, accepted)
+                self.assertEqual(len(client.requests), 2 if accepted else 3)
+                if not accepted:
+                    self.assertIn('数量单位与对应指标不一致', answer)
+                    self.assertNotIn(summary, answer)
+
+    def test_summary_single_ref_inherits_validated_module_source_group(self):
+        """整体总结的一个引用代表本模块已核验的小结来源组，而非单个原字段。"""
+        source = overview_tools(count=1, fields=2)
+        order, catalog = deepcopy(source._order), deepcopy(source._catalog)
+        catalog['fields'][0]['name'], catalog['fields'][1]['name'] = '申请次数', '机构数'
+        order['report_data']['report']['item_0_0'] = 8
+        order['report_data']['report']['item_0_1'] = 5
+        tools = LocalReportTools(order, catalog)
+        for summary, accepted in (('机构数为5家。', True), ('机构数为5次。', False)):
+            with self.subTest(summary=summary):
+                def mutate(stage, value, payload, *_):
+                    if stage == 'modules':
+                        value['modules'][0]['text'] = '申请次数为8次，机构数为5家。'
+                    elif stage == 'summary':
+                        value['text'] = summary
+                        value['sources'] = payload['modules'][0]['sources'][:1]
+                    return value
+
+                _, client, answer = self.run_overview(tools, OverviewClient(mutate))
+                self.assertEqual('**整体总结**' in answer, accepted)
+                self.assertEqual(len(client.requests), 2 if accepted else 3)
+                if not accepted:
+                    self.assertIn('数量单位与对应指标不一致', answer)
+                    self.assertNotIn(summary, answer)
+
+    def test_joint_metric_names_do_not_match_shorter_uncited_suffix(self):
+        """较长指标的正确并列概括不应被未引用的同名后缀误拦。"""
+        source = overview_tools(count=1, fields=3)
+        order, catalog = deepcopy(source._order), deepcopy(source._catalog)
+        for field, name in zip(catalog['fields'], ('申请次数', '银行申请次数', '非银申请次数')):
+            field['name'] = name
+        for index in range(3):
+            order['report_data']['report'][f'item_0_{index}'] = 8
+        tools = LocalReportTools(order, catalog)
+
+        def mutate(stage, value, payload, *_):
+            if stage == 'modules':
+                value['modules'][0]['text'] = '银行申请次数和非银申请次数均为8次。'
+                value['modules'][0]['sources'] = [fact['field_ref'] for fact in payload['modules'][0]['facts'][1:]]
+            return value
+
+        _, client, answer = self.run_overview(tools, OverviewClient(mutate))
+        self.assertIn('**整体总结**', answer)
+        self.assertEqual(len(client.requests), 2)
+
+    def test_module_and_summary_share_one_numeric_retry(self):
+        """模块已用修正机会时，整体总结再出错不能增加第二次请求。"""
+        def mutate(stage, value, _, request_index):
+            if stage == "modules" and request_index == 1:
+                value["modules"][0]["text"] = "申请记录有999999次。"
+            elif stage == "summary":
+                value["text"] = "申请记录有999999次。"
+            return value
+
+        _, client, answer = self.run_overview(client=OverviewClient(mutate))
+        self.assertEqual(len(client.requests), 3)
+        self.assertIn("详情：整体总结：包含来源未支持的数字", answer)
+        self.assertNotIn("999999", answer)
+
     def test_negated_overdue_confirmation_is_not_a_positive_guarantee(self):
         for text in ("不能确定没有逾期记录。", "无法确认您没有逾期记录。", "不能据此确认无逾期。"):
             with self.subTest(text=text):
@@ -230,13 +334,184 @@ class OverviewTests(support.NoExternalIO):
         _, _, answer = self.run_overview(self.single_value_tools("80%"), OverviewClient(mutate))
         self.assertIn("未通过本地校验", answer)
 
+    def test_numeric_source_omission_retries_only_failed_module_then_validates(self):
+        """漏引数字只重生成出错模块；修正来源后才发布完整总结。"""
+        def mutate(stage, value, payload, request_index):
+            if stage != "modules":
+                return value
+            if request_index == 1:
+                row = value["modules"][0]
+                module = next(item for item in payload["modules"] if item["module_ref"] == row["module_ref"])
+                row["text"] = "两项申请结果分别为1次、2次。"
+                row["sources"] = [module["facts"][0]["field_ref"]]
+            else:
+                value["modules"][0]["text"] = "两项申请结果分别为1次、2次。"
+            return value
+
+        _, client, answer = self.run_overview(overview_tools(count=2, fields=2), OverviewClient(mutate))
+        self.assertIn("**整体总结**", answer)
+        self.assertIn("1次、2次", answer)
+        self.assertEqual(len(client.requests), 3)
+        first = json.loads(client.requests[0]["messages"][-1]["content"])
+        retry = json.loads(client.requests[1]["messages"][-1]["content"])
+        self.assertEqual(len(first["modules"]), 2)
+        self.assertEqual(len(retry["modules"]), 1)
+        self.assertEqual(retry["modules"][0]["module_ref"], first["modules"][-1]["module_ref"])
+        self.assertEqual(retry["scope"]["module_count"], 2)
+        self.assertEqual(retry["scope"]["batch_module_count"], 1)
+
+    def test_unrecognized_window_wording_uses_one_checked_module_retry(self):
+        """中文周期被当作独立时长时，只能重写为来源实际登记的周期。"""
+        source = overview_tools(count=1)
+        catalog = deepcopy(source._catalog)
+        catalog["fields"][0]["window"] = "近2年"
+        tools = LocalReportTools(source._order, catalog)
+
+        def mutate(stage, value, _, request_index):
+            if stage == "modules":
+                value["modules"][0]["text"] = ("两年内有申请记录。" if request_index == 1
+                                                else "近2年有申请记录。")
+            return value
+
+        _, client, answer = self.run_overview(tools, OverviewClient(mutate))
+        self.assertIn("**整体总结**", answer)
+        self.assertIn("近2年有申请记录", answer)
+        self.assertNotIn("两年内", answer)
+        self.assertEqual(len(client.requests), 3)
+
+        def still_invalid(stage, value, *_):
+            if stage == "modules":
+                value["modules"][0]["text"] = "两年内有申请记录。"
+            return value
+
+        _, client, answer = self.run_overview(tools, OverviewClient(still_invalid))
+        self.assertEqual(len(client.requests), 2)
+        self.assertIn("时长或范围与对应指标来源不一致", answer)
+        self.assertNotIn("两年内有申请记录", answer)
+
+    def test_numeric_retry_is_global_and_cannot_publish_unknown_number(self):
+        """首个数字失败用完重试后，另一模块的无来源数字仍不能发布。"""
+        def mutate(stage, value, payload, request_index):
+            if stage == "modules" and request_index == 1:
+                for row in value["modules"]:
+                    row["text"] = "申请结果为999999次。"
+            return value
+
+        _, client, answer = self.run_overview(overview_tools(count=2), OverviewClient(mutate))
+        self.assertEqual(len(client.requests), 2)
+        self.assertIn("包含来源未支持的数字", answer)
+        self.assertNotIn("999999", answer)
+        self.assertNotIn("**整体总结**", answer)
+
+    def test_numeric_retry_cannot_cite_another_module(self):
+        """重生成不得借用批次里其他模块的引用来放行数字。"""
+        foreign_source = []
+
+        def mutate(stage, value, payload, request_index):
+            if stage != "modules":
+                return value
+            if request_index == 1:
+                row = value["modules"][0]
+                foreign = next(item for item in payload["modules"] if item["module_ref"] != row["module_ref"])
+                foreign_source.append(foreign["facts"][0]["field_ref"])
+                row["text"] = "申请结果为999999次。"
+            else:
+                value["modules"][0]["sources"] = foreign_source
+            return value
+
+        _, client, answer = self.run_overview(overview_tools(count=2), OverviewClient(mutate))
+        self.assertEqual(len(client.requests), 2)
+        self.assertIn("来源引用缺失、重复或不属于当前模块", answer)
+        self.assertNotIn("999999", answer)
+
+    def test_non_numeric_source_failure_does_not_retry(self):
+        def mutate(stage, value, *_):
+            if stage == "modules":
+                value["modules"][0]["sources"] = []
+            return value
+
+        _, client, answer = self.run_overview(client=OverviewClient(mutate))
+        self.assertEqual(len(client.requests), 1)
+        self.assertIn("来源引用缺失", answer)
+
+    def test_later_invalid_source_is_preflighted_before_numeric_retry(self):
+        """同批后行已无有效引用时，不为前行数字错误发注定无效的额外请求。"""
+        def mutate(stage, value, *_):
+            if stage == "modules":
+                value["modules"][0]["text"] = "申请记录有999999次。"
+                value["modules"][1]["sources"] = []
+            return value
+
+        _, client, answer = self.run_overview(overview_tools(count=2), OverviewClient(mutate))
+        self.assertEqual(len(client.requests), 1)
+        self.assertIn("来源引用缺失", answer)
+        self.assertNotIn("999999", answer)
+
+    def test_internal_protocol_words_never_appear_in_customer_summary(self):
+        """模型复述协议键时整轮拒绝，模块与最终总结都不发布技术术语。"""
+        for stage in ("modules", "summary"):
+            for word in ("window", "sources", "scope"):
+                with self.subTest(stage=stage, word=word):
+                    def mutate(current_stage, value, *_):
+                        if current_stage == stage:
+                            if stage == "modules":
+                                value["modules"][0]["text"] = word + "显示近7天申请0次。"
+                            else:
+                                value["text"] = word + "显示近7天申请0次。"
+                        return value
+
+                    _, client, answer = self.run_overview(overview_tools(count=1), OverviewClient(mutate))
+                    self.assertIn("正文包含技术引用", answer)
+                    self.assertNotIn(word, answer)
+                    self.assertEqual(len(client.requests), 1 if stage == "modules" else 2)
+
+    def test_explicit_count_units_stay_with_their_cited_metrics(self):
+        """同值字段不能把申请次数说成机构数，档位也不能沿用次数的量词。"""
+        cases = (
+            ((('申请次数', 8),), '申请次数为8家。', False),
+            ((('机构数', 8),), '申请次数为8次。', False),
+            ((('申请次数', 8), ('机构数', 8)), '申请次数为8家。', False),
+            ((('申请次数', 8), ('机构数', 8)), '申请次数和机构数均为8家。', False),
+            ((('申请次数', 8), ('机构数', 8)), '申请次数和机构数分别为8家和8次。', False),
+            ((('申请次数', 8), ('机构数', 8)), '申请次数和机构数分别为8次和8家。', True),
+            ((('申请次数', 8), ('机构数', 8)), '申请次数8次、机构数8家。', True),
+            ((('机构数', '8家'),), '机构数为8次。', False),
+            ((('机构数', '8家'),), '机构数为8家。', True),
+            ((('申请记录', '共8次申请'), ('机构数', 8)), '申请记录有8次，涉及8家机构。', True),
+            ((('申请记录', '共8次申请'), ('机构数', 8)), '机构数为8次。', False),
+            ((('申请次数', 1000),), '申请次数为1,000家。', False),
+            ((('申请次数', 1000),), '申请次数为1,000次。', True),
+            ((('申请次数档位', 8),), '申请次数档位为8次。', False),
+            ((('申请次数档位', 8),), '申请次数档位为8档。', True),
+        )
+        for fields, text, accepted in cases:
+            with self.subTest(fields=fields, text=text):
+                source = overview_tools(count=1, fields=len(fields))
+                order, catalog = deepcopy(source._order), deepcopy(source._catalog)
+                for index, (name, value) in enumerate(fields):
+                    catalog['fields'][index]['name'] = name
+                    order['report_data']['report'][f'item_0_{index}'] = value
+                tools = LocalReportTools(order, catalog)
+
+                def mutate(stage, value, *_):
+                    if stage == 'modules':
+                        value['modules'][0]['text'] = text
+                    return value
+
+                _, client, answer = self.run_overview(tools, OverviewClient(mutate))
+                self.assertEqual('**整体总结**' in answer, accepted)
+                if not accepted:
+                    self.assertIn('数量单位与对应指标不一致', answer)
+                    self.assertNotIn(text, answer)
+                self.assertEqual(len(client.requests), 2)
+
     def test_validation_details_identify_batch_and_summary_without_publishing_draft(self):
         def mutate(stage, value, _, request_index):
-            if stage == "modules" and request_index == 2:
+            if stage == "modules" and request_index in (2, 3):
                 value["modules"][0]["text"] = "未经支持的999999次申请。"
             return value
         _, client, answer = self.run_overview(overview_tools(count=10), OverviewClient(mutate))
-        self.assertEqual(len(client.requests), 2)
+        self.assertEqual(len(client.requests), 3)
         self.assertIn("详情：第2批模块小结（本批第1项）：包含来源未支持的数字", answer)
         self.assertNotIn("999999", answer)
         self.assertNotIn("**测试模块", answer)
@@ -394,8 +669,9 @@ class OverviewTests(support.NoExternalIO):
                 value["text"] = "总值为0。"
             return value
         _, client, answer = self.run_overview(client=OverviewClient(mutate))
-        self.assertEqual(len(client.requests), 2)
+        self.assertEqual(len(client.requests), 3)
         self.assertIn("分析回答未通过本地校验", answer)
+        self.assertNotIn("总值为0", answer)
 
     def test_summary_cannot_cite_a_field_not_used_in_module_text(self):
         def mutate(stage, value, payload, index):
@@ -440,16 +716,16 @@ class OverviewTests(support.NoExternalIO):
             with self.subTest(fields=len(tools.current_fields())):
                 conversation, client, answer = self.run_overview(tools)
                 self.assertEqual(client.requests, [])
-                self.assertIn("改用本地", answer)
+                self.assertIn("整体分析暂未完成", answer)
                 self.assertIsNone(conversation.analysis_context)
         with patch("report_assistant.conversation.overview.MAX_PAYLOAD_CHARS", 10):
             _, client, answer = self.run_overview()
             self.assertEqual(client.requests, [])
-            self.assertIn("改用本地", answer)
+            self.assertIn("整体分析暂未完成", answer)
         with patch("report_assistant.conversation.overview.MAX_BATCHES", 1):
             _, client, answer = self.run_overview(tools=overview_tools(count=9))
             self.assertEqual(client.requests, [])
-            self.assertIn("改用本地", answer)
+            self.assertIn("整体分析暂未完成", answer)
 
     def test_failed_batch_does_not_publish_partial_report_or_commit_context(self):
         def mutate(stage, value, payload, index):
@@ -460,7 +736,7 @@ class OverviewTests(support.NoExternalIO):
         before = AnalysisContext("之前的问题", ("f1",))
         conversation.analysis_context = before
         answer = conversation.answer("分析下我的报告", OverviewClient(mutate), "synthetic-model")
-        self.assertIn("改用本地", answer)
+        self.assertIn("整体分析暂未完成", answer)
         self.assertNotIn("**测试模块", answer)
         self.assertNotIn(support.PRIVATE_VALUE, answer)
         self.assertIsNone(conversation.analysis_context)

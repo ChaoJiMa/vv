@@ -334,7 +334,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
         with patch("report_assistant.conversation.overview.MAX_PAYLOAD_CHARS", complete_size - 1):
             _, client, answer = self.run_overview(tools)
         self.assertEqual(client.requests, [])
-        self.assertIn("改用本地", answer)
+        self.assertIn("整体分析暂未完成", answer)
 
     def test_sourced_callback_is_optional_and_original_four_arguments_work(self):
         strategy = AnalysisStrategy(phone_bank_tools())

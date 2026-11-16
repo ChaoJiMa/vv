@@ -98,7 +98,8 @@ class ChatGPTModelTests(privacy.NoExternalIO):
                 return self.stream(support.route(), status=kind)
             answer = Conversation(support.analysis_tools(), strategy='analysis').answer(
                 '分析报告中的指数', self.client(handler), OPENAI_DEFAULT_MODEL)
-            self.assertIn('本轮改用本地查询', answer)
+            self.assertIn('AI分析未完成', answer)
+            self.assertNotIn('改用本地查询', answer)
             self.assertNotIn('SYNTHETIC_PARTIAL_PRIVATE', answer)
             self.assertEqual(len(requests), 1)
 
@@ -122,6 +123,7 @@ class ChatGPTModelTests(privacy.NoExternalIO):
                                       json={'error': {'message': 'SYNTHETIC_PRIVATE_ERROR'}})
             answer = Conversation(support.analysis_tools(), strategy='analysis').answer(
                 '分析报告中的指数', self.client(handler), OPENAI_DEFAULT_MODEL)
-            self.assertIn('本轮改用本地查询', answer)
+            self.assertIn('AI分析未完成', answer)
+            self.assertNotIn('改用本地查询', answer)
             self.assertNotIn('SYNTHETIC_PRIVATE_ERROR', answer)
             self.assertEqual(len(requests), 1)

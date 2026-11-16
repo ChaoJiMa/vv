@@ -266,7 +266,8 @@ class OpenAIProviderTests(OpenAIProtocol, privacy.NoExternalIO):
                 answer = Conversation(support.analysis_tools(), strategy="analysis").answer(
                     "分析报告中的指数", self.client(handler), OPENAI_DEFAULT_MODEL,
                 )
-                self.assertIn("本轮改用本地查询", answer)
+                self.assertIn("AI分析未完成", answer)
+                self.assertNotIn("改用本地查询", answer)
                 self.assertNotIn("PRIVATE_ERROR", answer)
                 self.assertEqual(len(requests), 1)
                 self.assertEqual(requests[0].url.host, "api.openai.com")
@@ -348,7 +349,7 @@ class OpenAIProviderTests(OpenAIProtocol, privacy.NoExternalIO):
                     return httpx.Response(status, headers={"location": "https://unselected.invalid"}, json={"error": {"message": "PRIVATE_ERROR"}})
                 answer = Conversation(support.analysis_tools(), strategy="analysis").answer(
                     "分析报告中的指数", self.client(handler, "http://gateway.invalid:2455/v1"), OPENAI_DEFAULT_MODEL)
-                self.assertIn("改用本地", answer)
+                self.assertIn("回答暂未完成", answer)
                 self.assertNotIn("PRIVATE_ERROR", answer)
                 self.assertEqual(len(requests), 1)
                 self.assertEqual(requests[0].url.host, "gateway.invalid")

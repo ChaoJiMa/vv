@@ -11,6 +11,7 @@ ROUTE_PROMPT = """判断问题属于报告分析、贝融客服还是服务范�
 输入JSON只含当前question和has_previous_report布尔状态；该状态不含旧问题或报告结果。
 报告查询/分析输出：{"route":"report","use_previous":true或false,"scope":"overview或focused"}。
 解读整份报告、按模块总结或整体关注事项用overview；只问某个模块、字段、周期或具体含义用focused。
+只查询具体指标时，不能因为问题提到报告就选择overview；只有明确需要整份报告解读或整体关注事项时才扩大范围。
 问候或客服咨询输出：{"route":"service","use_previous":false,"topic":"从下列主题选择"}。
 服务主题：greeting问候；human人工联系；appeal数据异议申诉；refund退款咨询；data_source整体数据来源；loan能否贷款；score_vs_loan高分仍未获贷；application_frequency申请多久一次合适；identity查看姓名证件；report_list名下有哪些报告；attention澄清关注内容。
 用户仅表示感谢或已经明白时，选择thanks礼貌收尾，不重新介绍服务。感谢后还有实际问题时继续处理该问题，不能截断成收尾。
@@ -79,7 +80,8 @@ class AnalysisFailure(Exception):
         self.reason = reason
         self.validation = validation
         detail = "；详情：" + str(validation) if validation is not None else ""
-        super().__init__(f"AI分析未完成（原因：{self.REASONS[reason]}{detail}），本轮改用本地查询。")
+        # 这里只陈述失败分类；会话层根据已证实的问题范围决定是否能提供本地结果。
+        super().__init__(f"AI分析未完成（原因：{self.REASONS[reason]}{detail}）。")
 
 
 def function(name, description, properties, required):

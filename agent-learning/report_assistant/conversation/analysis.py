@@ -24,6 +24,8 @@ from report_assistant.conversation.analysis_protocol import (
 from report_assistant.conversation.wording import natural_missing_text
 from report_assistant.conversation.questions import is_report_overview
 from report_assistant.conversation.data_policy import personal_protocol
+from report_assistant.conversation.local_intents import explicitly_requests_overview, split_catalog_request, catalog_answer
+from report_assistant.conversation.module_selection import select_modules
 from report_assistant.conversation.overview import MAX_MODULES, OVERVIEW_PROTOCOL, OverviewBudgetError, OverviewValidationError, ReportOverview
 
 
@@ -70,9 +72,35 @@ class AnalysisStrategy:
             raise AnalysisFailure("incomplete")
         return response.choices[0].message
 
-    def answer(self, question, client, model, previous=None):
-        """具体问答最多7次；整份报告按模块分批总结，最多34次且不复用旧字段上下文。"""
+    def answer(self, question, client, model, previous=None, *, previous_module_ids=None):
+        """具体问答最多7次；模块指代只接收调用方上一轮绑定的当前目录ID。"""
         safe_question = self.guard.question(question)
+        catalog = split_catalog_request(safe_question)
+        if catalog.listing:
+            directory = catalog_answer(self.tools, self.guard)
+            if not catalog.question:
+                return directory, None
+            # 独立Python调用也按会话入口先消费完整目录分句，剩余诉求仍执行原权限与来源校验。
+            answer, context = self.answer(catalog.question, client, model, previous,
+                                          previous_module_ids=previous_module_ids)
+            return directory + '\n\n' + answer, context
+        selection = select_modules(safe_question, self.tools, previous_module_ids=previous_module_ids)
+        if selection.matched:
+            if selection.error:
+                return selection.error, None
+            topics = []
+            if selection.remainder:
+                extra = QuestionTargets(selection.remainder, self.tools, self.projection, previous)
+                if not extra.service_only:
+                    return '请先明确本次要解读的模块范围，其他指标问题可以另外提问，避免遗漏。', None
+                topics = extra.service_topics
+            # 目录指代恰好覆盖全部当前模块时沿用全报告协议；局部scope的限制只用于真正的子集。
+            current_ids = tuple(module['module_id'] for module in self.tools.current_modules())
+            selected_ids = None if selection.module_ids == current_ids else selection.module_ids
+            answer, context = self._overview(safe_question, client, model, mixed=bool(topics),
+                                             module_ids=selected_ids)
+            return (append_service_answer(answer, topics, allow_personal=self.guard.allow_personal)
+                    if topics else answer), context
         targets = QuestionTargets(safe_question, self.tools, self.projection, previous)
         # 完整整份报告短句直接进入覆盖全部模块的流程，避免语义路由偶然漏判或复用旧字段。
         if is_report_overview(safe_question):
@@ -126,6 +154,10 @@ class AnalysisStrategy:
         service_topics = list(dict.fromkeys([*targets.service_topics, *route.get('service_topics', [])]))
         if self.guard.allow_personal:
             service_topics = [topic for topic in service_topics if topic != 'identity']
+        if (route.get('scope') == 'overview' and targets.is_closed_result_query()
+                and not explicitly_requests_overview(safe_question)):
+            # 仅在全部实质分句都是闭合指标查值时收紧，不能凭命中一个字段截断整体诉求。
+            route['scope'] = 'focused'
         if route.get("scope") == "overview":
             answer, context = self._overview(safe_question, client, model, mixed=bool(service_topics))
         else:
@@ -155,12 +187,12 @@ class AnalysisStrategy:
                 or len(set(topics)) != len(topics)):
             raise PrivacyError('客服路由主题列表无效。')
 
-    def _overview(self, question, client, model, mixed=False):
+    def _overview(self, question, client, model, mixed=False, *, module_ids=None):
         """覆盖当前模板全部模块，引用只用于核对，不向用户追加字段事实清单。"""
-        if len(self.tools.current_modules()) > MAX_MODULES:
+        if module_ids is None and len(self.tools.current_modules()) > MAX_MODULES:
             raise AnalysisFailure("budget")
         overview = ReportOverview(self.tools, self.projection, self._check_text, strict_json,
-                                  check_sourced_text=self._check_sourced_text)
+                                  check_sourced_text=self._check_sourced_text, module_ids=module_ids)
 
         def request(messages):
             """复合问题每批与整体总结均限定只答报告，业务说明统一由本地追加。"""
