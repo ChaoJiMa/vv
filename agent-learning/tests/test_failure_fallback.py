@@ -119,7 +119,7 @@ class FailureFallbackTests(privacy.NoExternalIO):
         self.assertNotIn('本地查询', str(AnalysisFailure('answer')))
         client = ScriptClient([response('{"route":"report","use_previous":false,"scope":"unknown"}')])
         answer = self.conversation().answer('这份报告风险怎么样', client, 'synthetic-model')
-        self.assertIn('问题路由格式未通过校验', answer)
+        self.assertIn('AI分析未完成', answer)
         self.assertIn('回答暂未完成', answer)
         self.assertNotIn('指标或统计周期', answer)
         self.assertEqual(len(client.requests), 1)

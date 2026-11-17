@@ -138,8 +138,8 @@ class FactProjection:
         self.guard.check_payload(facts, trusted_strings=self.protocol_strings())
         return facts
 
-    def customer_answer(self, fields):
-        """自然问题的本地回退也只用页面结果，不回退到诊断字段清单。"""
+    def customer_answer(self, fields, *, on_structured=None):
+        """本地回退只用页面结果；遇到结构值可通知维护诊断，不传出值或字段。"""
         refs = [ref for field in fields for ref, item in self.fields.items() if item["local"] == field]
         parts = []
         for offset in range(0, len(refs), 12):
@@ -151,7 +151,12 @@ class FactProjection:
                     window = fact["window"] if fact["window"] != "未登记周期" else ""
                     value = fact["value"]
                     # 本地回退不把对象键、present包装或JSON代码朗读给用户。
-                    text = "有相关记录，详细解读请稍后再试" if isinstance(value, (dict, list)) else str(value)
+                    if isinstance(value, (dict, list)):
+                        if on_structured is not None:
+                            on_structured()
+                        text = "有相关记录，详细解读请稍后再试"
+                    else:
+                        text = str(value)
                     parts.append(f"{window}{label}显示为{text}。")
                 else:
                     parts.append(f"{fact['name']}暂时没有可确认的信息。")

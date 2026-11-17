@@ -2,10 +2,29 @@
 
 import ctypes
 from ctypes import wintypes
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import sqlite3
+
+
+# 诊断内容只允许封闭类别；不接受问题、答案、报告号或异常字符串作为字段。
+DIAGNOSTIC_REASONS = frozenset({
+    "timeout", "connection", "service", "incomplete", "budget", "answer",
+    "payload", "route", "tool", "facts", "request_guard", "privacy_guard",
+    "unexpected", "model_disabled", "template_error", "local_projection",
+    "fallback_no_fields", "fallback_structured_value", "fallback_projection_rejected",
+    "fallback_preview_limit", "local_privacy", "local_processing_error", "local_unexpected",
+})
+DIAGNOSTIC_ROUTES = frozenset({
+    "template", "routing", "selected_modules", "full_report", "focused", "local_processing",
+})
+VALIDATION_CODES = frozenset({
+    "json", "coverage", "structure", "module", "sources", "length", "scope",
+    "numbers", "claim", "technical", "text", "tool", "validation",
+})
+VALIDATION_STAGES = frozenset({"prepare", "modules", "summary"})
 
 
 class HistoryError(RuntimeError):
@@ -72,18 +91,27 @@ class WindowsProtector:
 
 
 class HistoryStore:
-    """SQLite 只存密文；报告标识、问题、答案都包含在加密 payload 内。"""
+    """SQLite 只存密文；问答历史与固定类别诊断分别存表且不在客户界面混用。"""
 
-    def __init__(self, path, protector=None):
-        """建立历史库；protector 可由测试注入，正式运行默认使用 Windows DPAPI。"""
+    def __init__(self, path, protector=None, *, readonly=False):
+        """建立或只读打开历史库；正式运行默认使用 Windows DPAPI。"""
         self._protector = protector if protector is not None else WindowsProtector()
         self._connection = None
+        self._has_diagnostics = False
         try:
             path = Path(path)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            self._connection = sqlite3.connect(path)
-            self._connection.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, payload BLOB NOT NULL)")
-            self._connection.commit()
+            if readonly:
+                # SQLite mode=ro 不创建文件或表，维护脚本不会改变旧用户数据库。
+                self._connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+                self._has_diagnostics = self._connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='diagnostics'").fetchone() is not None
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                self._connection = sqlite3.connect(path)
+                self._connection.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, payload BLOB NOT NULL)")
+                self._connection.execute("CREATE TABLE IF NOT EXISTS diagnostics (id INTEGER PRIMARY KEY, payload BLOB NOT NULL)")
+                self._connection.commit()
+                self._has_diagnostics = True
         except (OSError, sqlite3.Error):
             self.close()
             raise HistoryError("无法打开本地加密历史。") from None
@@ -97,6 +125,116 @@ class HistoryStore:
                 self._connection.execute("INSERT INTO history (payload) VALUES (?)", (encrypted,))
         except (OSError, sqlite3.Error, TypeError, ValueError):
             raise HistoryError("本轮本地历史保存失败。") from None
+
+    @staticmethod
+    def _validated_diagnostic(reason, route, validation=None, status_code=None):
+        """只接受程序封闭的诊断元数据；返回不含问答及报告绑定值的记录。"""
+        if (not isinstance(reason, str) or reason not in DIAGNOSTIC_REASONS
+                or not isinstance(route, str) or route not in DIAGNOSTIC_ROUTES):
+            raise HistoryError("诊断类别无效。")
+        if status_code is not None and (reason != "service" or type(status_code) is not int
+                                        or not 100 <= status_code <= 599):
+            raise HistoryError("诊断服务状态无效。")
+        detail = None
+        if validation is not None:
+            # 此处使用固定映射的输出标签；未知原始错误只能得到通用标签。
+            from report_assistant.conversation.overview import OverviewValidationError
+            allowed = set(OverviewValidationError.REASONS.values())
+            allowed.add(("validation", "结构或正文未通过校验"))
+            subreason = validation.diagnostic_subreason if isinstance(validation, OverviewValidationError) else None
+            needs_subreason = (validation.code, validation.diagnostic_detail) == (
+                "numbers", "时长或范围与对应指标来源不一致") if isinstance(validation, OverviewValidationError) else False
+            if (reason != "answer" or not isinstance(validation, OverviewValidationError)
+                    or not isinstance(validation.code, str) or validation.code not in VALIDATION_CODES
+                    or not isinstance(validation.stage, str) or validation.stage not in VALIDATION_STAGES
+                    or not isinstance(validation.diagnostic_detail, str)
+                    or (validation.code, validation.diagnostic_detail) not in allowed
+                    or (not isinstance(subreason, str)
+                        or subreason not in OverviewValidationError.DURATION_SUBREASONS.values()
+                        if needs_subreason else subreason is not None)
+                    or type(validation.batch) is not int or not 0 <= validation.batch <= 1000
+                    or type(validation.position) is not int or not 0 <= validation.position <= 12):
+                raise HistoryError("诊断校验信息无效。")
+            detail = {
+                "code": validation.code, "detail": validation.diagnostic_detail,
+                "stage": validation.stage, "batch": validation.batch, "position": validation.position,
+                "subreason": subreason,
+            }
+        return {
+            "version": 2, "time": datetime.now(timezone.utc).isoformat(),
+            "reason": reason, "route": route, "validation": detail, "status_code": status_code,
+        }
+
+    def append_diagnostic(self, reason, route, validation=None, *, status_code=None):
+        """在独立事务中先加密并持久化失败原因；失败时停止本轮，绝不写明文备用。"""
+        record = self._validated_diagnostic(reason, route, validation, status_code)
+        try:
+            encoded = json.dumps(record, ensure_ascii=False).encode("utf-8")
+            encrypted = self._protector.encrypt(encoded)
+            with self._connection:
+                self._connection.execute("INSERT INTO diagnostics (payload) VALUES (?)", (encrypted,))
+        except (OSError, sqlite3.Error, HistoryError, TypeError, ValueError):
+            raise HistoryError("本轮诊断记录保存失败。") from None
+
+    def read_diagnostics(self, limit=50):
+        """仅供维护脚本读取最近的固定诊断字段；不解密或返回客户问答历史。"""
+        if type(limit) is not int or not 1 <= limit <= 100000:
+            raise HistoryError("诊断读取数量无效。")
+        if not self._has_diagnostics:
+            return []
+        records = []
+        try:
+            rows = self._connection.execute(
+                "SELECT payload FROM diagnostics ORDER BY id DESC LIMIT ?", (limit,))
+            for (payload,) in rows:
+                item = json.loads(self._protector.decrypt(payload).decode("utf-8"))
+                if (not isinstance(item, dict) or set(item) != {
+                        "version", "time", "reason", "route", "validation", "status_code"}
+                        or type(item["version"]) is not int or item["version"] not in (1, 2)
+                        or not isinstance(item["time"], str)
+                        or len(item["time"]) > 40 or not isinstance(item["reason"], str)
+                        or item["reason"] not in DIAGNOSTIC_REASONS
+                        or not isinstance(item["route"], str) or item["route"] not in DIAGNOSTIC_ROUTES):
+                    raise HistoryError("诊断内容格式错误，已停止读取。")
+                status_code = item["status_code"]
+                if status_code is not None and (item["reason"] != "service" or type(status_code) is not int
+                                                or not 100 <= status_code <= 599):
+                    raise HistoryError("诊断内容格式错误，已停止读取。")
+                timestamp = datetime.fromisoformat(item["time"])
+                if timestamp.isoformat() != item["time"] or timestamp.utcoffset() != timezone.utc.utcoffset(None):
+                    raise HistoryError("诊断内容格式错误，已停止读取。")
+                validation = item["validation"]
+                if validation is not None:
+                    from report_assistant.conversation.overview import OverviewValidationError
+                    allowed = set(OverviewValidationError.REASONS.values())
+                    allowed.add(("validation", "结构或正文未通过校验"))
+                    keys = {"code", "detail", "stage", "batch", "position"}
+                    if item["version"] == 2:
+                        keys.add("subreason")
+                    if (not isinstance(validation, dict)
+                            or set(validation) != keys
+                            or item["reason"] != "answer" or not isinstance(validation["code"], str)
+                            or validation["code"] not in VALIDATION_CODES
+                            or not isinstance(validation["detail"], str)
+                            or (validation["code"], validation["detail"]) not in allowed
+                            or not isinstance(validation["stage"], str)
+                            or validation["stage"] not in VALIDATION_STAGES
+                            or type(validation["batch"]) is not int or not 0 <= validation["batch"] <= 1000
+                            or type(validation["position"]) is not int or not 0 <= validation["position"] <= 12):
+                        raise HistoryError("诊断内容格式错误，已停止读取。")
+                    if item["version"] == 2:
+                        # 新版本必须为时长类提供固定子码；旧版无此字段，原样兼容读取。
+                        subreason = validation["subreason"]
+                        needs_subreason = (validation["code"], validation["detail"]) == (
+                            "numbers", "时长或范围与对应指标来源不一致")
+                        if (not isinstance(subreason, str)
+                                or subreason not in OverviewValidationError.DURATION_SUBREASONS.values()
+                                if needs_subreason else subreason is not None):
+                            raise HistoryError("诊断内容格式错误，已停止读取。")
+                records.append(item)
+        except (OSError, sqlite3.Error, TypeError, ValueError, UnicodeError):
+            raise HistoryError("本地诊断读取失败。") from None
+        return records
 
     def read(self, scope, limit=50):
         """返回指定报告最近的 limit 条问答，结果按时间从早到晚排列。

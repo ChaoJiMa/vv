@@ -13,6 +13,7 @@ from report_assistant.conversation.local_intents import (split_catalog_request, 
                                                          permits_single_field_availability)
 from report_assistant.conversation.targets import QuestionTargets
 from report_assistant.conversation.module_selection import select_modules, selected_module_fallback
+from report_assistant.integrations.history import HistoryError
 from report_assistant.reports.score import score_family
 
 
@@ -23,6 +24,8 @@ class Conversation:
         """绑定当前报告；终端显式开放个人资料，旧Python调用默认保留原过滤契约。"""
         self.tools = tools
         self.history = history
+        # 正式入口复用加密历史库写独立诊断表；测试或旧调用未提供记录器时不改变协议。
+        self.diagnostics = history if callable(getattr(history, "append_diagnostic", None)) else None
         # public_history 只放 PublicRequest 枚举；local_history 可含个人信息，
         # 仅供本地回看。不能把两者合并后直接交给模型 SDK。
         self.public_history = []
@@ -53,10 +56,40 @@ class Conversation:
 
     def _verified_failure_facts(self, fields):
         """模型失败时仅展示当前报告重新投影成功的页面结果；投影拒绝则不输出局部值。"""
+        structured = False
+
+        def mark_structured():
+            """仅标记本地回退使用了结构值占位，不收集字段或实际值。"""
+            nonlocal structured
+            structured = True
+
         try:
-            return self.analysis.projection.customer_answer(fields)
+            answer = self.analysis.projection.customer_answer(
+                fields, on_structured=mark_structured)
         except PrivacyError:
+            self._record_failure("local_projection", "focused")
             return ''
+        if structured:
+            self._record_failure("fallback_structured_value", "focused")
+        return answer
+
+    @staticmethod
+    def _failure_route(selection=None, explicit_full=False):
+        """把本轮失败定位到固定范围，不记录问题文本或所选模块名称。"""
+        if selection is not None and selection.matched and selection.module_ids:
+            return "selected_modules"
+        return "full_report" if explicit_full else "focused"
+
+    def _record_failure(self, reason, route, validation=None, status_code=None):
+        """先加密落盘封闭失败类别；正式入口写入失败时由上层停止本轮。"""
+        if self.diagnostics is not None:
+            try:
+                self.diagnostics.append_diagnostic(reason, route, validation, status_code=status_code)
+            except HistoryError:
+                raise
+            except Exception:
+                # 记录器自身异常同样中止本轮，不落回客户答案或再尝试明文日志。
+                raise HistoryError("本轮诊断记录保存失败。") from None
 
     def answer(self, question, client=None, model=None):
         """按策略生成一轮答案；只有加密保存成功才提交内存及追问上下文。
@@ -67,7 +100,20 @@ class Conversation:
         if not isinstance(question, str) or not question.strip() or len(question) > 2000:
             raise ValueError("问题必须为1到2000字的文本。")
         if self.strategy == "analysis":
-            return self._analysis_answer(question, client, model)
+            try:
+                return self._analysis_answer(question, client, model)
+            except HistoryError:
+                # 问答或诊断密文写入失败不能再尝试写同一数据库，直接交入口停止。
+                raise
+            except PrivacyError:
+                self._record_failure("local_privacy", "local_processing")
+                raise
+            except (ValueError, OSError, KeyError, TypeError):
+                self._record_failure("local_processing_error", "local_processing")
+                raise
+            except Exception:
+                self._record_failure("local_unexpected", "local_processing")
+                raise
         # approved_request 返回有限枚举或 None；None 表示本轮必须在本地处理。
         # last_request 只帮助解析“这个指数呢”等指代，不保存原始问题或报告值。
         request = approved_request(question, self.last_request)
@@ -78,6 +124,7 @@ class Conversation:
             except Exception:
                 # SDK/传输异常可能包含请求头、URL和响应正文，禁止打印或回传。
                 # 模型失败不会把原问题作为“重试”发出，改用本地固定表达。
+                self._record_failure("template_error", "template")
                 template = TEMPLATES[0]
         # 模型调用到此结束；下面产生的字段、值、缺失状态和异常不再进入网络请求。
         query = self._local_query(question, request)
@@ -152,6 +199,7 @@ class Conversation:
             try:
                 self.analysis.guard.question(working_question)
             except PrivacyError:
+                self._record_failure("request_guard", self._failure_route(selection, explicit_full))
                 notice = ("问题含可能的登录凭据，本轮已留在本地；请去掉凭据后重新提问。"
                           if self.analysis.guard.allow_personal else
                           "问题含可能的个人信息，本轮已留在本地；请去掉个人信息后再让AI分析。")
@@ -161,16 +209,29 @@ class Conversation:
                         working_question, client, model, self.analysis_context,
                         previous_module_ids=self.module_context)
                 except AnalysisFailure as error:
-                    # 只显示程序封闭分类，不拼接SDK错误或模型响应正文。
-                    notice = str(error)
+                    # 详情只写当前用户可解密的诊断表；客户回复不含校验子类或批次。
+                    self._record_failure(error.reason, error.route or self._failure_route(selection, explicit_full),
+                                         error.validation, error.status_code)
+                    notice = "AI分析未完成。"
                 except PrivacyError:
-                    notice = "AI请求或工具返回未通过本地校验。"
+                    self._record_failure("privacy_guard", self._failure_route(selection, explicit_full))
+                    notice = "AI分析未完成。"
                 except Exception:
                     # SDK正文和模型协议异常只触发固定提示，不输出异常、不带原问题重试。
-                    notice = "AI分析暂不可用。"
+                    self._record_failure("unexpected", self._failure_route(selection, explicit_full))
+                    notice = "AI分析未完成。"
+                else:
+                    if not isinstance(answer, str) or not answer.strip():
+                        # 策略返回空内容也是未完成，不能无诊断地进入模块预览或提交空答。
+                        self._record_failure("incomplete", self._failure_route(selection, explicit_full))
+                        answer, context, notice = None, None, "AI分析未完成。"
+        if answer is None and client is None and not local_command:
+            self._record_failure("model_disabled", self._failure_route(selection, explicit_full))
         if answer is None and selection is not None and selection.matched and selection.module_ids:
             # 仅展示本地重新核实的所选范围结果，不发布被拒绝的模型小结，也不增加模型重试。
-            answer = selected_module_fallback(self.tools, self.analysis.projection, selection)
+            answer = selected_module_fallback(
+                self.tools, self.analysis.projection, selection,
+                on_degradation=lambda reason: self._record_failure(reason, "selected_modules"))
             if selection.remainder:
                 extra = QuestionTargets(selection.remainder, self.tools, self.analysis.projection, self.analysis_context)
                 if extra.service_topics:

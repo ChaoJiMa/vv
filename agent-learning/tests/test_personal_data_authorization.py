@@ -197,7 +197,7 @@ class PersonalDataAuthorizationTests(privacy.NoExternalIO):
         for draft in ('手机号是13999999999。', '手机号是13800000000，评分999分。'):
             conversation = self.conversation()
             answer = conversation.answer('手机号是多少？', self.client(conversation, ['手机号'], draft), 'synthetic-model')
-            self.assertIn('未通过本地校验', answer)
+            self.assertIn('AI分析未完成', answer)
             self.assertNotIn('13999999999', answer)
             self.assertNotIn('999分', answer)
         guard = self.conversation().analysis.guard

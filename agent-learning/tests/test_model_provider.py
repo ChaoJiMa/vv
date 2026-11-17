@@ -102,7 +102,8 @@ class DeepSeekTests(DeepSeekProtocol, privacy.NoExternalIO):
                 answer = Conversation(support.analysis_tools(), strategy="analysis").answer(
                     "分析报告中的指数", self.client(handler), DEEPSEEK_DEFAULT_MODEL,
                 )
-                self.assertIn(expected, answer)
+                self.assertIn("AI分析未完成", answer)
+                self.assertNotIn(expected, answer)
                 self.assertNotIn("SYNTHETIC_PRIVATE_ERROR", answer)
                 self.assertEqual(len(requests), 1)
 
@@ -246,7 +247,7 @@ class OpenAIProviderTests(OpenAIProtocol, privacy.NoExternalIO):
                 answer = Conversation(support.analysis_tools(), strategy="analysis").answer(
                     "分析报告中的指数", self.client(handler), OPENAI_DEFAULT_MODEL,
                 )
-                self.assertIn("模型未返回完整回答", answer)
+                self.assertIn("AI分析未完成", answer)
                 self.assertNotIn("PRIVATE_REFUSAL", answer)
 
     def test_sol_errors_do_not_retry_or_leak_and_only_use_openai(self):

@@ -139,7 +139,7 @@ def main():
                     _, answer = run_turn(client, model, conversation, question)
                     print(f"\n助手：{answer}", flush=True)
                 except HistoryError:
-                    print("本轮历史保存失败，已停止处理；不会改用明文历史。", file=sys.stderr, flush=True)
+                    print("本轮本地记录保存失败，已停止处理；不会改用明文记录。", file=sys.stderr, flush=True)
                     return 1
                 except (ValueError, OSError, KeyError, TypeError):
                     print("本轮本地查询失败，请检查问题或字段资料；不会将错误内容发送给模型。", file=sys.stderr, flush=True)

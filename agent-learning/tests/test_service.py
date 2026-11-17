@@ -90,7 +90,7 @@ class ServiceTests(privacy.NoExternalIO):
             with self.subTest(payload=payload):
                 client = support.ScriptClient([support.response(json.dumps(payload))])
                 answer = self.conversation().answer("请协助说明服务办理方式", client, "synthetic-model")
-                self.assertIn("问题路由格式未通过校验", answer)
+                self.assertIn("AI分析未完成", answer)
                 self.assertEqual(len(client.requests), 1)
                 self.assertNotIn(privacy.PRIVATE_VALUE, answer)
 
@@ -129,7 +129,7 @@ class ServiceTests(privacy.NoExternalIO):
         for text in ("该值为0，完全无风险。", "信用状况良好，非常健康。", "申请频率正常，不会产生不良影响。", "无逾期记录。"):
             with self.subTest(text=text):
                 answer = self.conversation().answer("分析报告中的指数", support.report_client(("f2",), text), "synthetic-model")
-                self.assertIn("分析回答未通过本地校验", answer)
+                self.assertIn("AI分析未完成", answer)
 
     def test_real_sdk_service_route_generates_only_one_request(self):
         """真实SDK通过内存HTTP返回语义路由；联系方式不进入请求，不继续生成答复。"""

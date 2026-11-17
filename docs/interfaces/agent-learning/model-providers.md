@@ -81,7 +81,15 @@ JSON模式在首个user输入前插入程序固定消息 `Return a JSON object.`
 
 ## 失败与生命周期
 
-HTTP 客户端关闭环境代理和重定向，SDK `max_retries=0`。超时、连接错误及 HTTP 服务错误映射到原有固定提示；异常正文不会显示、写入历史或重新发送。不向其他厂商自动转发请求。`ExitStack` 在结束、提前退出或异常时关闭 SDK 与传输连接。
+HTTP 客户端关闭环境代理和重定向，SDK `max_retries=0`。超时、连接错误及 HTTP 服务错误映射为内部固定类别，对客户仅显示未完成提示；异常正文不会显示、写入历史或重新发送。不向其他厂商自动转发请求。`ExitStack` 在结束、提前退出或异常时关闭 SDK 与传输连接。
+
+### Python 本地失败诊断（不是新增模型或 Java 接口）
+
+`Conversation` 在模型、路由、工具、来源及回答校验失败时，先调用 `HistoryStore.append_diagnostic`，写入当前 Windows 用户 DPAPI 加密的 SQLite 独立 `diagnostics` 表。新记录为 v2，仅含 UTC 时间、封闭 `reason`、实际执行范围 `route`、可选的 `OverviewValidationError` 固定标签与 `code/stage/batch/position/subreason`、模型服务错误的整数 `status_code`。`subreason` 仅对已知时长或范围失败使用封闭代码，其他失败为 `null`；旧 v1 记录没有此字段，读取时不推断历史子原因。语义路由请求失败记为 `routing`；纯“分析每个模块”直接归入整份报告，模型选整体分析后即使本地关键词未识别，也记实际的 `full_report` 分支。`reason=service` 的 401、429、5xx 可据状态码区分。所选模块回退的结构值占位、投影拒绝和超出预览上限另记固定类别；本地回退处理抛出异常时记 `local_processing`，同一轮可有多条诊断事件。不保存原始 SDK 异常、响应正文、URL、模型草稿、用户问题、答案或报告绑定值。客户只收到未完成提示或经本地核实的回退内容；`/history` 只读取原问答表。维护脚本 `scripts/inspect_failure_diagnostics.py` 使用只读连接解密展示固定诊断类别及已知子原因，写入失败时本轮停止。具体的 focused 回答校验目前只归类为 `answer`，尚不能从日志直接定位到每条自然语言断言；旧会话失败也不会自动补记。
+
+2026-11-16 使用虚构报告、临时 DPAPI 数据库和内存 HTTP 完成 609 项离线回归；本轮没有请求真实模型或 Java 报告正文。
+
+2026-11-17补充：诊断读写均严格要求非时长失败的 `subreason=null`，时长失败必须使用固定字符串子码。年份期间在模块及整体总结阶段均需完整绑定具名指标；整体总结仅按已展示小结及其来源组核对原样区间，不追加原报告年份。验证记录见 [每个模块分析失败修复](../../development/agent-learning/2026-11-17-each-module-analysis-failure.md)。
 
 ## 验证范围
 

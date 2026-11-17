@@ -73,12 +73,17 @@ class AnalysisFailure(Exception):
         "facts": "报告事实未通过出站校验",
     }
 
-    def __init__(self, reason, validation=None):
-        """可附加整份报告的封闭校验详情；禁止接收任意异常或模型原文。"""
+    def __init__(self, reason, validation=None, *, status_code=None, route=None):
+        """附加封闭校验详情、HTTP状态及实际执行分支；禁止接收异常原文。"""
         if validation is not None and not isinstance(validation, OverviewValidationError):
             raise ValueError("分析校验详情类型无效。")
+        if status_code is not None and (reason != "service" or type(status_code) is not int
+                                        or not 100 <= status_code <= 599):
+            raise ValueError("模型服务状态无效。")
         self.reason = reason
         self.validation = validation
+        self.status_code = status_code
+        self.route = route
         detail = "；详情：" + str(validation) if validation is not None else ""
         # 这里只陈述失败分类；会话层根据已证实的问题范围决定是否能提供本地结果。
         super().__init__(f"AI分析未完成（原因：{self.REASONS[reason]}{detail}）。")

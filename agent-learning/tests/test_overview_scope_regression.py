@@ -176,7 +176,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                         value["modules"][0]["text"] = text
                     return value
                 conversation, _, answer = self.run_overview(overview_tools(count=9), mutate)
-                self.assertIn("将局部模块范围误作整份报告范围", answer)
+                self.assertIn("AI分析未完成", answer)
                 self.assertNotIn("**测试模块", answer)
                 self.assertIsNone(conversation.analysis_context)
 
@@ -220,7 +220,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                 value["text"] = "目前仅有这一模块，暂无其他模块结果。"
             return value
         _, _, answer = self.run_overview(overview_tools(count=9), mutate)
-        self.assertIn("详情：整体总结：将局部模块范围误作整份报告范围", answer)
+        self.assertIn("AI分析未完成", answer)
 
     def test_confirmed_module_cannot_assert_other_modules_are_unavailable(self):
         for text in ("其余模块信息均未提供，当前报告暂无可确认结果。",
@@ -235,7 +235,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                                 row["text"] = text
                     return value
                 _, _, answer = self.run_overview(display_tools(), mutate)
-                self.assertIn("将局部模块范围误作整份报告范围", answer)
+                self.assertIn("AI分析未完成", answer)
                 self.assertNotIn("**非银行申请**", answer)
 
     def test_final_summary_cannot_narrow_whole_report_to_one_information_type(self):
@@ -246,7 +246,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                         value["text"] = text
                     return value
                 _, _, answer = self.run_overview(display_tools(), mutate)
-                self.assertIn("详情：整体总结：将局部模块范围误作整份报告范围", answer)
+                self.assertIn("AI分析未完成", answer)
 
     def test_confirmed_results_cannot_be_denied_at_any_module_count_boundary(self):
         for count in (1, 8, 9, 16, 17):
@@ -258,7 +258,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                             value["text"] = text
                         return value
                     _, _, answer = self.run_overview(overview_tools(count=count), mutate)
-                    self.assertIn("详情：整体总结：将局部模块范围误作整份报告范围", answer)
+                    self.assertIn("AI分析未完成", answer)
 
     def test_scope_conditions_and_denials_do_not_assert_others_availability(self):
         texts = ("如果其他模块没有可确认信息，应先核实对应模块。",
@@ -301,7 +301,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                 value["text"] = "报告没有可确认信息。"
             return value
         _, _, answer = self.run_overview(overview_tools(count=1), mutate)
-        self.assertIn("详情：整体总结：将局部模块范围误作整份报告范围", answer)
+        self.assertIn("AI分析未完成", answer)
 
     def test_actual_global_information_shortage_is_allowed_only_in_summary(self):
         def mutate(stage, value, *_):
@@ -320,7 +320,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                     row["sources"] = ["f9999"]
             return value
         _, _, answer = self.run_overview(status_tools(1, {0: (None, "直接输出原值")}), mutate)
-        self.assertIn("来源引用缺失、重复或不属于当前模块", answer)
+        self.assertIn("AI分析未完成", answer)
         self.assertNotIn("**测试模块", answer)
 
     def test_scope_metadata_is_counted_before_the_first_model_request(self):
@@ -375,7 +375,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                 if accepted:
                     self.assertIn("该手机号的业务使用情况已有说明", answer)
                 else:
-                    self.assertIn("未通过本地校验", answer)
+                    self.assertIn("AI分析未完成", answer)
 
     def test_final_summary_phone_permission_depends_only_on_its_actual_sources(self):
         for source_name, accepted in (("手机在网", True), ("银行申请", False)):
@@ -389,7 +389,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                 _, _, answer = self.run_overview(phone_bank_tools(), mutate)
                 self.assertEqual("**整体总结**" in answer, accepted)
                 if not accepted:
-                    self.assertIn("未通过本地校验", answer)
+                    self.assertIn("AI分析未完成", answer)
 
     def test_summary_source_metadata_does_not_authorize_unshown_original_numbers(self):
         def mutate(stage, value, payload, _):
@@ -404,7 +404,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                 value["text"] = "该手机号在网时长为24个月以上。"
             return value
         _, _, answer = self.run_overview(phone_bank_tools(), mutate)
-        self.assertIn("详情：整体总结：包含来源未支持的数字", answer)
+        self.assertIn("AI分析未完成", answer)
 
     def test_phone_source_does_not_authorize_an_actual_phone_number(self):
         def mutate(stage, value, payload, _):
@@ -415,7 +415,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                         row["text"] = "手机号为13800000000。"
             return value
         _, _, answer = self.run_overview(phone_bank_tools(), mutate)
-        self.assertIn("未通过本地校验", answer)
+        self.assertIn("AI分析未完成", answer)
         self.assertNotIn("13800000000", answer)
 
     def test_summary_preserves_displayed_phone_lower_bound_and_explicit_minimum(self):
@@ -469,7 +469,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                         value["text"] = summary
                     return value
                 _, _, answer = self.run_overview(phone_loan_tools(), mutate)
-                self.assertIn("详情：整体总结：包含来源未支持的数字", answer)
+                self.assertIn("AI分析未完成", answer)
                 self.assertNotIn("**手机在网**", answer)
 
     def test_same_numeric_key_from_loan_only_text_does_not_display_phone_duration(self):
@@ -490,7 +490,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                 _, _, answer = self.run_overview(phone_loan_tools("24个月以上"), mutate)
                 self.assertEqual("**整体总结**" in answer, accepted)
                 if not accepted:
-                    self.assertIn("详情：整体总结：包含来源未支持的数字", answer)
+                    self.assertIn("AI分析未完成", answer)
 
     def test_summary_isp_reference_can_represent_the_checked_phone_source_group(self):
         """总结只收到不透明sources数组，不应要求模型猜其中哪个引用是min字段。"""
@@ -532,4 +532,4 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                 _, _, answer = self.run_overview(tools, mutate)
                 self.assertEqual("**整体总结**" in answer, accepted)
                 if not accepted:
-                    self.assertIn("未通过本地校验", answer)
+                    self.assertIn("AI分析未完成", answer)

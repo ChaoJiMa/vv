@@ -86,7 +86,7 @@ class ModuleContextTests(NoExternalIO):
         conversation, client = self.conversation(), OverviewClient(mutate)
         answer = conversation.answer('分析下我的报告', client, 'synthetic-model')
         self.assertIn('整体分析暂未完成', answer)
-        self.assertIn('分析回答未通过本地校验', answer)
+        self.assertIn('AI分析未完成', answer)
         self.assertNotIn('请说明具体指标和周期', answer)
         self.assertNotIn('**测试模块', answer)
         self.assertNotIn('999', answer)

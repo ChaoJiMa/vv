@@ -76,7 +76,7 @@ class OverviewTests(support.NoExternalIO):
                         value["text"] = text
                     return value
                 _, _, answer = self.run_overview(self.single_value_tools(None), OverviewClient(mutate))
-                self.assertIn("详情：整体总结：包含来源未支持的数字", answer)
+                self.assertIn("AI分析未完成", answer)
 
     def test_summary_numeric_failure_uses_remaining_single_retry(self):
         """整体总结也能修正一次漏引，且只发送已校验模块小结。"""
@@ -120,7 +120,7 @@ class OverviewTests(support.NoExternalIO):
                 self.assertEqual('**整体总结**' in answer, accepted)
                 self.assertEqual(len(client.requests), 2 if accepted else 3)
                 if not accepted:
-                    self.assertIn('数量单位与对应指标不一致', answer)
+                    self.assertIn('AI分析未完成', answer)
                     self.assertNotIn(summary, answer)
 
     def test_summary_single_ref_inherits_validated_module_source_group(self):
@@ -145,7 +145,7 @@ class OverviewTests(support.NoExternalIO):
                 self.assertEqual('**整体总结**' in answer, accepted)
                 self.assertEqual(len(client.requests), 2 if accepted else 3)
                 if not accepted:
-                    self.assertIn('数量单位与对应指标不一致', answer)
+                    self.assertIn('AI分析未完成', answer)
                     self.assertNotIn(summary, answer)
 
     def test_joint_metric_names_do_not_match_shorter_uncited_suffix(self):
@@ -179,7 +179,7 @@ class OverviewTests(support.NoExternalIO):
 
         _, client, answer = self.run_overview(client=OverviewClient(mutate))
         self.assertEqual(len(client.requests), 3)
-        self.assertIn("详情：整体总结：包含来源未支持的数字", answer)
+        self.assertIn("AI分析未完成", answer)
         self.assertNotIn("999999", answer)
 
     def test_negated_overdue_confirmation_is_not_a_positive_guarantee(self):
@@ -200,7 +200,8 @@ class OverviewTests(support.NoExternalIO):
                 value["modules"][0]["text"] = "不能确定没有逾期记录；您的报告没有逾期。"
             return value
         _, _, answer = self.run_overview(client=OverviewClient(mutate))
-        self.assertIn("包含未经支持的分档或逾期判断", answer)
+        self.assertIn("AI分析未完成", answer)
+        self.assertNotIn("包含未经支持的分档或逾期判断", answer)
 
     def test_direct_negation_is_safe_but_cannot_hide_later_guarantee(self):
         for text, accepted in (("这些信息不能直接说明没有逾期。", True),
@@ -332,7 +333,7 @@ class OverviewTests(support.NoExternalIO):
                 value["modules"][0]["text"] = "审批通过概率为80%。"
             return value
         _, _, answer = self.run_overview(self.single_value_tools("80%"), OverviewClient(mutate))
-        self.assertIn("未通过本地校验", answer)
+        self.assertIn("AI分析未完成", answer)
 
     def test_numeric_source_omission_retries_only_failed_module_then_validates(self):
         """漏引数字只重生成出错模块；修正来源后才发布完整总结。"""
@@ -386,7 +387,7 @@ class OverviewTests(support.NoExternalIO):
 
         _, client, answer = self.run_overview(tools, OverviewClient(still_invalid))
         self.assertEqual(len(client.requests), 2)
-        self.assertIn("时长或范围与对应指标来源不一致", answer)
+        self.assertIn("AI分析未完成", answer)
         self.assertNotIn("两年内有申请记录", answer)
 
     def test_numeric_retry_is_global_and_cannot_publish_unknown_number(self):
@@ -399,7 +400,7 @@ class OverviewTests(support.NoExternalIO):
 
         _, client, answer = self.run_overview(overview_tools(count=2), OverviewClient(mutate))
         self.assertEqual(len(client.requests), 2)
-        self.assertIn("包含来源未支持的数字", answer)
+        self.assertIn("AI分析未完成", answer)
         self.assertNotIn("999999", answer)
         self.assertNotIn("**整体总结**", answer)
 
@@ -421,7 +422,7 @@ class OverviewTests(support.NoExternalIO):
 
         _, client, answer = self.run_overview(overview_tools(count=2), OverviewClient(mutate))
         self.assertEqual(len(client.requests), 2)
-        self.assertIn("来源引用缺失、重复或不属于当前模块", answer)
+        self.assertIn("AI分析未完成", answer)
         self.assertNotIn("999999", answer)
 
     def test_non_numeric_source_failure_does_not_retry(self):
@@ -432,7 +433,8 @@ class OverviewTests(support.NoExternalIO):
 
         _, client, answer = self.run_overview(client=OverviewClient(mutate))
         self.assertEqual(len(client.requests), 1)
-        self.assertIn("来源引用缺失", answer)
+        self.assertIn("AI分析未完成", answer)
+        self.assertNotIn("来源引用缺失", answer)
 
     def test_later_invalid_source_is_preflighted_before_numeric_retry(self):
         """同批后行已无有效引用时，不为前行数字错误发注定无效的额外请求。"""
@@ -444,7 +446,8 @@ class OverviewTests(support.NoExternalIO):
 
         _, client, answer = self.run_overview(overview_tools(count=2), OverviewClient(mutate))
         self.assertEqual(len(client.requests), 1)
-        self.assertIn("来源引用缺失", answer)
+        self.assertIn("AI分析未完成", answer)
+        self.assertNotIn("来源引用缺失", answer)
         self.assertNotIn("999999", answer)
 
     def test_internal_protocol_words_never_appear_in_customer_summary(self):
@@ -461,7 +464,8 @@ class OverviewTests(support.NoExternalIO):
                         return value
 
                     _, client, answer = self.run_overview(overview_tools(count=1), OverviewClient(mutate))
-                    self.assertIn("正文包含技术引用", answer)
+                    self.assertIn("AI分析未完成", answer)
+                    self.assertNotIn("正文包含技术引用", answer)
                     self.assertNotIn(word, answer)
                     self.assertEqual(len(client.requests), 1 if stage == "modules" else 2)
 
@@ -501,7 +505,7 @@ class OverviewTests(support.NoExternalIO):
                 _, client, answer = self.run_overview(tools, OverviewClient(mutate))
                 self.assertEqual('**整体总结**' in answer, accepted)
                 if not accepted:
-                    self.assertIn('数量单位与对应指标不一致', answer)
+                    self.assertIn('AI分析未完成', answer)
                     self.assertNotIn(text, answer)
                 self.assertEqual(len(client.requests), 2)
 
@@ -512,7 +516,7 @@ class OverviewTests(support.NoExternalIO):
             return value
         _, client, answer = self.run_overview(overview_tools(count=10), OverviewClient(mutate))
         self.assertEqual(len(client.requests), 3)
-        self.assertIn("详情：第2批模块小结（本批第1项）：包含来源未支持的数字", answer)
+        self.assertIn("AI分析未完成", answer)
         self.assertNotIn("999999", answer)
         self.assertNotIn("**测试模块", answer)
 
@@ -526,14 +530,49 @@ class OverviewTests(support.NoExternalIO):
             AnalysisFailure("answer", PrivacyError("SYNTHETIC_SECRET_RESPONSE"))
 
     def test_user_phrases_and_focused_questions_remain_distinct(self):
-        for question in ("分析下我的报告", "请帮我分析一下我的报告", "你好，分析我的报告", "按模块总结我的报告", "整体分析这份报告，然后做个整体总结"):
+        for question in ("分析下我的报告", "请帮我分析一下我的报告", "你好，分析我的报告", "按模块总结我的报告", "整体分析这份报告，然后做个整体总结",
+                         "分析每个模块", "分别解读各个模块", "分析这份报告里的每个模块", "把每个模块都分析一下"):
             with self.subTest(question=question):
                 self.assertTrue(is_report_overview(question))
                 _, client, answer = self.run_overview(question=question)
                 self.assertIn("整体总结", answer)
                 self.assertEqual(len(client.requests), 2)
-        for question in ("分析报告中的指数", "看看报告里的银行申请", "你好", "分析下我的报告，手机号13800000000"):
+        for question in ("分析报告中的指数", "看看报告里的银行申请", "你好", "分析下我的报告，手机号13800000000",
+                         "分析第一个模块", "分析前三个模块", "分析每个模块的申请次数", "分析每个模块，然后怎么退款"):
             self.assertFalse(is_report_overview(question))
+
+    def test_every_module_failure_keeps_full_report_scope(self):
+        """完整逐模块问法失败或离线时明确表示整份未完成，不发布局部草稿。"""
+        def mutate(stage, value, *_):
+            if stage == "modules":
+                value["modules"][0]["text"] = "未经支持的999999次申请。"
+            return value
+
+        _, client, answer = self.run_overview(client=OverviewClient(mutate), question="分析每个模块")
+        self.assertIn("整体分析暂未完成", answer)
+        self.assertNotIn("这次回答暂未完成", answer)
+        self.assertNotIn("999999", answer)
+        self.assertEqual(len(client.requests), 2)
+        offline = Conversation(overview_tools(), strategy="analysis").answer("分析每个模块")
+        self.assertIn("整体分析暂未完成", offline)
+
+    def test_every_module_accepts_literal_cited_year_range(self):
+        """具名字段的原样年份期间可生成完整小结，其他模块不借用该字段。"""
+        tools = overview_tools(count=1)
+        tools._catalog["fields"][0]["name"] = "案件期间"
+        tools._order["report_data"]["report"]["item_0_0"] = "2021年到2022年"
+        def mutate(stage, value, *_):
+            if stage == "modules":
+                value["modules"][0]["text"] = "案件期间为2021年到2022年。"
+            elif stage == "summary":
+                value["text"] = "案件期间为2021年到2022年，可关注该期间的记录。"
+            return value
+
+        _, client, answer = self.run_overview(LocalReportTools(tools._order, tools._catalog),
+                                              OverviewClient(mutate), "分析每个模块")
+        self.assertIn("案件期间为2021年到2022年", answer)
+        self.assertIn("**整体总结**", answer)
+        self.assertEqual(len(client.requests), 2)
 
     def test_template_order_is_preserved_despite_catalog_and_response_order(self):
         _, client, answer = self.run_overview(overview_tools(reverse=True))
@@ -625,7 +664,7 @@ class OverviewTests(support.NoExternalIO):
                 value["scope"] = "all_raw"
             return value
         _, client, answer = self.run_overview(client=OverviewClient(invalid), question="整体看看，有哪些值得关注的地方")
-        self.assertIn("问题路由格式未通过校验", answer)
+        self.assertIn("AI分析未完成", answer)
         self.assertEqual(len(client.requests), 1)
 
     def test_incomplete_extra_duplicate_and_cross_module_responses_are_rejected(self):
@@ -648,7 +687,7 @@ class OverviewTests(support.NoExternalIO):
         for mode in ("missing", "extra", "duplicate", "cross", "unknown"):
             with self.subTest(mode=mode):
                 conversation, client, answer = self.run_overview(client=OverviewClient(bad_rows(mode)))
-                self.assertIn("分析回答未通过本地校验", answer)
+                self.assertIn("AI分析未完成", answer)
                 self.assertEqual(len(client.requests), 1)
                 self.assertIsNone(conversation.analysis_context)
                 self.assertNotIn("**测试模块", answer)
@@ -661,7 +700,7 @@ class OverviewTests(support.NoExternalIO):
                         value["modules"][0]["text"] = text
                     return value
                 _, _, answer = self.run_overview(client=OverviewClient(mutate))
-                self.assertIn("分析回答未通过本地校验", answer)
+                self.assertIn("AI分析未完成", answer)
 
     def test_summary_cannot_add_digits_only_present_in_raw_fields(self):
         def mutate(stage, value, *_):
@@ -670,7 +709,7 @@ class OverviewTests(support.NoExternalIO):
             return value
         _, client, answer = self.run_overview(client=OverviewClient(mutate))
         self.assertEqual(len(client.requests), 3)
-        self.assertIn("分析回答未通过本地校验", answer)
+        self.assertIn("AI分析未完成", answer)
         self.assertNotIn("总值为0", answer)
 
     def test_summary_cannot_cite_a_field_not_used_in_module_text(self):
@@ -683,7 +722,7 @@ class OverviewTests(support.NoExternalIO):
             return value
         _, client, answer = self.run_overview(tools=overview_tools(count=1, fields=2), client=OverviewClient(mutate))
         self.assertEqual(len(client.requests), 2)
-        self.assertIn("分析回答未通过本地校验", answer)
+        self.assertIn("AI分析未完成", answer)
 
     def test_module_and_summary_requests_reject_tool_calls(self):
         for attacked_request in (1, 2):
@@ -697,7 +736,7 @@ class OverviewTests(support.NoExternalIO):
                     return result
                 client.chat.completions.create = create
                 _, _, answer = self.run_overview(client=client)
-                self.assertIn("分析回答未通过本地校验", answer)
+                self.assertIn("AI分析未完成", answer)
                 self.assertEqual(len(client.requests), attacked_request)
 
     def test_supported_digits_can_appear_naturally_in_both_summaries(self):

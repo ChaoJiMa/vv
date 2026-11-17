@@ -76,6 +76,22 @@ class OverviewBudgetError(PrivacyError):
 class OverviewValidationError(PrivacyError):
     """仅携带封闭校验分类及阶段序号，不能把模型正文或异常原文带入回退提示。"""
 
+    # 同一“时长或范围”标签含多条独立校验路径；只保存固定代码，供维护人员区分。
+    DURATION_SUBREASONS = {
+        "phone时长声明没有具名phone指标来源。": "phone_source_missing",
+        "phone声明的数值或范围角色未获同指标来源支持。": "phone_role_mismatch",
+        "手机时长关系含未知实质词或其他主体。": "phone_relation_unknown",
+        "手机设备使用时间不能冒充账户在网时长。": "device_account_confusion",
+        "未确认的号码指代不能绑定手机时长。": "number_reference_unconfirmed",
+        "回答将手机时长来源用于其他明确主体。": "phone_source_wrong_subject",
+        "回答包含尚未支持的复合时长区间。": "composite_duration_interval",
+        "回答包含尚未支持的复合时长。": "composite_duration",
+        "回答包含无法核验的中文时长。": "unverifiable_chinese_duration",
+        "回答改变了同指标时长来源的数值或范围边界。": "same_metric_boundary_changed",
+        "回答中的中文时长没有同指标来源。": "chinese_duration_source_missing",
+        "回答改变了时长来源的范围边界。": "duration_boundary_changed",
+    }
+
     REASONS = {
         "模型JSON格式无效。": ("json", "返回的JSON格式或长度不符合要求"),
         "JSON含重复键。": ("json", "返回的JSON含重复键"),
@@ -117,6 +133,9 @@ class OverviewValidationError(PrivacyError):
     def __init__(self, error, stage, batch=0, position=0, *, partial=False):
         """错误仅用于查固定映射；局部范围另标明所选总结，未知异常不回显。"""
         self.code, label = self.REASONS.get(str(error), ("validation", "结构或正文未通过校验"))
+        # 仅保存映射后的固定标签，诊断记录不能接收模型原文或底层异常内容。
+        self.diagnostic_detail = label
+        self.diagnostic_subreason = self.DURATION_SUBREASONS.get(str(error))
         self.stage = stage if stage in {"prepare", "modules", "summary"} else "prepare"
         self.batch = batch if type(batch) is int and 0 < batch <= MAX_BATCHES else 0
         self.position = position if type(position) is int and 0 < position <= MODULES_PER_REQUEST else 0

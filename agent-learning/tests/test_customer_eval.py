@@ -225,7 +225,7 @@ class CustomerEvaluationTests(unittest.TestCase):
                 client = analysis.ScriptClient([analysis.response(json.dumps(
                     {'route': 'service', 'use_previous': False, 'topics': topics}))])
                 answer = Conversation(synthetic_tools(), strategy='analysis').answer('帮我处理一下', client, 'synthetic-model')
-                self.assertIn('问题路由格式未通过校验', answer)
+                self.assertIn('AI分析未完成', answer)
                 with self.assertRaises(ValueError):
                     service_replies(topics)
 

@@ -486,6 +486,31 @@ class AnswerGuardRegressionTests(unittest.TestCase):
             with self.subTest(text=text):
                 check_answer_numbers(text, facts)
 
+    def test_cited_calendar_year_range_is_not_a_duration_interval(self):
+        """逐字引用同一字段的四位年份期间，不应被当成“2年到3年”的持续时长。"""
+        fact = {'name': '案件期间', 'status': 'provided', 'value': '2021年到2022年'}
+        check_answer_numbers('案件期间为2021年到2022年。', [fact])
+        for text in ('案件期间为2021年到2023年。', '案件期间为2年到3年。'):
+            with self.subTest(text=text), self.assertRaises(PrivacyError):
+                check_answer_numbers(text, [fact])
+        split = [{'name': '开始年份', 'value': '2021年'}, {'name': '结束年份', 'value': '2022年'}]
+        with self.assertRaises(PrivacyError):
+            check_answer_numbers('案件期间为2021年到2022年。', split)
+        with self.assertRaises(PrivacyError):
+            check_answer_numbers('贷款期间为2021年到2022年。', [fact])
+        with self.assertRaises(PrivacyError):
+            check_answer_numbers('案件期间有记录，贷款期间为2021年到2022年。', [fact])
+        for text in ('其他案件期间为2021年到2022年。', '非案件期间为2021年到2022年。'):
+            with self.subTest(text=text), self.assertRaises(PrivacyError):
+                check_answer_numbers(text, [fact])
+        roles = {'f1': [{'name': '案件期间', 'keys': []}]}
+        summary = {'field_ref': 'f1', 'value': '案件期间为2021年到2022年。'}
+        check_answer_numbers('案件期间为2021年到2022年。', [summary], duration_roles=roles)
+        for displayed in ('贷款期间为2021年到2022年。', '案件期间为2021年。结束年份为2022年。'):
+            with self.subTest(displayed=displayed), self.assertRaises(PrivacyError):
+                check_answer_numbers('案件期间为2021年到2022年。',
+                    [{'field_ref': 'f1', 'value': displayed}], duration_roles=roles)
+
     def test_duration_discourse_prefixes_preserve_ellipsis_but_cannot_cross_subjects(self):
         """话语连接不是新主体；只允许封闭连接，不能越过电脑、贷款等实质名词。"""
         facts = [{'name': '手机在网时长', 'value': '24个月以上'}]

@@ -66,8 +66,11 @@ class AnalysisStrategy:
             raise AnalysisFailure("timeout") from None
         except (APIConnectionError, OpenAIConnectionError):
             raise AnalysisFailure("connection") from None
-        except (APIStatusError, OpenAIStatusError):
-            raise AnalysisFailure("service") from None
+        except (APIStatusError, OpenAIStatusError) as error:
+            # 状态码是可用于区分权限、限流和服务故障的固定数字；不保留响应正文。
+            status = getattr(error, "status_code", None)
+            status = status if type(status) is int and 100 <= status <= 599 else None
+            raise AnalysisFailure("service", status_code=status) from None
         if not response.choices or getattr(response.choices[0], "finish_reason", None) in {"length", "content_filter"}:
             raise AnalysisFailure("incomplete")
         return response.choices[0].message
@@ -107,7 +110,11 @@ class AnalysisStrategy:
             return self._overview(safe_question, client, model)
         # 分类只接收上下文是否存在；旧问题和引用仍须在指代路由批准后才按需补入。
         route_input = encode({"question": safe_question, "has_previous_report": previous is not None})
-        routed = self._request(client, model, [{"role": "system", "content": ROUTE_PROMPT}, {"role": "user", "content": route_input}], json_mode=True)
+        try:
+            routed = self._request(client, model, [{"role": "system", "content": ROUTE_PROMPT}, {"role": "user", "content": route_input}], json_mode=True)
+        except AnalysisFailure as error:
+            error.route = "routing"
+            raise
         try:
             if routed.tool_calls:
                 raise PrivacyError("路由不允许工具。")
@@ -129,7 +136,7 @@ class AnalysisStrategy:
             elif set(route) != {"route", "use_previous"}:
                 raise PrivacyError("路由格式无效。")
         except PrivacyError:
-            raise AnalysisFailure("route") from None
+            raise AnalysisFailure("route", route="routing") from None
         if self.guard.allow_personal and route['route'] == 'service' and 'identity' in topics:
             # 原identity主题只解释隐私边界；新授权下真实字段查询必须进入报告事实流程。
             route = {'route': 'report', 'use_previous': False, 'scope': 'focused',
@@ -176,7 +183,7 @@ class AnalysisStrategy:
         if (not isinstance(topics, list) or not 1 <= len(topics) <= len(SERVICE_REPLIES)
                 or not all(type(topic) is str and topic in SERVICE_REPLIES for topic in topics)
                 or len(set(topics)) != len(topics)):
-            raise AnalysisFailure('route')
+            raise AnalysisFailure('route', route='routing')
         return service_replies(topics, local_complete=True, allow_personal=self.guard.allow_personal)
 
     @staticmethod
@@ -190,7 +197,7 @@ class AnalysisStrategy:
     def _overview(self, question, client, model, mixed=False, *, module_ids=None):
         """覆盖当前模板全部模块，引用只用于核对，不向用户追加字段事实清单。"""
         if module_ids is None and len(self.tools.current_modules()) > MAX_MODULES:
-            raise AnalysisFailure("budget")
+            raise AnalysisFailure("budget", route="full_report")
         overview = ReportOverview(self.tools, self.projection, self._check_text, strict_json,
                                   check_sourced_text=self._check_sourced_text, module_ids=module_ids)
 
@@ -202,17 +209,26 @@ class AnalysisStrategy:
 
         try:
             answer, refs = overview.run(question, request)
+        except AnalysisFailure as error:
+            # 模型请求可能在整体总结的任一批失败，记录实际进入的执行分支。
+            error.route = "selected_modules" if module_ids is not None else "full_report"
+            raise
         except OverviewBudgetError:
-            raise AnalysisFailure("budget") from None
+            raise AnalysisFailure("budget", route="selected_modules" if module_ids is not None else "full_report") from None
         except OverviewValidationError as error:
-            raise AnalysisFailure("answer", error) from None
+            raise AnalysisFailure("answer", error,
+                                  route="selected_modules" if module_ids is not None else "full_report") from None
         except PrivacyError:
-            raise AnalysisFailure("answer") from None
+            raise AnalysisFailure("answer", route="selected_modules" if module_ids is not None else "full_report") from None
         return answer, AnalysisContext(question, refs)
 
     def _report(self, question, client, model, previous, mixed=False, targets=None):
         """将本轮状态交给独立执行器，保留本策略的请求出口与最终校验。"""
-        return FocusedReportRun(self, question, client, model, previous, mixed, targets).run()
+        try:
+            return FocusedReportRun(self, question, client, model, previous, mixed, targets).run()
+        except AnalysisFailure as error:
+            error.route = "focused"
+            raise
 
     def _validate_call(self, name, args, exposed):
         if name == "submit_report_analysis" and set(args) == {"sections"}:

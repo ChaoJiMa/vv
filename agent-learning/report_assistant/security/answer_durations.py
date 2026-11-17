@@ -16,6 +16,9 @@ _DURATION = re.compile(r'(?<![\d.至到~～\-零〇一二两三四五六七八�
 # phone页面有限区间保留有序双端点；不把两个数字当独立精确时长，也不处理复合单位。
 _PHONE_INTERVAL = re.compile(r'(?<![\d.])(?P<lo>\d+)\s*[-–—~～至到]\s*(?P<hi>\d+)\s*'
                              r'(?P<unit>个月(?!份)|年(?!级|度|份|代))(?![\d.])')
+# 四位年份期间只允许引用同一来源的原文；不能借两个独立年份拼接新范围。
+_CALENDAR_YEAR_RANGE = re.compile(r'(?P<lo>[1-9]\d{3})\s*年\s*[至到~～—–\-]\s*'
+                                  r'(?P<hi>[1-9]\d{3})\s*年')
 # 谓语按“时间副词 + 时态 + 系词/动作 + 动态助词”组合，不按模型整句设白名单。
 # 动词只负责绑定同一指标，不能把裸“两年”自动解释成“至少两年”。
 _DURATION_PREDICATE = (r'(?:目前|当前|现在)?(?:已经|已)?'
@@ -293,11 +296,40 @@ def _displayed_duration_roles(value, roles):
     return entries
 
 
+def _cited_calendar_range(prefix, span, fact, duration_roles):
+    """年份原文须绑定完整指标；总结只继承已展示小结中的具名年份期间。"""
+    if (not isinstance(fact.get('value'), str)
+            or fact.get('status') in {'missing', 'null', 'empty', 'withheld'}
+            or span not in normalized(fact['value'])):
+        return False
+    roles = ([fact] if duration_roles is None else duration_roles.get(fact.get('field_ref'), ()))
+    if isinstance(roles, dict):
+        roles = [roles]
+    for role in roles:
+        name = role.get('name') if isinstance(role, dict) else None
+        if not isinstance(name, str) or not name:
+            continue
+        binding = re.escape(normalized(name)) + r'\s*(?:显示|展示|覆盖)?\s*(?:为|是|在|从|[:：])?\s*'
+        if not re.fullmatch(r'(?:(?:报告显示|报告中|页面显示|您的|你的|当前|其中|本次|该项)\s*)*'
+                            + binding, prefix):
+            continue
+        # 总结事实只有已核验的小结，不允许从原报告补入未展示的年份。
+        if duration_roles is None or re.search(binding + re.escape(span), normalized(fact['value'])):
+            return True
+    return False
+
+
 def _without_verified_duration(text, facts, *, duration_roles=None):
     """只在同一指标的封闭表述中换算时长，不把在网月数借给贷款期限或其他数量。"""
     for span in re.finditer(r'(?:\d+|[零〇一二两三四五六七八九十百千万半]+)(?:年|个月)?'
                             r'(?:以上|以下)?[至到~～—–\-](?:\d+|[零〇一二两三四五六七八九十百千万半]+)'
                             r'(?:年(?!级|度|份|代)|个月(?!份))', text):
+        calendar = _CALENDAR_YEAR_RANGE.fullmatch(span.group())
+        clause = re.split(r'[，,。；;!?！？\n]', text[:span.start()])[-1]
+        if (calendar and int(calendar['lo']) <= int(calendar['hi'])
+                and any(_cited_calendar_range(clause, span.group(), fact, duration_roles) for fact in facts)):
+            # 同句具名指标逐字转述同一来源；后面的整组数字检查仍会核对两个端点。
+            continue
         if (re.search(r'[零〇一二两三四五六七八九十百千万半]', span.group())
                 or re.search(r'(?:年|个月)(?:以上|以下)?[至到~～—–\-]', span.group())):
             # “2年到3年”不能只核验前半段，再借另一字段的3为后半段背书。

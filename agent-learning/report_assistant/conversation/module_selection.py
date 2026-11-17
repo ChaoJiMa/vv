@@ -103,10 +103,11 @@ def select_modules(question, tools, previous_module_ids=None):
     return ModuleSelection(ids, matched, remainder='，'.join(remaining))
 
 
-def selected_module_fallback(tools, projection, selection):
-    """模型失败后限量预览所选模块的已核实页面结果；未展示范围不冒充完整分析。"""
+def selected_module_fallback(tools, projection, selection, *, on_degradation=None):
+    """模型失败后限量预览已核实结果；仅把固定降级类别交给维护诊断。"""
     selected = set(selection.module_ids)
     modules = [module for module in tools.current_modules() if module['module_id'] in selected]
+    degradations = set()
     lead = ('所选模块的分析暂未完成，先列出每个所选模块最多3项可核实的展示结果：'
             if len(modules) <= _MAX_PREVIEW_MODULES else
             f'所选模块的分析暂未完成，先预览前{_MAX_PREVIEW_MODULES}个所选模块，每个最多3项可核实的展示结果：')
@@ -118,12 +119,20 @@ def selected_module_fallback(tools, projection, selection):
                   if item['local']['module_id'] == module['module_id']][:3]
         if not fields:
             answer = '该模块暂没有可用于自动解读的内容。'
+            degradations.add('fallback_no_fields')
         else:
             try:
-                answer = projection.customer_answer(fields)
+                answer = projection.customer_answer(
+                    fields, on_structured=lambda: degradations.add('fallback_structured_value'))
             except PrivacyError:
                 answer = '该模块的展示结果暂无法确认。'
+                degradations.add('fallback_projection_rejected')
         parts.append(f'**{name}**\n{answer}')
     if len(modules) > _MAX_PREVIEW_MODULES:
         parts.append(f'其余{len(modules) - _MAX_PREVIEW_MODULES}个所选模块本次未展示；这不代表它们没有数据。')
+        degradations.add('fallback_preview_limit')
+    # 诊断写入失败应阻止本轮提交；每类每轮只记一次，避免字段数放大日志量。
+    if on_degradation is not None:
+        for reason in sorted(degradations):
+            on_degradation(reason)
     return ('【演示数据】\n' if tools.is_demo else '') + '\n\n'.join(parts)

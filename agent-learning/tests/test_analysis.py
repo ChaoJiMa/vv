@@ -257,10 +257,10 @@ class AnalysisTests(support.NoExternalIO):
         for text in ("该统计值为1。", "报告编号为999。", "姓名为1。"):
             answer = Conversation(numeric_identity_tools(), strategy="analysis").answer(
                 "分析报告中的指数", report_client(("f2",), text), "synthetic-model")
-            self.assertIn("分析回答未通过本地校验", answer)
+            self.assertIn("AI分析未完成", answer)
 
     def test_validation_failure_categories_are_fixed_and_do_not_echo_data(self):
-        """区分请求冲突、路由、工具顺序及事实出口，所有提示只使用固定分类。"""
+        """请求、路由、工具与事实失败都使用统一客户提示，具体类别由诊断表记录。"""
         cases = (
             (ScriptClient([response('{"route":"report"}')]), "问题路由格式未通过校验"),
             (ScriptClient([response('{"route":[],"use_previous":false}')]), "问题路由格式未通过校验"),
@@ -268,19 +268,22 @@ class AnalysisTests(support.NoExternalIO):
         )
         for client, expected in cases:
             answer = self.conversation().answer("分析报告中的指数", client, "synthetic-model")
-            self.assertIn(expected, answer)
+            self.assertIn("AI分析未完成", answer)
+            self.assertNotIn(expected, answer)
             self.assertNotIn(support.PRIVATE_VALUE, answer)
         conversation = self.conversation()
         with patch.object(conversation.analysis.guard, "check_payload", side_effect=PrivacyError(support.PRIVATE_VALUE)):
             client = ScriptClient([])
             answer = conversation.answer("分析报告中的指数", client, "synthetic-model")
-        self.assertIn("请求内容与本地敏感值冲突", answer)
+        self.assertIn("AI分析未完成", answer)
+        self.assertNotIn("请求内容与本地敏感值冲突", answer)
         self.assertEqual(client.requests, [])
         self.assertNotIn(support.PRIVATE_VALUE, answer)
         conversation = self.conversation()
         with patch.object(conversation.analysis.projection, "read", side_effect=PrivacyError(support.PRIVATE_VALUE)):
             answer = conversation.answer("分析报告中的指数", report_client(), "synthetic-model")
-        self.assertIn("报告事实未通过出站校验", answer)
+        self.assertIn("AI分析未完成", answer)
+        self.assertNotIn("报告事实未通过出站校验", answer)
         self.assertNotIn(support.PRIVATE_VALUE, answer)
 
     def test_analysis_can_be_submitted_with_a_structured_tool_call(self):
@@ -299,7 +302,7 @@ class AnalysisTests(support.NoExternalIO):
             client = report_client()
             client.script[-1] = call("submit_report_analysis", {"sections": [{"text": text, "sources": sources}]}, "final")
             answer = self.conversation().answer("分析报告中的指数", client, "synthetic-model")
-            self.assertIn("分析回答未通过本地校验", answer)
+            self.assertIn("AI分析未完成", answer)
             self.assertNotIn(support.PRIVATE_VALUE, answer)
         submission = call("submit_report_analysis", {"sections": [{"text": "该指标未提供。", "sources": ["f1"]}]}, "final")
         client = ScriptClient([route(), submission])
@@ -415,7 +418,7 @@ class AnalysisTests(support.NoExternalIO):
         self.assertEqual(sum(len(m["tool_calls"]) for m in calls), 10)
 
     def test_service_errors_use_fixed_categories_without_echoing_details(self):
-        """服务异常分类必须只输出固定提示，并正确回退整体报告问法。"""
+        """服务异常内部分类，客户只看统一提示并保留原回退范围。"""
         request = httpx.Request("POST", "https://synthetic.invalid/" + support.PRIVATE_VALUE)
         cases = (
             (APITimeoutError(request=request), "模型响应超时"),
@@ -427,7 +430,8 @@ class AnalysisTests(support.NoExternalIO):
                 conversation = self.conversation()
                 client = ScriptClient([error])
                 answer = conversation.answer("分析报告中的指数", client, "synthetic-model")
-                self.assertIn(expected, answer)
+                self.assertIn("AI分析未完成", answer)
+                self.assertNotIn(expected, answer)
                 self.assertIn("回答暂未完成", answer)
                 self.assertNotIn("未找到该指标", answer)
                 self.assertNotIn(support.PRIVATE_VALUE, answer)
@@ -439,10 +443,10 @@ class AnalysisTests(support.NoExternalIO):
         truncated = response(support.PRIVATE_VALUE)
         truncated.choices[0].finish_reason = "length"
         answer = self.conversation().answer("分析报告中的指数", ScriptClient([truncated]), "synthetic-model")
-        self.assertIn("模型未返回完整回答", answer)
+        self.assertIn("AI分析未完成", answer)
         self.assertNotIn(support.PRIVATE_VALUE, answer)
         answer = self.conversation().answer("分析报告中的指数", report_client(text="指数为999"), "synthetic-model")
-        self.assertIn("分析回答未通过本地校验", answer)
+        self.assertIn("AI分析未完成", answer)
         self.assertNotIn("999", answer)
 
     def test_real_sdk_applies_reasoning_timeout_and_reports_timeout_safely(self):
@@ -458,7 +462,7 @@ class AnalysisTests(support.NoExternalIO):
             client = stack.enter_context(ZhipuAiClient(api_key="SYNTHETIC_MODEL_KEY", base_url="https://synthetic.invalid/v4", http_client=transport, max_retries=0, timeout=30))
             answer = self.conversation().answer("分析报告中的指数", client, "glm-5.3-flash")
         self.assertEqual(timeouts, [90.0])
-        self.assertIn("模型响应超时", answer)
+        self.assertIn("AI分析未完成", answer)
         self.assertNotIn(support.PRIVATE_VALUE, answer)
 
     def test_irrelevant_question_has_no_report_tools_facts_or_history(self):
