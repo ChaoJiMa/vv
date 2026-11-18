@@ -33,6 +33,18 @@
 | [Java 接口对接说明](interfaces/agent-learning/java-business-api.md) | 验证码、登录、报告列表及正文接口契约 |
 | [Python模型接入说明](interfaces/agent-learning/model-providers.md) | 智谱、DeepSeek与Sol的配置、HTTP协议、工具调用及失败回退 |
 
+## Python / Agent 练习项目
+
+- [项目运行与学习说明](../agent-practice/README.md)
+- [完整课程（D1–D56）](../agent-practice/docs/course.md)
+- [每次学习与动态调整流程](../agent-practice/docs/study-workflow.md)
+- [求职导向学习路线](../agent-practice/docs/roadmap.md)
+- [当前学习计划](../agent-practice/docs/current-plan.md)
+- [当前综合练习：多任务看板](../agent-practice/exercises/day04/task_board.py)
+- [反馈、验收与调整规则](../agent-practice/docs/feedback.md)
+- [动态学习路线开发记录](development/agent-practice/2026-11-10-adaptive-learning.md)
+- [完整课程开发记录](development/agent-practice/2026-11-13-complete-course.md)
+
 ## 历史资料
 
 已有邻里互助设计与计划仍保存在 `superpowers/specs/` 和 `superpowers/plans/`，保留原路径。

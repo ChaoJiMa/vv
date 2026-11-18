@@ -1,0 +1,635 @@
+{
+  "project": "agent-practice",
+  "intended_local_path": "D:\\vv\\agent-practice",
+  "total_learning_days": 56,
+  "current_day": 4,
+  "verified_days": [],
+  "schema_version": 2,
+  "learner_profile": {
+    "confirmed_on": "2026-11-10",
+    "background": "前端开发，Python 从基础开始",
+    "primary_goal": "转岗求职与面试",
+    "secondary_goal": "独立完成自己的 Agent 应用",
+    "available_minutes_per_day": [120, 240],
+    "study_pattern": "工作间隙学习，时间不固定，可拆分",
+    "target_role": "暂按 Python / Agent 应用开发准备，具体岗位要求待补充"
+  },
+  "planning": {
+    "baseline_topics": 56,
+    "fixed_calendar": false,
+    "current_plan": "docs/current-plan.md",
+    "review_history": "docs/reviews.md",
+    "next_action": "最新看板源码 A–H 均通过。补同文件作答记录，说明一次排错过程和合计的数据来源。函数职责与命名可以选做优化。",
+    "last_reviewed_at": "2026-11-18"
+  },
+  "skills": {
+    "python_basic_types": {
+      "level": "需提示",
+      "evidence_session_ids": ["2026-11-10-01", "2026-11-10-02", "2026-11-10-03"],
+      "review_next": "第 2 题已通过，四类类型和 int/str/float 复测正确；在后续第 4、6 题或项目中自然复查，不增加重复题"
+    },
+    "python_print_output": {
+      "level": "需提示",
+      "evidence_session_ids": ["2026-11-10-01", "2026-11-10-02", "2026-11-10-03", "2026-11-10-04"],
+      "review_next": "补充引号是语法、不属于字符串内容的解释正确，第 1 题通过；在后续第 4、6 题自然复查，不增加独立补练"
+    }
+  },
+  "sessions": [
+    {
+      "id": "2026-11-10-01",
+      "date": "2026-11-10",
+      "learning_day": 1,
+      "source": "用户提交 D1 前三题；读取 exercises/day01/answers.md 和 q01_output.py、q02_types.py、q03_values.py",
+      "submitted_questions": [1, 2, 3],
+      "actual_minutes": null,
+      "help_level": "未知",
+      "checks": [
+        {
+          "method": "本地运行与作答对照",
+          "command": "python exercises/day01/q01_output.py",
+          "result": "退出码 0，输出为学习 Python、30 两行；用户预测给第一行额外加了双引号，需修正"
+        },
+        {
+          "method": "本地运行与静态检查",
+          "command": "python exercises/day01/q02_types.py",
+          "result": "退出码 0，但无输出，四条 type() 核对尚未填写；作答将 progress=0.5 判为 int，且混用 JS 类型名称"
+        },
+        {
+          "method": "批改者独立核对变量类型",
+          "command": "runpy.run_path('exercises/day01/q02_types.py') 后对四个变量使用 type(value).__name__",
+          "result": "title=str、duration=int、progress=float、completed=bool；此核对不算用户完成第 2 题"
+        },
+        {
+          "method": "本地运行与原题要求对照",
+          "command": "python exercises/day01/q03_values.py",
+          "result": "退出码 0，输出学习 Python、40、False 三行，与题目一致；保留变量和原有三条输出语句"
+        }
+      ],
+      "decision": "第 3 题通过，第 1 题小修正，第 2 题补练。D1 保持学习中；未验证独立性、关键解释、变式和项目任务，不推进到 D2。"
+    },
+    {
+      "id": "2026-11-10-02",
+      "date": "2026-11-10",
+      "learning_day": 1,
+      "source": "用户请求再次检查；读取 q01_output.py、q02_types.py、q03_values.py 中的最新代码和同文件作答",
+      "submitted_questions": [1, 2, 3],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "本地运行与同文件作答对照",
+          "command": "python exercises/day01/q01_output.py",
+          "result": "退出码 0，输出学习 Python、30；用户已补对修正和实际输出，原始预测作为历史保留。但将引号与打印内容的区别解释为数据类型不一致，仍不准确。"
+        },
+        {
+          "method": "静态检查及实际运行",
+          "command": "python exercises/day01/q02_types.py",
+          "result": "退出码 0，无输出。用户已修正 str/int/float，40、带引号的40、40.0 的复测判断 int/str/float 正确；布尔类型仍写 boolean，且 TODO 下未补四条 print(type(...))。注释中的实际输出不能作为该脚本已打印类型的证据。"
+        },
+        {
+          "method": "本地运行与目标对照",
+          "command": "python exercises/day01/q03_values.py",
+          "result": "退出码 0，输出学习 Python、40、False，与目标一致，保持通过。新增作答模板空白不推翻此前代码验收，不要求重复填写。"
+        }
+      ],
+      "decision": "确认第 1 题输出核对与第 2 题三种数值/字符串复测的进步；仅修正引号解释、bool 名称及缺失的运行核对代码，不新增整套补练。第 3 题保持通过，D1 仍学习中。"
+    },
+    {
+      "id": "2026-11-10-03",
+      "date": "2026-11-10",
+      "learning_day": 1,
+      "source": "用户说明第 2 题已改并对第 1 题解释提出异议；读取 q01_output.py、q02_types.py 最新同文件作答并运行",
+      "submitted_questions": [1, 2],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "本地运行与作答对照",
+          "command": "python exercises/day01/q02_types.py",
+          "result": "退出码 0，依次输出 <class 'str'>、<class 'int'>、<class 'float'>、<class 'bool'>。已补齐四条核对语句并修正 bool，原有 int/str/float 复测正确，第 2 题通过。"
+        },
+        {
+          "method": "本地运行、阅读原文及区分可能含义",
+          "command": "python exercises/day01/q01_output.py",
+          "result": "退出码 0，输出学习 Python、30，与修正一致。解释仍为数据类型不一致，比较对象未说明；若比较 task_name 与 minutes 则类型确实不同，但尚未解释源码引号与打印内容的关系，不据此认定用户必然认为发生了类型转换。"
+        }
+      ],
+      "decision": "第 2 题新增通过，第 3 题保持此前通过；第 1 题输出正确、解释待澄清，允许继续第 4、6 题并自然复查，不因一句简短表述反复加练。"
+    },
+    {
+      "id": "2026-11-10-04",
+      "date": "2026-11-10",
+      "learning_day": 1,
+      "source": "用户调整第 1 题解释，读取 q01_output.py 最新同文件作答",
+      "submitted_questions": [1],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "静态审阅最新解释，结合此前已核实的运行结果",
+          "result": "用户新增解释：引号是语法 不属于字符串内容，正确说明源码定界引号与字符串内容的关系；输出引用 2026-11-10-03 本地运行结果学习 Python、30。本轮仅解释补充，不重复运行脚本。"
+        }
+      ],
+      "decision": "第 1 题通过，前三题均完成，清除当前卡点；在提示后修正，不自动认定已可独立。继续第 4、6 题和项目任务，D1 整体尚未验收。"
+    },
+    {
+      "id": "2026-11-10-05",
+      "date": "2026-11-10",
+      "learning_day": 1,
+      "source": "用户提交第 4 题；读取 exercises/day01/q04_fix.py 中的代码与作答注释",
+      "submitted_questions": [4],
+      "actual_minutes": null,
+      "help_level": "未知",
+      "checks": [
+        {
+          "method": "静态检查及本地运行",
+          "command": "python -B exercises/day01/q04_fix.py",
+          "result": "退出码 0，输出整理笔记、20、False 三行，与题目目标一致；正确使用赋值、False 和 print。两种语言写法差异的说明仍待填写，尚未验证解释能力。"
+        }
+      ],
+      "decision": "第 4 题代码部分通过，整体待一句写法差异说明；不要求重复抄写已核实输出，不要求重新写代码，不阻塞继续第 6 题。"
+    },
+    {
+      "id": "2026-11-10-06",
+      "date": "2026-11-10",
+      "learning_day": 1,
+      "source": "用户提交全部 8 道练习；读取 q01–q08 最新代码和同文件作答，另查看 task_info.py 仍为骨架",
+      "submitted_questions": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "actual_minutes": null,
+      "help_level": "未知",
+      "checks": [
+        {
+          "method": "本地运行与目标及作答对照",
+          "command": "python -B exercises/day01/q01_output.py",
+          "result": "退出码 0；标准输出：学习 Python\n30；标准错误：无"
+        },
+        {
+          "method": "本地运行与目标及作答对照",
+          "command": "python -B exercises/day01/q02_types.py",
+          "result": "退出码 0；标准输出：<class 'str'>\n<class 'int'>\n<class 'float'>\n<class 'bool'>；标准错误：无"
+        },
+        {
+          "method": "本地运行与目标及作答对照",
+          "command": "python -B exercises/day01/q03_values.py",
+          "result": "退出码 0；标准输出：学习 Python\n40\nFalse；标准错误：无"
+        },
+        {
+          "method": "本地运行与目标及作答对照",
+          "command": "python -B exercises/day01/q04_fix.py",
+          "result": "退出码 0；标准输出：整理笔记\n20\nFalse；标准错误：无"
+        },
+        {
+          "method": "本地运行与目标及作答对照",
+          "command": "python -B exercises/day01/q05_total.py",
+          "result": "退出码 0；标准输出：总学习时间： 55；标准错误：无"
+        },
+        {
+          "method": "本地运行与目标及作答对照",
+          "command": "python -B exercises/day01/q06_state.py",
+          "result": "退出码 0；标准输出：60\n70；标准错误：无"
+        },
+        {
+          "method": "本地运行与目标及作答对照",
+          "command": "python -B exercises/day01/q07_summary.py",
+          "result": "退出码 0；标准输出：任务一学习 Python\n预计时间:30分钟\n任务二完成练习\n预计时间:25分钟\n合计:55分钟；标准错误：无"
+        },
+        {
+          "method": "本地运行与目标及作答对照",
+          "command": "python -B exercises/day01/q08_update.py",
+          "result": "退出码 0；标准输出：完成 Python 第一天练习\n是否完成: False\n实际用时0分钟\n完成 Python 第一天练习\n是否完成: True\n实际用时45分钟；标准错误：无"
+        },
+        {
+          "method": "仅内存中替换输入，不修改用户文件",
+          "source": "q05_total.py",
+          "result": "修改 python_minutes 后输出：总学习时间： 65；计算验证通过，格式单独审阅"
+        },
+        {
+          "method": "仅内存中替换输入，不修改用户文件",
+          "source": "q06_state.py",
+          "result": "修改 minutes 后输出：80\n90；计算验证通过，格式单独审阅"
+        },
+        {
+          "method": "仅内存中替换输入，不修改用户文件",
+          "source": "q07_summary.py",
+          "result": "修改 minutes_a、minutes_b 后输出：任务一学习 Python\n预计时间:40分钟\n任务二完成练习\n预计时间:10分钟\n合计:50分钟；计算验证通过，格式单独审阅"
+        }
+      ],
+      "decision": "8 道代码均可运行；第 1、2、3、5、6 题通过。第 4 题代码正确、写法差异说明待补；第 7 题计算及变式通过、目标输出标签格式待修；第 8 题复用变量及状态更新正确、任务和实际用时标签待补。只修局部，不重写、不重复填输出。项目任务仍为骨架，D1 未验收。"
+    },
+    {
+      "id": "2026-11-17-01",
+      "date": "2026-11-17",
+      "learning_day": 1,
+      "source": "用户请求检查已完成部分；读取 task_info.py 的最新输入处理、校验函数和完成标记循环，未改用户代码",
+      "submitted_questions": ["task_info（部分）"],
+      "actual_minutes": null,
+      "help_level": "未知",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原始源码；替换 input 并捕获 stdout 和最终变量，A–H 共 8 组及一次错误标记后重输的变式",
+          "result": "A–D 输出任务概览和 True/False 文字，尚无摘要计算或状态。A 的标题两端空白去除，两个时间为 int；C 接受大写 Y，但 completed 仍为 str。E 提示空标题后继续读取并输出 False；F 的预计 0、G 的实际 -1 未被拒绝。H 提示错误并继续等待；有限测试输入耗尽导致测试内 EOFError，不据此判定交互重试有错。H_retry 追加 Y 后正常结束。"
+        },
+        {
+          "method": "静态检查并结合运行结果定位",
+          "result": "对已转成 int 的 data，not data 与 data < 0 无法同时成立；实际分钟数校验误传 planned_minutes；函数内 return 不结束主程序；print('True') 不为 completed 赋布尔值；任务概览标题在校验前打印。"
+        },
+        {
+          "method": "内存运行前后比较 task_info.py 的 SHA-256",
+          "result": "用户文件不变；未安装依赖、未联网、未写入练习代码"
+        }
+      ],
+      "decision": "确认输入规范化、int 转换、大小写判断与重试分支已有实现。先修校验条件、参数、bool 赋值和主流程控制，再实现时间计算、四种状态及概览。重输设计可以保留；D1 保持学习中，项目与 D2/D3 未验收，不增加重复基础题。"
+    },
+    {
+      "id": "2026-11-17-02",
+      "date": "2026-11-17",
+      "learning_day": 1,
+      "source": "用户修改综合题后反馈仍继续执行；读取 task_info.py 最新代码并运行定向用例",
+      "submitted_questions": ["task_info（退出条件）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原始源码；替换 input，记录提示、输出并捕获 SystemExit",
+          "result": "合法 60/25 在读取完成标记前触发 SystemExit；预计 0/实际25、预计60/实际-1 均提示时间错误却继续读取完成标记，n 分支保存 bool False。空标题仅提示后仍读取时间，最后因两项时间合法而退出。4 组定向用例确认退出条件写反。"
+        },
+        {
+          "method": "静态检查和执行前后源码字节比较",
+          "result": "minutes 使用 minimum 判断正确，实际时间已传 spent_minutes；y/n 分支已写 bool 赋值，y 分支本轮未执行。if planned_valid and spent_valid 表示两项合法时退出；标题函数仍只 return，概览标题仍提前输出。用户源码未修改。"
+        }
+      ],
+      "decision": "已修正时间函数和参数；下一步将退出条件改成任意校验失败，再处理空标题和概览时机。D1 项目保持未验收，未实现的计算和状态留待后续。"
+    },
+    {
+      "id": "2026-11-17-03",
+      "date": "2026-11-17",
+      "learning_day": 1,
+      "source": "用户请求确认前四项是否已完成；读取 task_info.py 最新代码并定向运行",
+      "submitted_questions": ["task_info（前四项复查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原始源码并替换 input，捕获输出、提示、最终变量和 SystemExit，共七组",
+          "result": "正常 n、大写 Y、实际时间 0 均继续并保存 bool；预计 0 和实际 -1 均提示后退出，不再问完成标记；错误标记后重输 Y 可结束。空标题仍提示后继续，且所有用例均提前打印任务概览。标题去空格正确；源码执行前后字节一致。"
+        }
+      ],
+      "decision": "时间校验、实际时间传参、bool 保存及时间失败退出已修正；空标题退出和概览输出时机尚未完成。若按题面第1–4项核对，第1/2项完成，第3项标记处理正确但错误路径仍有概览标题，第4项缺空标题终止及错误时无概览。D1 项目仍未验收。"
+    },
+    {
+      "id": "2026-11-17-04",
+      "date": "2026-11-17",
+      "learning_day": 1,
+      "source": "用户再次修改后要求检查；读取 task_info.py 最新代码并核对前四项",
+      "submitted_questions": ["task_info（前四项复验）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原始源码，替换 input，捕获输出和 SystemExit，八组断言",
+          "result": "空标题只询问标题后提示退出；预计0、实际-1 均提示退出；三类错误无概览。正常n、大写Y、实际0正确保存bool，合法后才有概览；错误标记提示并等待重输，无概览，追加Y后正常结束。八组检查通过，用户文件字节不变。"
+        }
+      ],
+      "decision": "前四项输入处理与校验通过，包含空标题退出及概览时机修正；按提示完成，不据此认定可独立。继续第5–7项计算、四种状态和完整输出，D1项目未验收。"
+    },
+    {
+      "id": "2026-11-17-05",
+      "date": "2026-11-17",
+      "learning_day": 1,
+      "source": "用户提交综合题第5项；读取 task_info.py 中 remaining_minutes 计算与 remaining 函数",
+      "submitted_questions": ["task_info（第5项）"],
+      "actual_minutes": null,
+      "help_level": "未知",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原始源码并替换 input；三组时间输入，捕获输出、异常与变量",
+          "result": "60/25、60/60、60/75 分别算出35、0、-15，减法正确；三组均在输出时触发 TypeError: can only concatenate str (not int) to str。源码执行前后字节不变。"
+        },
+        {
+          "method": "静态检查 remaining 函数",
+          "result": "f-string 花括号内仍执行字符串加整数，外层 f 不会使该加法自动合法；if data > 0 将0错误分到超出分支，应按非负条件区分。使用 abs 的超时展示方向正确，但尚未成功输出。"
+        }
+      ],
+      "decision": "第5项计算正确、输出未通过；提示直接使用 f-string 插值并将0归入剩余分支。前四项保留先前结论，D1项目不验收，下一步只修这两处并复测。"
+    },
+    {
+      "id": "2026-11-17-06",
+      "date": "2026-11-17",
+      "learning_day": 1,
+      "source": "用户修改第5项后请求复查；读取最新remaining函数",
+      "submitted_questions": ["task_info（第5项复查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原始源码并替换输入，三组时间及静态检查",
+          "result": "60/25、60/60、60/75仍算出35、0、-15，但三组均在输出发生str加int的TypeError。data>=0已修正；剩余分支仍写文字+data，超时分支仍写文字+abs(data)。用户文件字节不变。"
+        }
+      ],
+      "decision": "确认零分支已修好，只剩两行输出；换用JS模板字符串对照解释f-string的文字和表达式位置，不增加重复题，D1项目未验收。"
+    },
+    {
+      "id": "2026-11-17-07",
+      "date": "2026-11-17",
+      "learning_day": 1,
+      "source": "用户要求新练习，读取最新D1源码发现第5项两行输出已修改，并实际复测；出题本身不算完成新题",
+      "submitted_questions": ["task_info（第5项最新代码复测）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原始源码并替换输入；三组时间，核对输出与源码字节",
+          "result": "60/25显示剩余分钟数35，60/60显示剩余分钟数0，60/75显示超出预计分钟数15，均无异常，源码字节不变。第6–7项状态和完整概览仍未实现。"
+        }
+      ],
+      "decision": "第5项通过，清除f-string卡点。按用户要求转入多任务看板，组合D4–D6部分能力并复查旧题缺少的状态和摘要；当前主题改为4，保留D1项目未验收、verified_days为空。新题未开始，不新增学习完成或独立掌握结论。"
+    },
+    {
+      "id": "2026-11-18-01",
+      "date": "2026-11-18",
+      "learning_day": 4,
+      "source": "用户提交多任务看板初版，请求按 view 筛选思路给出调整建议",
+      "submitted_questions": ["task_board（部分实现）"],
+      "actual_minutes": null,
+      "help_level": "未知",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原始源码，替换 input",
+          "result": "all、todo、done 都成功读取模式，但调用 getlist(tasks) 缺少 view，三次均报 TypeError，未输出任务。"
+        },
+        {
+          "method": "内存中仅给函数调用补上 view，执行三组模式并核对源码字节",
+          "result": "输入带空格的大写 ALL 可规范化为 all。三个模式都打印编号 1、2、3，遍历、字典取值和 f-string 可运行，函数内仍未使用 view。临时改动未写回练习。"
+        }
+      ],
+      "decision": "D4 进入学习中。保留 getlist(data, view) 和单次遍历，先补调用参数，再在打印前依据 view 和 done 跳过不匹配任务。筛选、状态、时间差和汇总尚待验收。"
+    },
+    {
+      "id": "2026-11-18-02",
+      "date": "2026-11-18",
+      "learning_day": 4,
+      "source": "用户更新看板并说明了按完成值保留任务的思路，询问整题是否完成",
+      "submitted_questions": ["task_board（筛选复查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原始源码并替换 input，核对输出编号和原数据",
+          "result": "带空格的大写 ALL 输出 1/2/3，todo 输出 1/3，done 输出 2，运行后任务数据一致。other 仍输出 1/2/3，缺少无效模式校验。"
+        },
+        {
+          "method": "仅在内存追加第四条未完成任务，运行 todo",
+          "result": "输出 1/3/4，筛选适应数据增加。用户源码字节不变。"
+        }
+      ],
+      "decision": "确认三种合法模式的筛选通过。汇总、状态、时间差、空结果提示和无效模式校验仍待实现。D4 保持学习中，下一步先统计实际展示的任务。"
+    },
+    {
+      "id": "2026-11-18-03",
+      "date": "2026-11-18",
+      "learning_day": 4,
+      "source": "用户新增筛选结果列表和 total(data)，请求定位运行错误",
+      "submitted_questions": ["task_board（汇总任务数）"],
+      "actual_minutes": null,
+      "help_level": "未知",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原始源码，输入 todo",
+          "result": "任务 1、3 正常打印，total 中 data.len() 抛出 AttributeError，列表没有 len 方法。"
+        },
+        {
+          "method": "仅在内存将 data.len() 改为 len(data)，复跑三种模式",
+          "result": "all、todo、done 分别输出任务数 3、2、1，源码字节一致。"
+        }
+      ],
+      "decision": "保留用户用列表组织筛选结果的写法。先修 len 调用并复测，再汇总预计和实际分钟数。D4 继续学习中。"
+    },
+    {
+      "id": "2026-11-18-04",
+      "date": "2026-11-18",
+      "learning_day": 4,
+      "source": "用户修正 len 并补上两种时间累计后请求检查",
+      "submitted_questions": ["task_board（筛选结果汇总）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原始源码，替换 input，核对任务编号及汇总",
+          "result": "带空格的大写 ALL、todo、done 的任务数和预计、实际总分钟数分别为 3/110/90、2/80/60、1/30/30。无异常。"
+        },
+        {
+          "method": "内存替换输入任务列表，检查空列表和追加任务",
+          "result": "空列表汇总 0/0/0，缺少空结果文字提示。追加第四条后 todo 输出 1/3/4，汇总 3/90/60。执行后任务数据一致，练习源码字节不变。"
+        }
+      ],
+      "decision": "任务数和两种时间合计通过，清除 len 卡点。下一步先输出四种任务状态，再补时间差、空结果提示和无效模式校验。整题仍在学习中。"
+    },
+    {
+      "id": "2026-11-18-05",
+      "date": "2026-11-18",
+      "learning_day": 4,
+      "source": "用户新增 setdone(data) 并请求检查",
+      "submitted_questions": ["task_board（状态判断）"],
+      "actual_minutes": null,
+      "help_level": "未知",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原稿并直接调用 setdone，覆盖五种完成值与时间组合",
+          "result": "正常入口未调用 setdone，仍打印布尔值。直接调用时，已完成但超时的任务被标为超时未完成，已完成且刚好用完的任务被标为已到预计时间。三个未完成时间分支的最终文字符合预期，但 done 被改为字符串。"
+        },
+        {
+          "method": "在内存对默认任务调用 setdone 后再运行 todo 筛选",
+          "result": "todo 输出结果为空，因为非空状态文字被当成真。练习源码字节一致。"
+        }
+      ],
+      "decision": "状态计算以单条任务为输入，先判断 done 为真并返回已完成，再比较时间。由 getlist 打印返回值，避免状态文字写进 done。D4 项目仍未验收。"
+    },
+    {
+      "id": "2026-11-18-06",
+      "date": "2026-11-18",
+      "learning_day": 4,
+      "source": "用户改为返回状态文字后请求复查",
+      "submitted_questions": ["task_board（状态函数复查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原始脚本，替换 input，核对三种模式与任务 done 类型",
+          "result": "all 输出 1/2/3，todo 输出 1/3，done 输出 2，任务 done 均为 bool。列表仍打印 True/False，状态函数尚未接入。"
+        },
+        {
+          "method": "直接运行 setdone，覆盖完成与未完成各三种时间关系",
+          "result": "三个未完成状态全部正确。三个已完成用例的文字均被后面的时间分支覆盖，预计 60、实际 75 时返回超时未完成。练习源码字节一致。"
+        }
+      ],
+      "decision": "状态函数已改为返回文字，参数可以沿用。下一步已完成时直接 return，并在 getlist 打印前调用。D4 继续学习中。"
+    },
+    {
+      "id": "2026-11-18-07",
+      "date": "2026-11-18",
+      "learning_day": 4,
+      "source": "用户加入 TaskStatus 枚举并调整提前返回后请求复查",
+      "submitted_questions": ["task_board（状态枚举复查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原始源码，分别输入 all、todo、done",
+          "result": "任务编号分别为 1/2/3、1/3、2，原数据 done 为 bool。每行状态位置仍打印布尔值，getlist 尚未调用 setdone。"
+        },
+        {
+          "method": "直接调用原稿 setdone，验证两种完成值和三种时间关系",
+          "result": "六组均返回预期枚举成员，已完成时三组均为 COMPLETED，未完成时分别为 IN_PROGRESS、AT_LIMIT、OVERDUE。练习源码字节一致。"
+        }
+      ],
+      "decision": "状态判断和完成优先级通过。下一步在 getlist 中使用状态成员的 .value，随后补时间差与边界处理。"
+    },
+    {
+      "id": "2026-11-18-08",
+      "date": "2026-11-18",
+      "learning_day": 4,
+      "source": "用户将状态函数接入列表后请求定位中文状态未显示的原因",
+      "submitted_questions": ["task_board（枚举状态显示）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原始源码，输入 all",
+          "result": "状态列直接格式化枚举成员，输出 TaskStatus.IN_PROGRESS、TaskStatus.COMPLETED、TaskStatus.OVERDUE。"
+        },
+        {
+          "method": "仅在内存将 f-string 的 status 改为 status.value 并复跑 all",
+          "result": "状态列输出进行中、已完成、超时未完成，合计仍为 3/110/90。练习源码字节一致。"
+        }
+      ],
+      "decision": "状态函数已成功接入。中文展示待改用 .value 并复测，再补时间差。"
+    },
+    {
+      "id": "2026-11-18-09",
+      "date": "2026-11-18",
+      "learning_day": 4,
+      "source": "用户修正中文状态显示后询问剩余任务",
+      "submitted_questions": ["task_board（中文状态与剩余项检查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原始源码，按题面 A–H 输入检查，数据变式仅替换内存中的任务列表",
+          "result": "A/B/C/G/H 的筛选编号、中文状态与合计正确，G 中已完成任务即使超时仍显示已完成。所有任务行均缺时间差。D/E 统计 0/0/0，但缺少无匹配提示。F 输入 other 后仍展示全部和汇总。练习源码字节一致。"
+        }
+      ],
+      "decision": "清除枚举输出卡点。下一步先输出剩余或超出时间，再处理空结果和非法模式。D4 项目继续学习中。"
+    },
+    {
+      "id": "2026-11-18-10",
+      "date": "2026-11-18",
+      "learning_day": 4,
+      "source": "用户增加 timedif 和每条任务的时间差输出后请求复查",
+      "submitted_questions": ["task_board（时间差复查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 执行原始源码及内存数据变式，复核 A–H 的输出",
+          "result": "A/B/C/G/H 的任务编号、状态、时间差与汇总符合预期。G 中已完成任务正确显示超出 15 分钟，刚好用完的任务显示剩余 0 分钟。D/E 只有零值汇总，缺空结果提示。F 输入 other 仍输出全部任务及汇总。题面任务数据和练习源码均未被执行修改。"
+        }
+      ],
+      "decision": "时间差和状态通过，整题仍需空结果提示与非法模式校验。补后复测 D/E/F 并填写作答记录。"
+    },
+    {
+      "id": "2026-11-18-11",
+      "date": "2026-11-18",
+      "learning_day": 4,
+      "source": "用户加入空结果检查后反馈输出不符合预期",
+      "submitted_questions": ["task_board（空结果与重复输出）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 内存执行当前代码与仅替换汇总调用的版本，比较默认 todo 和空结果 D/E",
+          "result": "当前默认 todo 按 1/3/1/3 显示，D/E 均输出提示和零值汇总。内存中改用 total(matched_tasks) 后默认 todo 只显示 1/3，汇总 2/80/60，D/E 继续通过。练习源码字节一致。"
+        }
+      ],
+      "decision": "空结果处理通过。getlist 同时筛选和打印，汇总复用第一次的返回值可避免重复显示。无效模式校验待补。"
+    },
+    {
+      "id": "2026-11-18-12",
+      "date": "2026-11-18",
+      "learning_day": 4,
+      "source": "用户添加无效输入校验后询问剩余要求",
+      "submitted_questions": ["task_board（无效模式和剩余要求复查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 内存执行原始源码与 A–H 数据变式",
+          "result": "D/E 正确提示并汇总零值。F 输入 other 只输出错误提示，退出码为 1。A/B/C/G/H 因调用 getlist 两次，任务行均重复打印，合计正确。作答记录仍待填写。"
+        },
+        {
+          "method": "仅将最后的汇总调用改为 total(matched_tasks) 后在内存复跑 A–H",
+          "result": "八组行为均符合题面预期，筛选不修改任务数据，用户源码字节一致。"
+        }
+      ],
+      "decision": "无效输入校验通过，当前文件最后的汇总调用仍需修正。完成后复测并填写作答记录，D4 暂未验收。"
+    },
+    {
+      "id": "2026-11-18-13",
+      "date": "2026-11-18",
+      "learning_day": 4,
+      "source": "用户改为复用筛选结果后询问代码优化",
+      "submitted_questions": ["task_board（功能复验与代码优化）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 执行当前源码及仅调整输入列表的内存变式，逐项检查 A–H",
+          "result": "八组均通过，合法模式只展示一次，状态和时间差正确，空结果提示且汇总归零，非法模式只提示后退出，追加或调整任务后统计符合预期。原任务数据和练习源码字节一致。"
+        },
+        {
+          "method": "检查代码职责和同文件作答记录",
+          "result": "getlist 同时筛选和打印，可按需分开。setdone 实际只读取并返回状态，可用 get_task_status 表达职责。作答记录仍为待填写。"
+        }
+      ],
+      "decision": "确认功能通过，清除重复输出卡点，D4 待验收。作答解释待补，重构作为可选练习，未据此认定独立通过。"
+    }
+  ],
+  "days": {
+    "day01": {
+      "status": "学习中",
+      "completed_questions": [1, 2, 3, 4, 5, 6, 7, 8],
+      "waived_requirements": [
+        {
+          "questions": [7, 8],
+          "requirement": "与示例逐字一致的标签、冒号和空格",
+          "reason": "用户反馈难度偏低；2026-11-10-06 已实测计算与状态更新，格式作为改进建议，不阻塞核心验收"
+        },
+        {
+          "questions": [4],
+          "requirement": "单独补写 Python 与 JS 语法差异说明",
+          "reason": "2026-11-10-06 已核对改写代码正确，表达能力改在升级综合任务中验证，不声称已提交这条说明"
+        }
+      ],
+      "project_verified": false,
+      "actual_minutes": null,
+      "blockers": [],
+      "feedback": "2026-11-17-07：第1–5项有运行验收证据，第5项最新三组输出通过；旧文件第6–7项未实现。按用户要求改做多任务看板，相关状态和摘要能力在新题验证，D1项目保持未验收。"
+    },
+    "day04": {
+      "status": "待验收",
+      "completed_questions": [],
+      "project_verified": false,
+      "actual_minutes": null,
+      "blockers": [],
+      "feedback": "2026-11-18-13：实际源码 A–H 功能通过，重复输出已解决。待补作答解释，命名和拆分筛选展示为可选优化。"
+    }
+  }
+}
