@@ -8,7 +8,7 @@
 
 | 文档 | 内容 |
 |---|---|
-| [Git 提交与合并规范](conventions/git-workflow.md) | 全项目提交格式、暂存快照检查、PR/MR 完整差异及分支合并门禁 |
+| [Git 提交与合并规范](conventions/git-workflow.md) | 提交格式、暂存快照、PR/MR 完整差异、合并门禁及任务分支收尾 |
 | [统一提交规范开发记录](development/project/2026-10-30-git-workflow.md) | 规范来源、接入入口、验证结果及执行边界 |
 
 ## 报告助手
