@@ -10,6 +10,7 @@
 |---|---|
 | [Git 提交与合并规范](conventions/git-workflow.md) | 提交格式、暂存快照、PR/MR 完整差异、合并门禁及任务分支收尾 |
 | [统一提交规范开发记录](development/project/2026-10-30-git-workflow.md) | 规范来源、接入入口、验证结果及执行边界 |
+| [两个 Python 入口直接运行](development/project/2026-11-18-direct-python-launch.md) | 根目录启动练习与报告助手，验证跨目录导入和虚拟环境回退 |
 
 ## 报告助手
 

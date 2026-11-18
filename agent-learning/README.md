@@ -95,6 +95,15 @@
 
 ## 运行
 
+从 `D:\vv` 打开 `agent-learning/main.py` 后可以直接运行。当前解释器缺少启动依赖时，
+程序会用本项目已有的 `.venv` 在同一个运行窗口接着启动。从仓库根目录也可以用 PowerShell 启动。
+
+```powershell
+python .\agent-learning\main.py
+```
+
+也可以从子项目目录显式选用虚拟环境解释器。
+
 ```powershell
 cd D:\vv\agent-learning
 .\.venv\Scripts\python.exe main.py

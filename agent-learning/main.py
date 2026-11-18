@@ -1,9 +1,35 @@
 """报告查询助手：AI理解当前授权报告，凭据过滤与来源校验由程序执行。"""
 
 from contextlib import ExitStack
+from importlib.util import find_spec
 import os
 from pathlib import Path
+import subprocess
 import sys
+
+
+def _launch_with_project_python():
+    """直接启动且缺少依赖时，使用项目的 .venv 运行入口并传回退出码。"""
+    required_modules = ("dotenv", "httpx", "jwt", "openai", "zai")
+    if all(find_spec(module) is not None for module in required_modules):
+        return
+
+    script = Path(__file__).resolve()
+    executable = "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    project_python = script.parent / ".venv" / executable
+    if not project_python.is_file() or Path(sys.executable).absolute() == project_python:
+        return
+
+    # 复用现有输入输出，让终端或 IDE 的原运行窗口继续接收交互。
+    options = ["-B", "-u"] if sys.dont_write_bytecode else ["-u"]
+    result = subprocess.run([str(project_python), *options, str(script), *sys.argv[1:]], check=False)
+    raise SystemExit(result.returncode)
+
+
+# 启动引导必须在导入第三方模块前执行。导入 main 做测试时直接使用调用方的解释器。
+if __name__ == "__main__":
+    _launch_with_project_python()
+
 
 from dotenv import load_dotenv
 

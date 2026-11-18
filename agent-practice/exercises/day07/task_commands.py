@@ -42,8 +42,8 @@
 # C. 用空任务列表运行一次 summary，然后 add 一条未填 category 的任务，再 summary。
 #    第一次 data 是 {}，第二次在「未分类」中看到新增待办。空指令列表返回 []。
 #
-# 运行（在 agent-practice 目录）：py -3 -B -m exercises.day07.task_commands
-# 也可以用：python -B -m exercises.day07.task_commands
+# 在 D:\vv 打开本文件可直接运行。终端也可用 python -B .\agent-practice\exercises\day07\task_commands.py。
+# 在 agent-practice 目录下可用 python -B -m exercises.day07.task_commands。
 #
 # 作答记录（直接写在本文件）
 # A–C 实际结果：
@@ -53,6 +53,13 @@
 # A–C 通过。默认批次前后两次汇总分别是 25 和 20 分钟，每条指令都有对应结果。
 # execute_command() 根据动作选择处理函数，execute_batch() 传入同一份任务列表并按顺序收集结果。
 # 先校验编号，再查找和修改。未知或缺失动作以失败结果返回，批次可以继续执行。
+
+from pathlib import Path
+import sys
+
+# 直接运行文件时，Python 从 day07 目录查找模块。补上练习项目根目录以复用 D6。
+if __name__ == "__main__" and not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 # D6 已提供按分类统计待办的函数，这里直接用来处理 summary 指令。
 from exercises.day06.category_summary import summarize_pending
@@ -174,7 +181,7 @@ def execute_batch(tasks, commands):
     return l
 
 
-# 入口保护让其他模块可以导入函数。用题面的 -m 命令启动时，才执行并逐条打印样例结果。
+# 入口保护让其他模块可以导入函数。作为程序启动时，执行并逐条打印样例结果。
 if __name__ == "__main__":
     executes = execute_batch(tasks, commands)
     for execute in executes:

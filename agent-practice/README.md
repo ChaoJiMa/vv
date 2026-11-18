@@ -16,18 +16,15 @@
 
 当前练习使用 Python 标准库。项目建议使用 Python 3.10 或更高版本。
 
-在 PowerShell 中进入项目：
+在 `D:\vv` 打开练习文件后可以直接运行。也可以从仓库根目录用 PowerShell 启动。
 
 ```powershell
-Set-Location D:\vv\agent-practice
-py -3 --version
-py -3 -B -m exercises.day07.task_commands
+python -B .\agent-practice\exercises\day07\task_commands.py
 ```
 
-如果电脑没有 `py` 命令，但有 `python` 命令，可以使用：
+从 `agent-practice` 子项目目录也可使用模块方式启动。
 
 ```powershell
-python --version
 python -B -m exercises.day07.task_commands
 ```
 
