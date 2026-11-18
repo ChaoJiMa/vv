@@ -1,0 +1,6 @@
+[project]
+name = "agent-practice"
+version = "0.1.0"
+description = "Python and Agent practice for a frontend developer"
+requires-python = ">=3.10"
+dependencies = []

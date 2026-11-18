@@ -26,7 +26,7 @@ describe('serializePost', () => {
     expect(dto.images).toEqual(['a.jpg'])
     expect(dto.cover).toEqual({ key: 'a.jpg', width: 100, height: 200 })
     expect(dto.author).toEqual({
-      id: 'u1', nickname: '邻', avatar: null, building: '3', unit: '2',
+      id: 'u1', nickname: '邻', avatar: null, building: '3', unit: '',
     })
     expect(dto.stats).toEqual({ commentCount: 2, likeCount: 5 })
     expect(dto.viewer).toEqual({ liked: true, responded: false })
@@ -36,6 +36,17 @@ describe('serializePost', () => {
     expect(dto.my_liked).toBe(true)
     expect(dto.myLiked).toBe(true)
     expect(dto.nickname).toBe('邻')
+    expect(dto.unit).toBe('')
+  })
+
+  it('仅本人会话可取得房号，公开与他人视角的两种字段均脱敏且不修改原行', () => {
+    const own = serializePost(row, { viewerId: 'u1' })
+    expect(own.author.unit).toBe('2')
+    expect(own.unit).toBe('2')
+    const other = serializePost(row, { viewerId: 'u2' })
+    expect(other.author.unit).toBe('')
+    expect(other.unit).toBe('')
+    expect(row.unit).toBe('2')
   })
 
   it('兼容旧纯 key 数组', () => {

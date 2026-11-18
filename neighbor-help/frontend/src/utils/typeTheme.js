@@ -1,33 +1,46 @@
-/** 四类服务封面/ pill 色（列表卡与详情共用） */
+/**
+ * 四类服务的糖果色语义：列表标签、分类卡和详情共用同一组 CSS Token。
+ * pillBg 保留纯色供小标签使用；cardBg / cardShadow 仅供功能卡添加短渐变与细高光。
+ * 保留原返回字段，颜色由 data-theme 解析，调用方无需监听主题或重新计算样式。
+ */
 export const TYPE_THEME = {
   help: {
     label: '求助互助',
-    pillBg: '#FFE49A',
-    pillFg: '#C56A12',
-    cover: 'linear-gradient(125deg, #FFE49A 0%, #FFB070 55%, #FFD4A8 100%)',
+    pillBg: 'var(--color-category-help-bg)',
+    pillFg: 'var(--color-category-help-fg)',
+    cardBg: 'linear-gradient(145deg, var(--color-category-help-soft) 0%, var(--color-category-help-bg) 65%)',
+    cardShadow: 'inset 0 1px 0 var(--color-material-highlight), var(--shadow-candy)',
+    cover: 'linear-gradient(125deg, var(--color-category-help-soft) 0%, var(--color-category-help-bg) 100%)',
   },
   idle: {
     label: '闲置转让',
-    pillBg: '#F3E0C0',
-    pillFg: '#8B6914',
-    cover: 'linear-gradient(125deg, #FFF6E8 0%, #F3E0C0 50%, #E8D0A8 100%)',
+    pillBg: 'var(--color-category-idle-bg)',
+    pillFg: 'var(--color-category-idle-fg)',
+    cardBg: 'linear-gradient(145deg, var(--color-category-idle-soft) 0%, var(--color-category-idle-bg) 65%)',
+    cardShadow: 'inset 0 1px 0 var(--color-material-highlight), var(--shadow-candy)',
+    cover: 'linear-gradient(125deg, var(--color-category-idle-soft) 0%, var(--color-category-idle-bg) 100%)',
   },
   lost: {
     label: '失物招领',
-    pillBg: '#C6ECDC',
-    pillFg: '#1F7A62',
-    cover: 'linear-gradient(125deg, #E8F8F1 0%, #C6ECDC 50%, #7bc9a6 100%)',
+    pillBg: 'var(--color-category-lost-bg)',
+    pillFg: 'var(--color-category-lost-fg)',
+    cardBg: 'linear-gradient(145deg, var(--color-category-lost-soft) 0%, var(--color-category-lost-bg) 65%)',
+    cardShadow: 'inset 0 1px 0 var(--color-material-highlight), var(--shadow-candy)',
+    cover: 'linear-gradient(125deg, var(--color-category-lost-soft) 0%, var(--color-category-lost-bg) 100%)',
   },
   group: {
     label: '拼单拼团',
-    pillBg: '#C8E6F8',
-    pillFg: '#2A6F96',
-    cover: 'linear-gradient(125deg, #F2FAFF 0%, #C8E6F8 50%, #5BA8D0 100%)',
+    pillBg: 'var(--color-category-group-bg)',
+    pillFg: 'var(--color-category-group-fg)',
+    cardBg: 'linear-gradient(145deg, var(--color-category-group-soft) 0%, var(--color-category-group-bg) 65%)',
+    cardShadow: 'inset 0 1px 0 var(--color-material-highlight), var(--shadow-candy)',
+    cover: 'linear-gradient(125deg, var(--color-category-group-soft) 0%, var(--color-category-group-bg) 100%)',
   },
 }
 
 export function getTypeTheme(type, menu) {
-  const base = TYPE_THEME[type] || TYPE_THEME.help
+  // 未知类型不能从对象原型取到同名成员，否则会丢失默认颜色与分类标签。
+  const base = Object.prototype.hasOwnProperty.call(TYPE_THEME, type) ? TYPE_THEME[type] : TYPE_THEME.help
   return { ...base, label: menu?.label || base.label }
 }
 

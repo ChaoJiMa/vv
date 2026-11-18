@@ -1,9 +1,10 @@
-import { MenuSticker } from '../icons'
+import { GridIcon, MenuSticker } from '../icons'
+import { getTypeTheme } from '../../utils/typeTheme'
 
 /**
- * 分类贴纸横滑条
+ * 原布局分类入口：糖果底色与胶质角色提供亲和感，文字与选中描边继续说明业务及状态。
  * - mode "entry"：首页入口（可带今日新帖角标）
- * - mode "filter"：发现筛选（选中缩放 + 描边）
+ * - mode "filter"：发现筛选（选中颜色 + 描边，保持图形尺寸稳定）
  */
 export default function CategoryStrip({
   menus = [],
@@ -19,7 +20,7 @@ export default function CategoryStrip({
 
   return (
     <section
-      className={stripClass}
+      className={`nh-category-strip ${stripClass}`}
       style={{
         position: 'relative',
         display: 'flex',
@@ -52,16 +53,19 @@ export default function CategoryStrip({
         )
       ))}
       <style>{`
-        .${stripClass}::-webkit-scrollbar { display: none; }
+        .nh-category-strip::-webkit-scrollbar { display: none; }
+        .nh-category-option:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; border-radius: 12px; }
       `}</style>
     </section>
   )
 }
 
 function EntryItem({ menu, hot, onClick }) {
+  const theme = getTypeTheme(menu.value, menu)
   return (
     <button
       type="button"
+      className="nh-category-option"
       onClick={onClick}
       style={{
         flex: '0 0 auto',
@@ -77,8 +81,13 @@ function EntryItem({ menu, hot, onClick }) {
         color: 'var(--color-text)',
       }}
     >
-      <span style={{ position: 'relative', display: 'inline-flex', width: 48, height: 48 }}>
-        <MenuSticker type={menu.value} size={48} />
+      <span style={{
+        position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 48, height: 48, borderRadius: 15, boxSizing: 'border-box',
+        border: '1px solid transparent', background: theme.cardBg, color: theme.pillFg,
+        boxShadow: theme.cardShadow,
+      }}>
+        <MenuSticker type={menu.value} size={44} />
         {hot ? (
           <span
             aria-label="今日有新帖"
@@ -92,6 +101,7 @@ function EntryItem({ menu, hot, onClick }) {
               background: 'var(--color-primary)',
               border: '1.5px solid var(--color-surface)',
               boxSizing: 'border-box',
+              zIndex: 1,
             }}
           />
         ) : null}
@@ -105,7 +115,8 @@ function FilterAll({ active, onClick }) {
   return (
     <button
       type="button"
-      className="nh-discover-cat"
+      className="nh-discover-cat nh-category-option"
+      aria-pressed={active}
       onClick={onClick}
       style={{
         flex: '0 0 auto',
@@ -119,28 +130,26 @@ function FilterAll({ active, onClick }) {
         alignItems: 'center',
         gap: 6,
         color: 'var(--color-text)',
-        transform: active ? 'scale(1.04)' : 'scale(1)',
       }}
     >
       <span
         style={{
           width: 44,
           height: 44,
-          borderRadius: 14,
+          borderRadius: 12,
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
           fontSize: 13,
           fontWeight: 800,
-          background: active ? 'var(--color-primary)' : 'var(--color-bg-accent)',
-          color: active ? 'var(--color-on-primary)' : 'var(--color-text-muted)',
-          boxShadow: active
-            ? '0 0 0 2.5px color-mix(in srgb, var(--color-primary) 40%, transparent)'
-            : '0 0 0 2px transparent',
-          transition: 'background 200ms ease, color 200ms ease, box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1)',
+          boxSizing: 'border-box',
+          border: `1.5px solid ${active ? 'var(--color-primary)' : 'var(--color-border)'}`,
+          background: active ? 'color-mix(in srgb, var(--color-primary) 6%, var(--color-surface))' : 'var(--color-surface)',
+          color: active ? 'var(--color-primary)' : 'var(--color-text-muted)',
+          transition: 'background 200ms ease, color 200ms ease, border-color 200ms ease',
         }}
       >
-        全
+        <GridIcon size={26} />
       </span>
       <span
         style={{
@@ -156,10 +165,12 @@ function FilterAll({ active, onClick }) {
 }
 
 function FilterItem({ menu, active, onClick }) {
+  const theme = getTypeTheme(menu.value, menu)
   return (
     <button
       type="button"
-      className="nh-discover-cat"
+      className="nh-discover-cat nh-category-option"
+      aria-pressed={active}
       onClick={onClick}
       style={{
         flex: '0 0 auto',
@@ -173,18 +184,22 @@ function FilterItem({ menu, active, onClick }) {
         alignItems: 'center',
         gap: 6,
         color: 'var(--color-text)',
-        transform: active ? 'scale(1.04)' : 'scale(1)',
       }}
     >
       <span
         style={{
-          borderRadius: 16,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          position: 'relative',
+          width: 44, height: 44, borderRadius: 14, boxSizing: 'border-box',
           lineHeight: 0,
-          boxShadow: active ? '0 0 0 2.5px var(--color-primary)' : '0 0 0 2.5px transparent',
-          transition: 'box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1)',
+          border: `1.5px solid ${active ? 'var(--color-primary)' : 'transparent'}`,
+          background: theme.cardBg,
+          color: theme.pillFg,
+          boxShadow: theme.cardShadow,
+          transition: 'background 200ms ease, color 200ms ease, border-color 200ms ease',
         }}
       >
-        <MenuSticker type={menu.value} size={44} />
+        <MenuSticker type={menu.value} size={40} />
       </span>
       <span
         style={{

@@ -1,10 +1,11 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { keepPreviousData, useMutation, useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import {
   MoreIcon, ThemeMoonIcon, ThemeSunIcon, ThemeSystemIcon,
 } from '../components/icons'
 import { api } from '../api'
+import { captureSession, isSessionCurrent, assertSessionCurrent } from '../session'
 import { useAuth } from '../hooks/useAuth'
 import { useAppTheme } from '../theme/useAppTheme'
 import { toast } from '../toast'
@@ -45,7 +46,7 @@ export default function Profile() {
   const menuRef = useRef(null)
 
   const { data: stats } = useQuery({
-    queryKey: ['myStats'],
+    queryKey: ['myStats', user?.id],
     queryFn: () => api.getMyStats(),
     enabled: !!user,
   })
@@ -59,14 +60,15 @@ export default function Profile() {
 
   const {
     data, isLoading, isError, refetch, fetchNextPage, hasNextPage, isFetchingNextPage,
+    isFetchNextPageError, isRefetchError, isFetching, isPlaceholderData,
   } = useInfiniteQuery({
-    queryKey: ['myPosts', status],
+    queryKey: ['myPosts', status, user?.id],
     queryFn: ({ pageParam }) => api.getMyPosts(pageParam, status),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
     enabled: !!user,
     // 全部/进行中/已完成切换时保留上一屏，避免闪四个骨架框
-    placeholderData: keepPreviousData,
+    placeholderData: (previous, query) => query?.queryKey[2] === user?.id ? previous : undefined,
   })
   const list = data?.pages.flatMap(p => p.list) ?? []
 
@@ -111,12 +113,14 @@ export default function Profile() {
     <AppShell withNav>
       {/* 浮层顶栏：上滑后收起 */}
       <div
+        className="nh-page-chrome-top"
         style={{
           position: 'fixed',
           top: 0, left: 0, right: 0, zIndex: 40,
           maxWidth: 480, margin: '0 auto',
           display: 'flex', justifyContent: 'flex-end', gap: 8,
           padding: 'calc(10px + var(--safe-top)) 12px 10px',
+          // 固定顶区由全局 chrome 类对齐同一视口柔光，局部按钮材质保持不变。
           opacity: compact ? 0 : 1,
           transform: compact ? 'translateY(-8px)' : 'translateY(0)',
           pointerEvents: compact ? 'none' : 'auto',
@@ -168,15 +172,8 @@ export default function Profile() {
       {/* 头区 */}
       <section
         ref={heroRef}
-        style={{ position: 'relative', padding: 'calc(56px + var(--safe-top)) 16px 20px', overflow: 'hidden' }}
+        style={{ position: 'relative', padding: 'calc(56px + var(--safe-top)) 16px 20px', overflow: 'hidden', background: 'transparent' }}
       >
-        <div
-          aria-hidden
-          style={{
-            position: 'absolute', inset: 0, pointerEvents: 'none',
-            background: 'linear-gradient(165deg, color-mix(in srgb, var(--color-primary) 18%, transparent) 0%, color-mix(in srgb, var(--color-accent-cream, #F5E6C8) 42%, transparent) 45%, transparent 85%)',
-          }}
-        />
         <button
           type="button"
           onClick={() => setEditOpen(true)}
@@ -226,9 +223,8 @@ export default function Profile() {
       <div
         style={{
           position: 'sticky', top: 0, zIndex: 30,
-          background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)',
-          backdropFilter: 'blur(10px)',
-          WebkitBackdropFilter: 'blur(10px)',
+          // 标签条初始位于头区下方，使用中性工具底，避免未吸顶时重复绘制视口顶部柔光。
+          background: 'var(--color-bg)',
           borderBottom: '1px solid var(--color-border)',
           padding: 'calc(8px + var(--safe-top)) 16px 8px',
         }}
@@ -259,6 +255,11 @@ export default function Profile() {
             />
           ))}
         </div>
+        {isPlaceholderData && (
+          <div role="status" style={{ paddingTop: 8, fontSize: 12, color: 'var(--color-text-muted)' }}>
+            正在更新帖子状态…
+          </div>
+        )}
       </div>
 
       <PostFeed
@@ -266,10 +267,15 @@ export default function Profile() {
         feedKey={status}
         feedClassName="nh-profile-feed"
         items={list}
-        isLoading={isLoading}
+        // 占位列表来自上一状态：空数据不能提前冒充新状态的空结果。
+        isLoading={isLoading || isPlaceholderData}
         isError={isError}
+        isFetchNextPageError={isFetchNextPageError}
+        isRefetchError={isRefetchError}
+        isFetching={isFetching}
         onRetry={() => refetch()}
         hasNextPage={hasNextPage}
+        autoLoadEnabled={!isPlaceholderData}
         isFetchingNextPage={isFetchingNextPage}
         fetchNextPage={fetchNextPage}
         empty={{
@@ -279,11 +285,12 @@ export default function Profile() {
           actionLabel: '去发布',
           onAction: () => navigate('/create'),
         }}
-        renderItem={(post, { aspect }) => (
+        renderItem={(post, { aspect, priority }) => (
           <PostCard
             post={post}
             menu={menuMap[post.type]}
             aspect={aspect}
+            priority={priority}
             onClick={() => navigate(`/note/${post.id}`)}
           />
         )}
@@ -442,6 +449,7 @@ function SegTab({ active, onClick, label }) {
 }
 
 function EditProfileForm({ user, setUser, onDone }) {
+  const [formSession] = useState(captureSession)
   const qc = useQueryClient()
   const [nickname, setNickname] = useState(user.nickname || '')
   const [building, setBuilding] = useState(user.building || '')
@@ -457,7 +465,9 @@ function EditProfileForm({ user, setUser, onDone }) {
   const initial = displayInitial({ nickname: nickname.trim() || user.nickname })
 
   const mutation = useMutation({
+    onMutate: () => formSession,
     mutationFn: () => {
+      assertSessionCurrent(formSession)
       const body = {
         nickname: nickname.trim(),
         building: building.trim(),
@@ -466,14 +476,15 @@ function EditProfileForm({ user, setUser, onDone }) {
       if (avatarDraft !== undefined) body.avatar = avatarDraft
       return api.updateMe(body)
     },
-    onSuccess: () => {
-      setUser(prev => ({
+    onSuccess: (_data, _variables, session) => {
+      if (!isSessionCurrent(session)) return
+      setUser(prev => prev?.id === user.id ? ({
         ...prev,
         nickname: nickname.trim(),
         building: building.trim(),
         unit: unit.trim(),
         ...(avatarDraft !== undefined ? { avatar: avatarDraft } : {}),
-      }))
+      }) : prev)
       // 头像/昵称变更后刷新列表与详情里的作者信息
       qc.invalidateQueries({ queryKey: ['posts'] })
       qc.invalidateQueries({ queryKey: ['myPosts'] })
@@ -483,7 +494,7 @@ function EditProfileForm({ user, setUser, onDone }) {
       toast.success('保存成功')
       onDone()
     },
-    onError: (e) => toast.error(e.message || '保存失败'),
+    onError: (e, _variables, session) => { if (isSessionCurrent(session)) toast.error(e.message || '保存失败') },
   })
 
   const pickAvatar = async (e) => {
@@ -492,11 +503,13 @@ function EditProfileForm({ user, setUser, onDone }) {
     if (!file) return
     setUploading(true)
     try {
+      assertSessionCurrent(formSession)
       const { file: out, width, height } = await downscaleImage(file, 512)
-      const data = await api.uploadImage(out, { width, height })
+      const data = await api.uploadImage(out, { width, height }, formSession)
+      assertSessionCurrent(formSession)
       setAvatarDraft(data.key)
     } catch (err) {
-      toast.error(err.message || '头像上传失败')
+      if (isSessionCurrent(formSession)) toast.error(err.message || '头像上传失败')
     } finally {
       setUploading(false)
     }
@@ -591,18 +604,24 @@ function EditProfileForm({ user, setUser, onDone }) {
 }
 
 function PasswordForm({ onDone }) {
+  const [formSession] = useState(captureSession)
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirm, setConfirm] = useState('')
 
   const mutation = useMutation({
-    mutationFn: () => api.changePassword({ oldPassword, newPassword }),
-    onSuccess: (data) => {
-      if (data?.token) api.setToken(data.token)
+    onMutate: () => formSession,
+    mutationFn: () => {
+      assertSessionCurrent(formSession)
+      return api.changePassword({ oldPassword, newPassword })
+    },
+    onSuccess: (data, _variables, session) => {
+      if (!isSessionCurrent(session)) return
+      if (data?.token) api.setToken(data.token, session, { restore: false })
       toast.success('密码修改成功')
       onDone()
     },
-    onError: (e) => toast.error(e.message || '修改失败'),
+    onError: (e, _variables, session) => { if (isSessionCurrent(session)) toast.error(e.message || '修改失败') },
   })
 
   const handleSubmit = () => {

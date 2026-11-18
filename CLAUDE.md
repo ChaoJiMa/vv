@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 项目公共规范
+
+开始工作前读取根目录 [AGENTS.md](AGENTS.md)，按其中要求使用项目内的开发规范。
+所有子项目统一遵守 [Git 提交与合并规范](docs/conventions/git-workflow.md)；
+执行提交（含 amend）、推送、创建或更新 PR/MR、合并前必须读取并完成适用检查。
+检查实际暂存快照或完整合入差异，任何规范违规或必要检查未完成都禁止继续相应操作。
+Git 操作遵循用户已有授权，不重复索取已明确授予的同一操作权限。
+
 ## 项目概览
 
 邻里互助小程序，全部代码位于 `neighbor-help/` 下，分两个独立部署单元：

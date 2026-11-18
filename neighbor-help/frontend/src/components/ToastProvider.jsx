@@ -24,7 +24,8 @@ export default function ToastProvider() {
   const palette = {
     success: { background: 'var(--color-primary)', color: 'var(--color-on-primary)' },
     info: { background: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-border)' },
-    error: { background: 'var(--color-danger)', color: '#fff' },
+    // 深色模式使用浅粉错误底，前景随语义 Token 切换，保证提示文字对比度。
+    error: { background: 'var(--color-danger)', color: 'var(--color-on-danger)' },
   }[state.severity] || { background: 'var(--color-surface)', color: 'var(--color-text)' }
 
   return (

@@ -7,10 +7,12 @@ export default function AppShell({ children, withNav = false, className = '', st
         maxWidth: 480,
         margin: '0 auto',
         minHeight: '100svh',
-        background: 'var(--color-bg)',
+        // 全页底色和柔光由 body 的单层画布提供，外壳不再重复覆盖或绘制。
+        background: 'transparent',
         color: 'var(--color-text)',
         boxSizing: 'border-box',
-        paddingBottom: withNav ? 'var(--nav-height-safe)' : undefined,
+        // 悬浮底栏的整块占位包含胶囊和下方留白，保证列表末项可滚到操作区上方。
+        paddingBottom: withNav ? 'var(--nav-floating-footprint)' : undefined,
         textAlign: 'left',
         ...style,
       }}

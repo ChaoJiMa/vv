@@ -3,6 +3,7 @@ import { parseStoredImages } from '../images.js'
 /**
  * 帖子出口 DTO：新造型（camelCase + author/stats/viewer）并双写旧扁平字段。
  * row: DB 行 + join 的 nickname/avatar/... + comment_count/like_count 等
+ * opts.viewerId 只能来自已验签会话；房号默认置空，仅作者本人可取回，两个兼容出口保持一致。
  */
 export function serializePost(row, opts = {}) {
   const images = parseStoredImages(row.images)
@@ -21,6 +22,7 @@ export function serializePost(row, opts = {}) {
   const responded = !!(opts.responded ?? row.myResponded)
   const commentCount = Number(row.comment_count) || 0
   const likeCount = Number(opts.likeCount ?? row.like_count) || 0
+  const privateUnit = opts.viewerId && opts.viewerId === row.user_id ? row.unit || '' : ''
 
   const extensions = { ...(opts.extensions || {}) }
   if (opts.contactUnavailable) extensions.contactUnavailable = true
@@ -40,7 +42,7 @@ export function serializePost(row, opts = {}) {
       nickname: row.nickname || '邻居',
       avatar: row.avatar ?? null,
       building: row.building || '',
-      unit: row.unit || '',
+      unit: privateUnit,
     },
     stats: {
       commentCount,
@@ -59,7 +61,7 @@ export function serializePost(row, opts = {}) {
     nickname: row.nickname || '邻居',
     avatar: row.avatar ?? null,
     building: row.building || '',
-    unit: row.unit || '',
+    unit: privateUnit,
     comment_count: commentCount,
     like_count: likeCount,
     my_liked: liked,

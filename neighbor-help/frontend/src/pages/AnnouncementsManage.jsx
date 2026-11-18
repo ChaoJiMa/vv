@@ -32,7 +32,7 @@ export default function AnnouncementsManage() {
   }, [user, navigate])
 
   const { data, isLoading } = useQuery({
-    queryKey: ADMIN_QK,
+    queryKey: [...ADMIN_QK, user?.id],
     queryFn: () => api.adminListAnnouncements(),
     enabled: isAdmin,
   })
@@ -83,13 +83,11 @@ export default function AnnouncementsManage() {
 
   return (
     <AppShell>
-      <header style={{
+      <header className="nh-page-chrome-top" style={{
         position: 'sticky', top: 0, zIndex: 20,
         display: 'flex', alignItems: 'center', gap: 8,
         padding: 'calc(8px + var(--safe-top)) 12px 8px', minHeight: 52,
-        background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
+        // 管理页吸顶栏与全局顶部柔光对齐，不随下方公告卡片改变背景。
         borderBottom: '1px solid var(--color-border)',
       }}>
         <button type="button" aria-label="返回" onClick={() => navigate('/profile')} style={iconBtn}>

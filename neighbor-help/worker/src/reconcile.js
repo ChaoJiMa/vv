@@ -1,44 +1,48 @@
-// R2 图片孤儿对账:兜底清理「没有任何帖子引用」的图片对象。
-//
-// 为什么需要:删帖/编辑帖已在应用层即时清理 R2(见 routes/posts.js),但仍有漏网场景——
-// 用户上传了图片却没提交帖子、历史遗留、清理时 R2 异常被吞掉等。这里用定时任务做最终对账。
-//
-// 安全要点:
-// - 宽限期 GRACE_MS:只删「上传时间早于宽限期」的孤儿,避免误删「刚上传、还没提交帖子」的图。
-// - 引用集合来自 posts.images(JSON 数组)。逐页扫 posts 汇总所有在用 key。
-// - 删除分批进行,避免一次 delete 过多 key。
+import { isValidKey } from './images.js'
+import { IMAGE_GRACE_MS } from './imageAccess.js'
+import { deleteUnreferencedImages } from './imageCleanup.js'
 
-const GRACE_MS = 24 * 60 * 60 * 1000 // 24 小时:新上传未关联的图在此期限内不清理
-const DELETE_BATCH = 100             // 单次 R2 delete 的 key 数上限
+const PAGE_SIZE = 500
+const DELETE_BATCH = 100
 
-// 收集所有被帖子引用的图片 key。逐页读 posts.images 并 JSON.parse 汇总。
+// 帖子与头像共用 R2；引用损坏时中止清理，避免把未知引用当作孤儿。
 async function collectReferencedKeys(env) {
   const referenced = new Set()
-  const PAGE = 500
-  let offset = 0
-  // 按主键分页扫描,避免一次性把全表 images 读进内存
+  let after = ''
   for (;;) {
-    const { results } = await env.DB.prepare(
-      'SELECT images FROM posts WHERE images IS NOT NULL AND images != \'\' LIMIT ? OFFSET ?'
-    ).bind(PAGE, offset).all()
-    const rows = results || []
-    for (const r of rows) {
-      try {
-        const keys = JSON.parse(r.images || '[]')
-        if (Array.isArray(keys)) keys.forEach(k => referenced.add(k))
-      } catch { /* 单行损坏忽略,不影响整体对账 */ }
+    const { results: rows } = await env.DB.prepare(
+      "SELECT id, images FROM posts WHERE id > ? AND images IS NOT NULL AND images != '' ORDER BY id LIMIT ?"
+    ).bind(after, PAGE_SIZE).all()
+    for (const row of rows) {
+      const images = JSON.parse(row.images)
+      if (!Array.isArray(images)) throw new Error('Invalid stored image references')
+      for (const image of images) {
+        const key = typeof image === 'string' ? image : image?.key
+        if (!isValidKey(key)) throw new Error('Invalid stored image reference')
+        referenced.add(key)
+      }
     }
-    if (rows.length < PAGE) break
-    offset += PAGE
+    if (rows.length < PAGE_SIZE) break
+    after = rows[rows.length - 1].id
+  }
+  after = ''
+  for (;;) {
+    const { results: rows } = await env.DB.prepare(
+      "SELECT id, avatar FROM users WHERE id > ? AND avatar IS NOT NULL AND avatar != '' ORDER BY id LIMIT ?"
+    ).bind(after, PAGE_SIZE).all()
+    for (const row of rows) {
+      if (isValidKey(row.avatar)) referenced.add(row.avatar)
+    }
+    if (rows.length < PAGE_SIZE) break
+    after = rows[rows.length - 1].id
   }
   return referenced
 }
 
-// 执行一次对账。返回 { scanned, deleted } 便于日志。
 export async function reconcileImages(env) {
   if (!env.IMAGES) return { scanned: 0, deleted: 0 }
   const referenced = await collectReferencedKeys(env)
-  const cutoff = Date.now() - GRACE_MS
+  const cutoff = Date.now() - IMAGE_GRACE_MS
 
   let scanned = 0
   let deleted = 0
@@ -54,8 +58,7 @@ export async function reconcileImages(env) {
       if (!referenced.has(obj.key) && uploadedMs < cutoff) {
         pending.push(obj.key)
         if (pending.length >= DELETE_BATCH) {
-          await env.IMAGES.delete(pending)
-          deleted += pending.length
+          deleted += await deleteUnreferencedImages(env, pending)
           pending = []
         }
       }
@@ -64,8 +67,7 @@ export async function reconcileImages(env) {
     cursor = listing.cursor
   }
   if (pending.length) {
-    await env.IMAGES.delete(pending)
-    deleted += pending.length
+    deleted += await deleteUnreferencedImages(env, pending)
   }
   return { scanned, deleted }
 }

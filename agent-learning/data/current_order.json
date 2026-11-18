@@ -1,0 +1,31 @@
+{
+  "order_id": "DEMO-REPORT-001",
+  "is_demo": true,
+  "note": "仅供学习的模拟报告订单；字段定义来自参考项目，下面所有订单值均为手工演示值，不是真实用户报告。",
+  "report_data": {
+    "report": {
+      "BRS_SUMMARY_00001": "DEMO-RPT-001",
+      "BRS_SUMMARY_00002": "DEMO-COMPANY",
+      "BRS_SUMMARY_00003": 4,
+      "BRS_SUMMARY_00004": [5, 9],
+      "BRS_SUMMARY_00005": "2026-10-30",
+      "BRS_RS_00001": 68.4,
+      "NONE_BANK_APPLY_D7_APPLY_COUNT": 8,
+      "NONE_BANK_APPLY_D7_APPLY_ORG_COUNT": 5,
+      "NONE_BANK_APPLY_M1_APPLY_COUNT": 15,
+      "NONE_BANK_APPLY_M1_APPLY_ORG_COUNT": 9,
+      "BANK_APPLY_D7_APPLY_COUNT": 0,
+      "BANK_APPLY_D7_APPLY_ORG_COUNT": 0
+    },
+    "template": {
+      "theme": 3,
+      "config": "",
+      "modules": [
+        {"moduleId": 4, "moduleName": "报告概览"},
+        {"moduleId": 5, "moduleName": "风险指数"},
+        {"moduleId": 9, "moduleName": "非银行申请"},
+        {"moduleId": 10, "moduleName": "银行申请"}
+      ]
+    }
+  }
+}

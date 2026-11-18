@@ -1,49 +1,99 @@
-/* 邻里里设计 Token — 由 data-theme 切换明暗 */
+/* 邻里里设计 Token：奶白 / 黑色排版打底，糖果色仅用于分类与功能装饰。 */
 :root,
 [data-theme="light"] {
-  --color-primary: #ec6e33;
-  --color-primary-pressed: #d85f26;
+  --color-primary: #242326;
+  --color-primary-pressed: #121114;
   --color-on-primary: #ffffff;
-  --color-accent-mint: #7bc9a6;
-  --color-accent-sky: #6bb3e0;
-  --color-accent-cream: #f0d9a8;
-  --color-bg: #fff8f2;
-  --color-bg-accent: #ffe8d6;
+  /* 禁用 / 等待按钮固定为同一浅灰，不随明暗主题反转；深灰前景保持可读。 */
+  --color-disabled-bg: #e5e5e5;
+  --color-disabled-text: #666666;
+  --color-accent-pink: #f8d0ed;
+  --color-accent-lilac: #e4ccff;
+  --color-accent-sky: #d3defc;
+  --color-accent-cream: #ffe9b8;
+  /* 保留旧装饰调用名，实际映射为淡粉紫，避免登录等页面继续出现青绿色。 */
+  --color-accent-mint: #f5e7f4;
+  /* --color-bg 由 index.html 首屏主题样式提供，避免首次渲染及浏览器栏使用不同底色。 */
+  --color-bg-accent: #f6eff8;
   --color-surface: #ffffff;
-  --color-text: #1c1c1e;
-  --color-text-muted: #6c6c70;
-  --color-border: rgba(28, 28, 30, 0.08);
-  --color-danger: #e5484d;
+  --color-text: #242326;
+  --color-text-muted: #55515d;
+  --color-border: rgba(36, 35, 38, 0.1);
+  --color-danger: #ba3450;
+  --color-on-danger: #ffffff;
+  /* 分类底色加浓后同步调整辅助文字，保留糖果底上小字的对比度余量。 */
+  --color-category-help-bg: #f8d0ed;
+  --color-category-help-fg: #613a58;
+  /* soft 预混约 35% 原浅底与 65% 主底，减少大面积泛白并兼容无需 color-mix 的环境。 */
+  --color-category-help-soft: #fadcf2;
+  --color-category-idle-bg: #ffe9b8;
+  --color-category-idle-fg: #6b501e;
+  --color-category-idle-soft: #ffefca;
+  --color-category-lost-bg: #e4ccff;
+  --color-category-lost-fg: #593b7d;
+  --color-category-lost-soft: #ebd8ff;
+  --color-category-group-bg: #d3defc;
+  --color-category-group-fg: #3f507b;
+  --color-category-group-soft: #dfe7fd;
+  /* 功能卡按需添加细内高光和柔影，不改变通用卡片阴影或任何布局尺寸。 */
+  --color-material-highlight: rgba(255, 255, 255, 0.85);
+  /* 仅用于糖果正文上的标签与头像；照片徽标仍用不透明分类底确保读得清。 */
+  --color-candy-label-bg: rgba(255, 255, 255, 0.68);
+  --shadow-candy: 0 5px 14px rgba(100, 72, 98, 0.1);
   --radius-card: 20px;
   --radius-btn: 14px;
+  /* 首页、发现、消息共用顶部起点和操作行高，文字行与按钮都以同一水平中心对齐。 */
+  --page-heading-top: 20px;
+  --page-heading-height: 44px;
   --nav-height: 72px;
   /* 含 iOS Home 指示条：底栏总占位 / 页面底部留白 */
   --nav-height-safe: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px));
+  /* 原屏归一到 390px 后约留 32px 底距；iOS 使用更大的真实安全区，不重复叠加。 */
+  --nav-floating-bottom: max(32px, env(safe-area-inset-bottom, 0px));
+  --nav-floating-footprint: calc(var(--nav-height) + 8px + var(--nav-floating-bottom));
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-  /* 与 ThemeProvider syncBrowserChrome 一致，供底栏/Safari 采样 */
-  --chrome-color: #fff8f2;
+  /* 安全区直接跟随页面基础底色，不维护第二套主题色值。 */
+  --chrome-color: var(--color-bg);
   --font-display: "KaiXinTi", system-ui, sans-serif;
-  --shadow-card: 0 4px 16px rgba(236, 110, 51, 0.08);
+  --shadow-card: 0 4px 16px rgba(36, 35, 38, 0.06);
+  --motion-duration: 200ms;
   color-scheme: light;
 }
 
 [data-theme="dark"] {
-  --color-primary: #f08a52;
-  --color-primary-pressed: #ec6e33;
-  --color-on-primary: #1a1614;
-  --color-accent-mint: rgba(123, 201, 166, 0.35);
-  --color-accent-sky: rgba(107, 179, 224, 0.35);
-  --color-accent-cream: rgba(240, 217, 168, 0.28);
-  --color-bg: #1a1614;
-  --color-bg-accent: #2a211c;
-  --color-surface: #26201c;
-  --chrome-color: #1a1614;
-  --color-text: #f5f2ef;
-  --color-text-muted: #a89f97;
-  --color-border: rgba(245, 242, 239, 0.12);
-  --color-danger: #ff7369;
-  --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --color-primary: #faf5fc;
+  --color-primary-pressed: #dfd5e7;
+  --color-on-primary: #24202a;
+  --color-accent-pink: #55344d;
+  --color-accent-lilac: #4b355f;
+  --color-accent-sky: #344467;
+  --color-accent-cream: #52412c;
+  --color-accent-mint: #403046;
+  --color-bg-accent: #352c3c;
+  --color-surface: #2d2933;
+  --color-text: #faf5fc;
+  --color-text-muted: #d2c9d9;
+  --color-border: rgba(250, 245, 252, 0.13);
+  --color-danger: #ff8a9b;
+  --color-on-danger: #24202a;
+  --color-category-help-bg: #55344d;
+  --color-category-help-fg: #f3d3e8;
+  /* 深色材质只在边缘加亮；渐变起点更暗，避免正文落在亮斑上。 */
+  --color-category-help-soft: #492f45;
+  --color-category-idle-bg: #52412c;
+  --color-category-idle-fg: #f3dfb7;
+  --color-category-idle-soft: #46392a;
+  --color-category-lost-bg: #4b355f;
+  --color-category-lost-fg: #e9d5ff;
+  --color-category-lost-soft: #423052;
+  --color-category-group-bg: #344467;
+  --color-category-group-fg: #d1deff;
+  --color-category-group-soft: #2f3c58;
+  --color-material-highlight: rgba(255, 255, 255, 0.1);
+  --color-candy-label-bg: rgba(255, 255, 255, 0.1);
+  --shadow-candy: 0 5px 14px rgba(8, 5, 12, 0.24);
+  --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.28);
   color-scheme: dark;
 }
 
@@ -51,8 +101,4 @@
   :root {
     --motion-duration: 0.01ms;
   }
-}
-
-:root {
-  --motion-duration: 200ms;
 }

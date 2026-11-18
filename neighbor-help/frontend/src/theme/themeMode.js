@@ -13,7 +13,8 @@ export function getStoredMode() {
 
 /** @param {'light' | 'dark' | 'system'} mode */
 export function setStoredMode(mode) {
-  localStorage.setItem(THEME_KEY, mode)
+  // 隐私模式可能禁止持久化，但本次页面中的主题切换仍应正常生效。
+  try { localStorage.setItem(THEME_KEY, mode) } catch { /* 本次会话继续使用所选主题 */ }
 }
 
 /**

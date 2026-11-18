@@ -131,8 +131,9 @@ messages.post('/messages/thread', async (c) => {
     return fail(CODE.MESSAGE_BAD_TARGET, '会话对象无效')
   }
   const peerId = conv.user_a === userId ? conv.user_b : conv.user_a
+  // 会话成员可见对方昵称、头像与楼栋；房号属于对方资料，不因存在私信会话而公开。
   const peer = await c.env.DB.prepare(
-    'SELECT id, nickname, avatar, building, unit FROM users WHERE id = ?'
+    'SELECT id, nickname, avatar, building FROM users WHERE id = ?'
   ).bind(peerId).first()
   if (!peer) return fail(CODE.MESSAGE_BAD_TARGET, '会话对象不存在')
 
@@ -151,7 +152,7 @@ messages.post('/messages/thread', async (c) => {
   const list = rows.slice(0, limit).reverse()
 
   return success({
-    peer,
+    peer: { ...peer, unit: '' },
     conversationId: conv.id,
     postId: conv.post_id,
     postTitle: displayPostTitle(conv.post_title, postDeleted),

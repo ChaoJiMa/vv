@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api'
+import { captureSession, assertSessionCurrent, isSessionCurrent } from '../session'
 import { useAuth } from '../hooks/useAuth'
+import { useInfiniteScroll } from '../hooks/useInfiniteScroll'
 import { toast } from '../toast'
 import { coverAspectRatio, imageKeys } from '../utils/image'
 import { resolveAvatarUrl } from '../utils/avatar'
@@ -42,9 +44,15 @@ function coverWidthPx() {
 
 export default function PostDetail() {
   const { id } = useParams()
+  const { user } = useAuth()
+  // 公开详情页不会随账号切换离开；重建局部状态，避免旧账号输入/旧帖子回复目标串用。
+  return <PostDetailContent key={`${user?.id || 'guest'}:${id}`} id={id} user={user} />
+}
+
+/** 帖子详情及评论交互；实例按账号和帖子隔离，保留各自查询缓存。 */
+function PostDetailContent({ id, user }) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { user } = useAuth()
   const qc = useQueryClient()
   const [comment, setComment] = useState('')
   const [adoptOpen, setAdoptOpen] = useState(false)
@@ -65,13 +73,20 @@ export default function PostDetail() {
   const [deleteReplyId, setDeleteReplyId] = useState(null)
   const coverScrollRef = useRef(null)
   const commentInputRef = useRef(null)
+  // 内容或回复目标被重新编辑后，迟到的提交成功不能清空新的输入。
+  const commentRevision = useRef(0)
+  const active = useRef(false)
+  useEffect(() => {
+    active.current = true
+    return () => { active.current = false }
+  }, [])
 
-  const { data: post, isLoading, isError, isFetching, refetch } = useQuery({
-    queryKey: ['post', id],
+  const { data: post, isLoading, isError, error, isFetching, refetch } = useQuery({
+    queryKey: ['post', id, user?.id],
     queryFn: async () => {
       const data = await api.getPost(id)
-      // 详情已带首页评论：写入 comments 缓存，避免再打 /posts/comments?page=1
-      if (data?.comments) {
+      // 仅首次用详情附带的首页播种，刷新详情不能截断已加载的后续评论页。
+      if (data?.comments && !qc.getQueryData(['comments', id])?.pages?.length) {
         qc.setQueryData(['comments', id], {
           pages: [data.comments],
           pageParams: [1],
@@ -81,9 +96,13 @@ export default function PostDetail() {
     },
   })
   const isRefreshing = isFetching && !isLoading
+  // 临时刷新失败仍可读旧内容；服务端明确表示不存在/无权访问时必须撤下缓存详情。
+  const postUnavailable = isError && [401, 403, 404, 2001].includes(error?.code)
 
   const {
     data: commentData, fetchNextPage, hasNextPage, isFetchingNextPage, refetch: refetchComments,
+    isError: commentsError, isFetching: commentsFetching, isFetchNextPageError: commentsNextError,
+    isLoading: commentsLoading,
   } = useInfiniteQuery({
     queryKey: ['comments', id],
     queryFn: ({ pageParam }) => api.getComments(id, pageParam),
@@ -123,22 +142,29 @@ export default function PostDetail() {
 
   const refreshComments = () => {
     qc.invalidateQueries({ queryKey: ['comments', id] })
-    qc.invalidateQueries({ queryKey: ['post', id] })
+    qc.invalidateQueries({ queryKey: ['post', id, user?.id] })
     setReplyExpand({})
   }
 
   const commentMutation = useMutation({
-    mutationFn: (text) => (
-      replyTo
-        ? api.addCommentReply(replyTo.commentId, text)
+    mutationFn: ({ text, replyTarget, session }) => {
+      assertSessionCurrent(session)
+      return replyTarget
+        ? api.addCommentReply(replyTarget.commentId, text)
         : api.addComment(id, text)
-    ),
-    onSuccess: () => {
-      setComment('')
-      setReplyTo(null)
+    },
+    onSuccess: (_data, submission) => {
+      // 请求完成时页面/账号可能已切换，旧实例不能再刷新新实例或改写输入。
+      if (!active.current || !isSessionCurrent(submission.session)) return
+      if (commentRevision.current === submission.revision) {
+        setComment('')
+        setReplyTo(null)
+      }
       refreshComments()
     },
-    onError: (e) => toast.error(e.message || '发送失败'),
+    onError: (e, submission) => {
+      if (active.current && isSessionCurrent(submission.session)) toast.error(e.message || '发送失败')
+    },
   })
 
   const deleteReplyMutation = useMutation({
@@ -156,7 +182,7 @@ export default function PostDetail() {
       setAdoptOpen(false)
       setAuthorMenuOpen(false)
       toast.success('已完成')
-      qc.invalidateQueries({ queryKey: ['post', id] })
+      qc.invalidateQueries({ queryKey: ['post', id, user?.id] })
       qc.invalidateQueries({ queryKey: ['myPosts'] })
       qc.invalidateQueries({ queryKey: ['posts'] })
       qc.invalidateQueries({ queryKey: ['myStats'] })
@@ -169,7 +195,7 @@ export default function PostDetail() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['posts'] })
       qc.invalidateQueries({ queryKey: ['myPosts'] })
-      qc.removeQueries({ queryKey: ['post', id] })
+      qc.removeQueries({ queryKey: ['post', id, user?.id] })
       navigate('/')
     },
     onError: (e) => toast.error(e.message || '删除失败'),
@@ -201,7 +227,7 @@ export default function PostDetail() {
       }
     },
     onSuccess: (result) => {
-      qc.invalidateQueries({ queryKey: ['post', id] })
+      qc.invalidateQueries({ queryKey: ['post', id, user?.id] })
       if (result?.conversationId) {
         navigate(`/messages/${result.conversationId}`)
         return
@@ -232,28 +258,21 @@ export default function PostDetail() {
     },
   })
 
-  const sentinelRef = useRef(null)
-  const observe = useCallback((node) => {
-    if (!node) return
-    const io = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting && hasNextPage && !isFetchingNextPage) fetchNextPage()
-    }, { rootMargin: '200px' })
-    io.observe(node)
-    return io
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
-  useEffect(() => {
-    const io = observe(sentinelRef.current)
-    return () => io?.disconnect()
-  }, [observe])
+  const sentinelRef = useInfiniteScroll({
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+    enabled: !!post && !postUnavailable && comments.length > 0 && !commentsError && !commentsFetching,
+  })
 
   if (isLoading) {
     return <AppShell><div style={{ textAlign: 'center', padding: 64, color: 'var(--color-text-muted)' }}>加载中…</div></AppShell>
   }
-  if (isError || !post) {
+  if (!post || postUnavailable) {
     return (
       <AppShell>
         <div style={{ textAlign: 'center', padding: 64 }}>
-          <p style={{ color: 'var(--color-text-muted)', marginBottom: 16 }}>{isError ? '加载失败' : '帖子不存在'}</p>
+          <p style={{ color: 'var(--color-text-muted)', marginBottom: 16 }}>{postUnavailable ? '帖子不存在或无法访问' : isError ? '加载失败' : '帖子不存在'}</p>
           {isError ? <Button type="button" onClick={() => refetch()}>重试</Button> : <Button type="button" onClick={() => navigate('/')}>回首页</Button>}
         </div>
       </AppShell>
@@ -268,12 +287,13 @@ export default function PostDetail() {
   const nickname = (post.author?.nickname || post.nickname || '').trim() || '邻居'
   const avatarSrc = resolveAvatarUrl(post.author?.avatar ?? post.avatar)
   const building = post.author?.building ?? post.building
-  const unit = post.author?.unit ?? post.unit
   const liked = !!(post.viewer?.liked ?? post.myLiked ?? post.my_liked)
   const likeCount = Number(post.stats?.likeCount ?? post.like_count) || 0
   const responded = !!(post.viewer?.responded ?? post.myResponded)
   const isAuthor = !!(user && user.id === authorId)
-  const locLine = formatResidence(building, unit)
+  // 作者资料行仅显示楼栋；不从旧缓存或本人专用响应把房号带到公开作者区。
+  // 帖子 location 是用户填写的公开内容，继续在正文位置区保留原值。
+  const locLine = formatResidence(building, '')
   const initial = nickname === '邻居' ? '邻' : (nickname[0] || '邻')
 
   if (!adoptAuto && location.state?.openAdopt) {
@@ -309,7 +329,7 @@ export default function PostDetail() {
       const data = liked ? await api.unlikePost(id) : await api.likePost(id)
       const nextLiked = !!data.liked
       const nextCount = Number(data.likeCount ?? data.like_count) || 0
-      qc.setQueryData(['post', id], (old) => old ? {
+      qc.setQueryData(['post', id, user?.id], (old) => old ? {
         ...old,
         myLiked: nextLiked,
         my_liked: nextLiked,
@@ -331,7 +351,7 @@ export default function PostDetail() {
     }
     const text = comment.trim()
     if (!text || commentMutation.isPending) return
-    commentMutation.mutate(text)
+    commentMutation.mutate({ text, replyTarget: replyTo, revision: commentRevision.current, session: captureSession() })
   }
 
   const startReply = (c) => {
@@ -339,6 +359,7 @@ export default function PostDetail() {
       navigate('/login', { state: { from: location } })
       return
     }
+    commentRevision.current++
     setReplyTo({ commentId: c.id, nickname: c.nickname || '邻居' })
     commentInputRef.current?.focus()
   }
@@ -358,7 +379,8 @@ export default function PostDetail() {
     const nextPage = cur?.expanded ? (cur.page || 1) + 1 : 1
     setReplyExpand((prev) => ({
       ...prev,
-      [c.id]: { ...(prev[c.id] || {}), loading: true, expanded: true },
+      // expanded/page 只在成功后推进；首屏失败继续使用预览和原“更多”入口重试第 1 页。
+      [c.id]: { ...(prev[c.id] || {}), loading: true },
     }))
     try {
       const data = await api.getCommentReplies(c.id, nextPage)
@@ -463,6 +485,12 @@ export default function PostDetail() {
 
   return (
     <AppShell style={{ paddingBottom: 'calc(96px + var(--safe-bottom))' }}>
+      {isError && !postUnavailable && (
+        <div role="status" style={{ padding: 16, textAlign: 'center' }}>
+          <p style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>刷新失败，已保留当前帖子</p>
+          <Button variant="secondary" loading={isRefreshing} onClick={() => refetch()}>重试刷新帖子</Button>
+        </div>
+      )}
       <div style={{ position: 'relative' }}>
         <header style={overlayHeader}>
           <IconBtn
@@ -477,15 +505,9 @@ export default function PostDetail() {
             ariaLabel="刷新"
             disabled={isRefreshing}
             onClick={async () => {
-              const r = await refetch()
-              if (r.data?.comments) {
-                qc.setQueryData(['comments', id], {
-                  pages: [r.data.comments],
-                  pageParams: [1],
-                })
-              } else {
-                refetchComments()
-              }
+              await refetch()
+              // 手动刷新也沿用评论查询的完整分页，不能用详情首页覆盖历史页。
+              if (active.current) refetchComments()
             }}
             style={{ background: 'rgba(0,0,0,.35)', color: '#fff' }}
           >
@@ -561,8 +583,12 @@ export default function PostDetail() {
           ) : (
             <div
               style={{
-                height: coverH,
-                background: theme.cover,
+                // 无图正文使用轻量分类标记，不再用整幅装饰封面撑高首屏；安全区留给返回操作。
+                height: 'calc(144px + var(--safe-top))',
+                paddingTop: 'var(--safe-top)',
+                boxSizing: 'border-box',
+                background: 'transparent',
+                borderBottom: '1px solid var(--color-border)',
                 position: 'relative',
                 overflow: 'hidden',
                 display: 'flex',
@@ -570,15 +596,7 @@ export default function PostDetail() {
                 justifyContent: 'center',
               }}
             >
-              <span style={{
-                position: 'absolute', top: -30, right: -20, width: 140, height: 140,
-                borderRadius: '50%', background: 'rgba(255,255,255,.28)',
-              }} />
-              <span style={{
-                position: 'absolute', bottom: -40, left: 10, width: 110, height: 110,
-                borderRadius: '50%', background: 'rgba(255,255,255,.2)',
-              }} />
-              <MenuSticker type={post.type} size={72} style={{ position: 'relative', zIndex: 1 }} />
+              <MenuSticker type={post.type} size={36} style={{ position: 'relative', zIndex: 1, color: 'var(--color-text-muted)' }} />
             </div>
           )}
 
@@ -674,8 +692,8 @@ export default function PostDetail() {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 4, alignItems: 'center' }}>
             <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>感谢:</span>
             {post.helpers.map(h => (
-              <Sticker key={h.helperId || h.helper_id} active={false} color="mint" style={{ minHeight: 28, padding: '4px 10px', pointerEvents: 'none', fontSize: 12 }}>
-                {h.thanked ? '🙏 ' : ''}{h.nickname || '邻居'}
+              <Sticker key={h.helperId || h.helper_id} active={false} color="mint" style={{ minHeight: 28, padding: '4px 10px', pointerEvents: 'none', fontSize: 12, gap: 4 }}>
+                {h.thanked ? <HeartIcon size={13} /> : null}{h.nickname || '邻居'}
               </Sticker>
             ))}
           </div>
@@ -699,6 +717,13 @@ export default function PostDetail() {
         <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text)', marginBottom: 14 }}>
           回复 · {commentTotal}
         </div>
+        {commentsLoading && <p role="status" style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>评论加载中…</p>}
+        {commentsError && !commentsNextError && (
+          <div role="status" style={{ textAlign: 'center', padding: '8px 0 16px' }}>
+            <p style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>{comments.length ? '评论刷新失败，已保留当前回复' : '评论暂时无法加载'}</p>
+            <Button variant="secondary" loading={commentsFetching} onClick={() => refetchComments()}>重试刷新评论</Button>
+          </div>
+        )}
         {comments.map(c => {
           const pinned = !!(c.pinned || c.pinnedAt || c.pinned_at)
           const replies = visibleReplies(c)
@@ -771,16 +796,21 @@ export default function PostDetail() {
         })}
         {comments.length > 0 && (
           <div ref={sentinelRef} style={{ textAlign: 'center', padding: 8, color: 'var(--color-text-muted)', fontSize: 12 }}>
-            {isFetchingNextPage ? '加载中…' : ''}
+            {commentsNextError ? (
+              <div role="status">
+                <p>更多评论加载失败</p>
+                <Button variant="secondary" loading={isFetchingNextPage} disabled={commentsFetching && !isFetchingNextPage} onClick={() => fetchNextPage()}>重试加载评论</Button>
+              </div>
+            ) : isFetchingNextPage ? '加载中…' : ''}
           </div>
         )}
       </section>
 
-      <div style={composerBar}>
+      <div className="nh-page-chrome-bottom" style={composerBar}>
         {replyTo ? (
           <button
             type="button"
-            onClick={() => setReplyTo(null)}
+            onClick={() => { commentRevision.current++; setReplyTo(null) }}
             style={{
               ...linkBtn,
               flexShrink: 0,
@@ -798,9 +828,9 @@ export default function PostDetail() {
         <input
           ref={commentInputRef}
           value={comment}
-          onChange={e => setComment(e.target.value)}
+          onChange={e => { commentRevision.current++; setComment(e.target.value) }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
+            if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) {
               e.preventDefault()
               sendComment()
             }
@@ -813,7 +843,7 @@ export default function PostDetail() {
           disabled={!user}
           style={{
             flex: 1, minWidth: 0, minHeight: 40, borderRadius: 999, border: '1.5px solid var(--color-border)',
-            background: 'var(--color-bg)', color: 'var(--color-text)', padding: '0 14px', fontSize: 14, outline: 'none',
+            background: 'var(--color-surface)', color: 'var(--color-text)', padding: '0 14px', fontSize: 14, outline: 'none',
           }}
         />
         {user && comment.trim() ? (
@@ -976,12 +1006,13 @@ export default function PostDetail() {
 }
 
 function AdoptSheet({ open, onClose, postId, postType, onConfirm, submitting }) {
+  const { user } = useAuth()
   const multi = postType === 'help'
   const [picks, setPicks] = useState({})
   const [inited, setInited] = useState(false)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['helperCandidates', postId],
+    queryKey: ['helperCandidates', postId, user?.id],
     queryFn: () => api.getHelperCandidates(postId),
     enabled: open,
   })
@@ -1038,8 +1069,8 @@ function AdoptSheet({ open, onClose, postId, postType, onConfirm, submitting }) 
                 {p.building ? <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', fontSize: 12 }}> · {formatResidence(p.building, '')}</span> : null}
               </div>
               {adopted && (
-                <button type="button" onClick={() => toggleThank(p.id)} style={{ ...linkBtn, color: state === 'thank' ? 'var(--color-primary)' : 'var(--color-text-muted)' }}>
-                  {state === 'thank' ? '🙏 已感谢' : '🙏 感谢'}
+                <button type="button" onClick={() => toggleThank(p.id)} style={{ ...linkBtn, display: 'inline-flex', alignItems: 'center', gap: 4, color: state === 'thank' ? 'var(--color-primary)' : 'var(--color-text-muted)' }}>
+                  <HeartIcon size={14} />{state === 'thank' ? '已感谢' : '感谢'}
                 </button>
               )}
               <Button
@@ -1106,12 +1137,14 @@ const overlayHeader = {
   position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5,
   display: 'flex', alignItems: 'center', gap: 4,
   padding: 'calc(8px + var(--safe-top)) 10px 8px',
+  // 工具区随封面滚动，保持透明，不在这个非吸顶段重复绘制视口柔光。
 }
 const composerBar = {
   position: 'fixed', left: '50%', transform: 'translateX(-50%)', bottom: 0,
   width: '100%', maxWidth: 480, display: 'flex', gap: 6, alignItems: 'center',
   padding: '10px 12px calc(10px + var(--safe-bottom))',
-  background: 'var(--color-surface)', borderTop: '1px solid var(--color-border)',
+  // 评论条外框由全局 chrome-bottom 类衔接安全区，输入框与按钮局部颜色保持。
+  borderTop: '1px solid var(--color-border)',
   boxSizing: 'border-box', zIndex: 40,
 }
 const barPrimaryBtn = {

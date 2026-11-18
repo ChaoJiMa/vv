@@ -52,6 +52,10 @@ export default function Sheet({ open, onClose, title, children }) {
   }, [mounted])
 
   const onPointerDown = (e) => {
+    // 关闭等头部控件需要保留自己的点击目标；父级捕获指针会把鼠标 click 重定向到拖拽区。
+    // 使用 closest 同时覆盖图标等控件子元素，只有非交互标题或拖拽条才开始拖动。
+    const control = e.target.closest?.('button, a, input, select, textarea, [role="button"]')
+    if (control && e.currentTarget.contains(control)) return
     dragging.current = true
     setSuppressTransition(true)
     startY.current = e.clientY
@@ -101,6 +105,7 @@ export default function Sheet({ open, onClose, title, children }) {
     >
       <div
         role="dialog"
+        className="nh-page-chrome-bottom"
         aria-modal
         aria-label={title || '面板'}
         onClick={(e) => e.stopPropagation()}
@@ -110,7 +115,8 @@ export default function Sheet({ open, onClose, title, children }) {
           height: 'auto',
           maxHeight: '90dvh',
           borderRadius: '20px 20px 0 0',
-          background: 'var(--color-surface)',
+          // 实底由主题提供，柔光按视口底部对齐；输入框/卡片继续使用独立 surface。
+          backgroundColor: 'var(--color-bg)',
           color: 'var(--color-text)',
           boxShadow: '0 -6px 28px rgba(0,0,0,0.12)',
           borderTop: '1px solid var(--color-border)',
@@ -130,7 +136,8 @@ export default function Sheet({ open, onClose, title, children }) {
           onPointerCancel={endDrag}
           style={{ paddingTop: 10, paddingBottom: 8, cursor: 'grab', touchAction: 'none', flexShrink: 0 }}
         >
-          <div style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--color-border)', margin: '0 auto 12px' }} />
+          {/* 与主按钮同色，保证两种主题下都清晰可见。 */}
+          <div style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--color-primary)', margin: '0 auto 12px' }} />
           {title ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{title}</h2>
@@ -139,12 +146,12 @@ export default function Sheet({ open, onClose, title, children }) {
                 aria-label="关闭"
                 onClick={() => { setDragY(0); onClose?.() }}
                 style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 18,
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
                   border: 'none',
-                  background: 'var(--color-bg-accent)',
-                  color: 'var(--color-text-muted)',
+                  background: 'transparent',
+                  color: 'var(--color-primary)',
                   cursor: 'pointer',
                   fontSize: 18,
                   lineHeight: 1,

@@ -1,0 +1,21 @@
+/* 标题在原 flex 行内分配剩余宽度；装饰跟随文字，不定位到右侧按钮区域。 */
+.nh-page-title {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  /* 文字与卷线保持明确正间距，不改变标题起点或挤占右侧操作。 */
+  column-gap: 8px;
+  min-width: 0;
+  margin: 0;
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 400;
+  font-style: normal;
+  font-synthesis: none;
+  /* 与顶部操作同高，三页文字与按钮在不同字体加载状态下也共用水平中心。 */
+  line-height: var(--page-heading-height);
+  letter-spacing: 0.02em;
+}
+
+.nh-page-title-text { white-space: nowrap; }

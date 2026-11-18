@@ -8,7 +8,7 @@ import HomeTop from '../components/home/HomeTop'
 import {
   AppShell, Fab, PostCard, PostFeed, SectionHeader, Sheet,
 } from '../components/ui'
-import { HelpIcon } from '../components/icons'
+import { InfoIcon } from '../components/icons'
 import { EmptyPosts } from '../components/illustrations/EmptyArts'
 
 const NOTICES_FALLBACK = [
@@ -18,10 +18,10 @@ const NOTICES_FALLBACK = [
 ]
 
 const SAFETY_TIPS_FALLBACK = [
-  { icon: '🔒', text: '见面交易选在小区公共区域,结伴更安心' },
-  { icon: '💰', text: '大额交易当面验货,警惕预付定金类骗局' },
-  { icon: '📵', text: '不向陌生人透露验证码、银行卡等敏感信息' },
-  { icon: '🤝', text: '文明互助、理性沟通,共建友善邻里关系' },
+  { text: '见面交易选在小区公共区域,结伴更安心' },
+  { text: '大额交易当面验货,警惕预付定金类骗局' },
+  { text: '不向陌生人透露验证码、银行卡等敏感信息' },
+  { text: '文明互助、理性沟通,共建友善邻里关系' },
 ]
 
 export default function Home() {
@@ -48,8 +48,9 @@ export default function Home() {
 
   const {
     data, isLoading, isError, refetch, fetchNextPage, hasNextPage, isFetchingNextPage,
+    isFetchNextPageError, isRefetchError, isFetching,
   } = useInfiniteQuery({
-    queryKey: ['posts', '', ''],
+    queryKey: ['posts', '', '', user?.id],
     queryFn: ({ pageParam }) => api.getPosts('', pageParam, ''),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.page + 1 : undefined,
@@ -70,10 +71,9 @@ export default function Home() {
         total={total}
         noticeSummary={noticeSummary}
         onNoticeClick={() => setNoticeOpen(true)}
-        onLogin={() => navigate('/login')}
         menus={menus}
         hotByType={hotTodayByType}
-        onPickCategory={(value) => navigate('/discover', { state: { type: value } })}
+        onPickCategory={(value) => navigate(`/discover?${new URLSearchParams({ type: value })}`)}
       />
 
       <SectionHeader
@@ -94,11 +94,16 @@ export default function Home() {
         items={posts}
         isLoading={isLoading}
         isError={isError}
+        isFetchNextPageError={isFetchNextPageError}
+        isRefetchError={isRefetchError}
+        isFetching={isFetching}
         onRetry={() => refetch()}
         hasNextPage={hasNextPage}
         isFetchingNextPage={isFetchingNextPage}
         fetchNextPage={fetchNextPage}
         feedClassName="nh-home-feed"
+        cardVariant="candy"
+        cardMenus={menuMap}
         empty={{
           title: '还没有邻居动态',
           description: '发布第一个求助,让邻居帮你!',
@@ -106,11 +111,14 @@ export default function Home() {
           onAction: () => navigate('/create'),
           illustration: <EmptyPosts />,
         }}
-        renderItem={(post, { aspect }) => (
+        renderItem={(post, { aspect, colWidth, priority }) => (
           <PostCard
             post={post}
             menu={menuMap[post.type]}
             aspect={aspect}
+            colWidth={colWidth}
+            variant="candy"
+            priority={priority}
             onClick={() => navigate(`/note/${post.id}`)}
           />
         )}
@@ -134,7 +142,7 @@ export default function Home() {
         onClick={() => setHelpOpen(true)}
         style={{ background: 'var(--color-surface)', color: 'var(--color-primary)' }}
       >
-        <HelpIcon size={22} />
+        <InfoIcon size={22} />
       </Fab>
 
       <Sheet open={noticeOpen} onClose={() => setNoticeOpen(false)} title="小区公告" heightVh={42}>
@@ -161,7 +169,7 @@ export default function Home() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {safetyTips.map((t, i) => (
             <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-              <span style={{ fontSize: 18 }}>{t.icon}</span>
+              <InfoIcon size={18} style={{ marginTop: 2, color: 'var(--color-text-muted)' }} />
               <span style={{ fontSize: 13.5, color: 'var(--color-text-muted)', lineHeight: 1.5 }}>{t.text}</span>
             </div>
           ))}

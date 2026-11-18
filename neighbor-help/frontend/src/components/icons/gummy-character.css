@@ -1,0 +1,48 @@
+/* 四列三行图集由 SVG image 裁出单格；这里只放大外壳绘制，保留原占位与点击热区。 */
+.nh-gummy-character {
+  user-select: none;
+  pointer-events: none;
+  transform-origin: 50% 80%;
+  transform: scale(var(--gummy-scale, 1.4));
+  /* 两层静态白影沿角色透明边缘绘制细软轮廓，随既有缩放一起变化，不产生图片矩形外框。
+   * 仅作用在胶质角色外壳，内部 image 的配色矩阵、真实尺寸和指针热区保持不变。 */
+  filter: drop-shadow(0 0 0.7px rgba(255, 255, 255, 0.98)) drop-shadow(0 0 1.5px rgba(255, 255, 255, 0.5));
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 仅在按钮激活时压缩角色；松开后回弹，不增加持续动画或改变真实点击热区。 */
+.nh-category-option:active .nh-gummy-character,
+.nh-type-pick:active .nh-gummy-character {
+  transform: translateY(1px) scale(var(--gummy-scale, 1.4)) scale(1.08, 0.94);
+}
+
+/* 发布卡内右上方原本是留白：放大已知角色，28px 流内占位和全部文字位置保持原样。
+ * 只匹配胶质角色，未知分类回退的线标不会被放大或移出原图标位。 */
+.nh-type-pick .nh-gummy-character {
+  --gummy-scale: 1;
+  position: absolute;
+  top: -3px;
+  right: -2px;
+  width: 80px;
+  height: 80px;
+  z-index: 0;
+}
+
+@media (max-width: 360px) {
+  .nh-type-pick .nh-gummy-character {
+    width: 64px;
+    height: 64px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nh-gummy-character {
+    transition: none;
+  }
+
+  .nh-category-option:active .nh-gummy-character,
+  .nh-type-pick:active .nh-gummy-character {
+    /* 减少动态效果时仍保留静态放大，防止按下时突然恢复成小图。 */
+    transform: scale(var(--gummy-scale, 1.4));
+  }
+}

@@ -4,10 +4,10 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 登录页标题字体:开心就笑林雨就走体,已子集化(仅含标题用字),自托管 woff2 约 3.4KB */
+/* 开心就笑淋雨就走体：v2 并集保留原文案与版权信息，补全首页 / 发现 / 消息标题字形。 */
 @font-face {
   font-family: 'KaiXinTi';
-  src: url('/fonts/kaixin-subset.woff2') format('woff2');
+  src: url('/fonts/kaixin-display-v2.woff2') format('woff2');
   font-weight: 400;
   font-display: swap;
 }
@@ -29,27 +29,91 @@ body {
   min-height: 100%;
   min-height: 100svh;
   background: var(--color-bg);
+  /* 独立层叠上下文让负层级柔光位于 body 实底之上、所有业务内容之下。 */
+  isolation: isolate;
   color: var(--color-text);
   font-family: system-ui, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  transition: background-color 0.35s ease, color 0.35s ease;
-}
-
-/* 主题切换：整页淡入淡出（配合 startViewTransition） */
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 0.38s;
-  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  /* 浏览器栏无法跟随 CSS 动画，同步换色避免安全区与正文短暂出现两种底色。 */
 }
 
 #root {
+  background: transparent;
   width: 100%;
   max-width: 100%;
   margin: 0;
   min-height: 100svh;
   box-sizing: border-box;
+}
+
+/* 全站只绘制一次柔光，不随内容段重复平铺；固定层不占文档尺寸、不拦截点击。 */
+body::before {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  background-image: var(--page-glow);
+  background-size: 100% 100svh;
+  background-position: center top;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+
+/* 固定栏截取同一屏高画布的对应边缘；避免 iOS 对 background-attachment: fixed 的差异。 */
+.nh-page-chrome-top,
+.nh-page-chrome-bottom {
+  background-color: var(--color-bg);
+  background-image: var(--page-glow);
+  background-size: 100% 100svh;
+  background-repeat: no-repeat;
+}
+.nh-page-chrome-top { background-position: center top; }
+.nh-page-chrome-bottom { background-position: center bottom; }
+
+/* 注册头图与浏览器上方露底同色；固定画布及底部安全区跟随表单主题底色，离开时一起恢复。 */
+@media (max-width: 480px) {
+  html[data-page-chrome="registration"],
+  html[data-page-chrome="registration"] body {
+    background-color: var(--registration-hero-start);
+  }
+}
+html[data-page-chrome="registration"] body::before {
+  background-color: var(--registration-form-bg);
+  background-image: none;
+}
+.nh-page-safe-top { display: none; }
+html[data-page-chrome="registration"] .nh-page-safe-top {
+  display: block;
+  background-color: var(--registration-hero-start);
+}
+html[data-page-chrome="registration"] .nh-page-chrome-bottom {
+  background-color: var(--registration-form-bg);
+  background-image: none;
+}
+
+/* 原生、fieldset 继承禁用及 MUI 按钮共用固定等待色。
+ * 这里有意覆盖页面/内联主色与透明度，避免同一 #e5e5e5 在不同主题里被混成不同颜色。
+ * 仅改变视觉；实际禁用与防重复提交仍由各按钮原有逻辑负责。 */
+:where(button, [role="button"]):is(:disabled, [aria-disabled="true"], [aria-busy="true"]) {
+  background: var(--color-disabled-bg) !important;
+  color: var(--color-disabled-text) !important;
+  border-color: var(--color-disabled-bg) !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+  transition: none !important;
+}
+
+/* MUI 加载器有自己的颜色规则，禁用按钮中继承固定深灰，避免白圈落在浅灰底上。 */
+:where(button, [role="button"]):is(:disabled, [aria-disabled="true"], [aria-busy="true"]) .MuiCircularProgress-root {
+  color: inherit !important;
 }
 
 .nh-spin {
@@ -59,7 +123,7 @@ body {
   to { transform: rotate(360deg); }
 }
 
-/* 列表骨架：暖色低对比，贴页面底，避免灰色块抢眼 */
+/* 列表骨架：中性色低对比，贴页面底，不与分类糖果色竞争注意力。 */
 .nh-skeleton {
   background: color-mix(in srgb, var(--color-primary) 8%, var(--color-bg));
   opacity: 0.42;
@@ -71,13 +135,6 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  body {
-    transition: none !important;
-  }
-  ::view-transition-old(root),
-  ::view-transition-new(root) {
-    animation: none !important;
-  }
   .nh-skeleton {
     animation: none;
     opacity: 0.36;
