@@ -12,6 +12,9 @@
 # 实际输出：待填写。
 # Python 与 JavaScript 的写法差异：待填写。
 # 卡点：待填写；没有可写“无”。
+# 小结（助手整理）
+# 实际输出依次为「整理笔记」「20」「False」。Python 可以直接用 `=` 给变量赋值，
+# 用 `False` 表示假，用 `print()` 输出。JS 示例对应的是 `let`/`const`、`false`、`console.log()`。
 #
 # 原始 JavaScript 示例：
 # let task_name = "整理笔记"

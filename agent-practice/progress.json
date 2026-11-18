@@ -2,7 +2,7 @@
   "project": "agent-practice",
   "intended_local_path": "D:\\vv\\agent-practice",
   "total_learning_days": 56,
-  "current_day": 4,
+  "current_day": 6,
   "verified_days": [],
   "schema_version": 2,
   "learner_profile": {
@@ -19,7 +19,7 @@
     "fixed_calendar": false,
     "current_plan": "docs/current-plan.md",
     "review_history": "docs/reviews.md",
-    "next_action": "最新看板源码 A–H 均通过。补同文件作答记录，说明一次排错过程和合计的数据来源。函数职责与命名可以选做优化。",
+    "next_action": "D6 的 A–C 与新分类变式已通过。下一次用自己的话解释当前写法如何统计两条同类待办，以及一次遍历的写法如何累加。",
     "last_reviewed_at": "2026-11-18"
   },
   "skills": {
@@ -600,6 +600,182 @@
         }
       ],
       "decision": "确认功能通过，清除重复输出卡点，D4 待验收。作答解释待补，重构作为可选练习，未据此认定独立通过。"
+    },
+    {
+      "id": "2026-11-18-14",
+      "date": "2026-11-18",
+      "learning_day": 5,
+      "source": "用户提交 mark_done 初版，询问如何处理编号 999",
+      "submitted_questions": ["task_update（查找与返回位置）"],
+      "actual_minutes": null,
+      "help_level": "未知",
+      "checks": [
+        {
+          "method": "python -B - 载入用户源码，直接调用 mark_done，检查 A–E 的函数返回值、输出和数据差异",
+          "result": "A/E 找到正确任务并更新 done，但还新增 state，打印字典后仍返回占位语。B 额外修改了 state。C/D 不修改任务数据，但仍返回占位语。放在 continue 后的 return 无法执行。练习文件字节一致。"
+        }
+      ],
+      "decision": "D5 进入学习中。无匹配的返回放在整个循环之后，成功或已完成的返回放在找到任务的分支里。任务状态文字作为返回值，字典只更新 done。"
+    },
+    {
+      "id": "2026-11-18-15",
+      "date": "2026-11-18",
+      "learning_day": 5,
+      "source": "用户将未找到提示移至循环后，请求检查完成情况",
+      "submitted_questions": ["task_update（未找到分支复查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 载入原稿并直接调用 A–E，比较返回文字、打印和数据变化",
+          "result": "C/D 返回未找到及目标编号，数据未变。A/B/E 找到任务后打印字典并继续执行，仍返回未找到。A/E 额外新增 state，B 新增 state 违反已完成数据保持原值的要求。练习源码字节一致。"
+        }
+      ],
+      "decision": "C/D 功能通过，清除未找到分支原卡点。匹配分支应返回提示，成功时仅写 done。D5 继续学习中。"
+    },
+    {
+      "id": "2026-11-18-16",
+      "date": "2026-11-18",
+      "learning_day": 5,
+      "source": "用户在匹配分支增加 return task 后请求复查",
+      "submitted_questions": ["task_update（匹配分支返回值复查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 载入原稿，直接调用 A–E，比较返回类型和字段变化",
+          "result": "C/D 通过。A/B/E 已在循环内提前返回，返回值为任务字典，外层会打印整个字典。A/E 的 done 更新正确，但新增 state，B 仍新增 state。练习源码字节一致。"
+        }
+      ],
+      "decision": "匹配分支提前返回通过。保留函数拆分，把布尔更新放到 setdone，提示由它直接返回，mark_done 传递返回值。D5 继续学习中。"
+    },
+    {
+      "id": "2026-11-18-17",
+      "date": "2026-11-18",
+      "learning_day": 5,
+      "source": "用户将匹配分支改为返回 f-string 后请求检查",
+      "submitted_questions": ["task_update（提示和数据变化复查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 载入源码并直接调用 A–E，核对提示类型和值与修改后的完整列表",
+          "result": "A–E 均返回符合预期的提示字符串。C/D 的数据符合预期。A/E 除了正确更新 done 还新增 state，B 在已完成时仍新增 state。源码字节一致。"
+        }
+      ],
+      "decision": "提示文字通过，剩下 state 的数据变更。用已完成编号 205 演示差异，先让 setdone 直接返回提示，复测 A/B/E。"
+    },
+    {
+      "id": "2026-11-18-18",
+      "date": "2026-11-18",
+      "learning_day": 5,
+      "source": "用户改用 getdesc 返回提示后请求复查",
+      "submitted_questions": ["task_update（功能复验）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 载入当前源码，检查 A–E、重复更新和终端入口",
+          "result": "A–E 均通过，101/309 只改变目标的 done，205/999 和空列表的最终数据符合预期。对同一列表连续处理 101，两次分别返回已标记和已完成，第二次数据值一致。终端入口可显示 205 的提示。练习源码字节一致。"
+        }
+      ],
+      "decision": "功能通过，D5 进入待验收。作答记录仍待填写，已完成分支重复赋 True 属可选清理。"
+    },
+    {
+      "id": "2026-11-18-19",
+      "date": "2026-11-18",
+      "learning_day": 5,
+      "source": "用户移除已完成时的重复赋值后请求复查",
+      "submitted_questions": ["task_update（赋值位置复查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 从最新源码复跑 A–E，用记录写入次数的字典连续完成同一任务两次",
+          "result": "A–E 的提示和完整列表均符合预期。两次完成仅写入一次 done=True，已完成分支直接返回提示。练习源码验证前后字节一致。"
+        }
+      ],
+      "decision": "功能继续通过，重复赋值已清理。D5 待填写作答记录。"
+    },
+    {
+      "id": "2026-11-18-20",
+      "date": "2026-11-18",
+      "learning_day": 6,
+      "source": "用户请求检查分类统计初稿和 set 去重后的计数方式",
+      "submitted_questions": ["category_summary（分类计数初稿）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 载入原稿并调用默认数据、空列表，另用原数据验证列表计数思路",
+          "result": "默认数据执行到 categories['count'] 时抛出 TypeError，空列表返回 None。独立检查确认保留重复分类的列表可以用 count 得到学习 2、工作 1、未分类 1。未修改用户代码，计数提示不计为用户实现。"
+        }
+      ],
+      "decision": "D6 进入学习中。保留用户的两步做法，先从分类名列表核对待办条数，再补分钟总和与返回值。"
+    },
+    {
+      "id": "2026-11-18-21",
+      "date": "2026-11-18",
+      "learning_day": 6,
+      "source": "用户更新计数循环后询问为何多打印 None",
+      "submitted_questions": ["category_summary（计数与返回值复查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 以内存执行原稿的主程序并逐行核对输出",
+          "result": "初次检查打印学习 2、工作 1、未分类 1，末尾由主程序打印 None。中途版本因 if category 和 continue 只打印 None。最新复跑恢复正确计数，末尾仍打印 None。运行未写回用户源码。"
+        }
+      ],
+      "decision": "默认数据计数通过。让函数构建并返回汇总字典，随后补分钟数和边界验收。"
+    },
+    {
+      "id": "2026-11-18-22",
+      "date": "2026-11-18",
+      "learning_day": 6,
+      "source": "用户拆分分类、计数和时间函数后询问如何计算同类时间",
+      "submitted_questions": ["category_summary（时间汇总初稿）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 执行原稿并在内存独立检验单类分钟数",
+          "result": "原稿输出三类正确条数，并打印六个任务字典。单类函数的内存示例得到学习 45、工作 40、未分类 10；给工作增加带空格的 15 分钟待办得到 55，空列表得到 0。示例未写入作答。"
+        }
+      ],
+      "decision": "沿用函数拆分，增加目标分类参数，在原始列表里筛选并累加分钟数。用户自行将两项统计合入返回字典。"
+    },
+    {
+      "id": "2026-11-18-23",
+      "date": "2026-11-18",
+      "learning_day": 6,
+      "source": "用户完成分类计数和时间汇总后询问如何组合结果",
+      "submitted_questions": ["category_summary（汇总结构复查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 执行原稿，捕获 A–C 输出并核对返回值和输入数据",
+          "result": "A/B 的三类计数和分钟数打印正确，C 的空列表与全完成列表均无打印。所有用例返回 None，原输入数据与源码未修改。"
+        }
+      ],
+      "decision": "计数与分钟数实测通过。将每类计算结果存入嵌套字典，循环后返回，等待复查返回契约。"
+    },
+    {
+      "id": "2026-11-18-24",
+      "date": "2026-11-18",
+      "learning_day": 6,
+      "source": "用户返回汇总字典后询问现有写法和一次遍历的写法哪种更好",
+      "submitted_questions": ["category_summary（功能复验与方案对比）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 载入用户实现和内存中的一次遍历示例，核对六组调用和终端入口",
+          "result": "两种写法在 A–C、新增分类与空白分类、再次调用时结果均符合预期。原实现保留输入数据，终端只打印一次。"
+        }
+      ],
+      "decision": "D6 功能通过，进入待验收。保留已通过的用户实现并记录小结，独立解释留待复查。"
     }
   ],
   "days": {
@@ -629,7 +805,23 @@
       "project_verified": false,
       "actual_minutes": null,
       "blockers": [],
-      "feedback": "2026-11-18-13：实际源码 A–H 功能通过，重复输出已解决。待补作答解释，命名和拆分筛选展示为可选优化。"
+      "feedback": "2026-11-18-13：实际源码 A–H 功能通过。小结已由助手整理，独立解释待复查。"
+    },
+    "day05": {
+      "status": "待验收",
+      "completed_questions": [],
+      "project_verified": false,
+      "actual_minutes": null,
+      "blockers": [],
+      "feedback": "2026-11-18-19：A–E 复测通过，连续两次完成同一任务只写入一次 done。小结已由助手整理，独立解释待复查。"
+    },
+    "day06": {
+      "status": "待验收",
+      "completed_questions": [],
+      "project_verified": false,
+      "actual_minutes": null,
+      "blockers": [],
+      "feedback": "2026-11-18-24：A–C 及新增和空白分类复查通过。小结由助手整理，独立解释待复查。"
     }
   }
 }

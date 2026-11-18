@@ -17,6 +17,9 @@
 # 实际类型输出（按变量顺序填写）：str int float bool。
 # 简短复测：先判断 40、"40"、40.0 的类型，再运行核对：int str float。
 #
+# 小结（助手整理）
+# 用 `type()` 核对实际类型。`40`、`"40"` 和 `40.0` 分别是 `int`、`str` 和 `float`。
+# Python 的布尔类型叫 `bool`，字面值写作 `True` 或 `False`。
 # 下方为起始代码和你的代码区：
 title = "整理笔记"
 duration = 45

@@ -10,46 +10,49 @@
 2. [学习流程](docs/study-workflow.md)：每次怎样学习、作答、求助、批改以及按实际表现调整下一步。
 3. [当前计划](docs/current-plan.md)：打开本项目后实际要做的下一题和验收条件。
 
-整套课程已经规划好；具体 `.py` 练习会按当前掌握情况逐题展开。课程写到 D56 不代表已学完或已生成 56 份代码题。当前做[多任务看板](exercises/day04/task_board.py)，组合列表、字典和循环，复查状态判断。
+完整课程包含 56 个主题，具体练习随学习进度展开。当前练习是[按分类统计剩余任务](exercises/day06/category_summary.py)。
 
 ## 从当前任务开始
 
-当前多任务看板不需要安装第三方依赖。需要电脑上已有 Python 3.10 或更高版本。
+当前练习使用 Python 标准库。项目建议使用 Python 3.10 或更高版本。
 
 在 PowerShell 中进入项目：
 
 ```powershell
 Set-Location D:\vv\agent-practice
 py -3 --version
-py -3 -B exercises\day04\task_board.py
+py -3 -B exercises\day06\category_summary.py
 ```
 
 如果电脑没有 `py` 命令，但有 `python` 命令，可以使用：
 
 ```powershell
 python --version
-python -B exercises\day04\task_board.py
+python -B exercises\day06\category_summary.py
 ```
 
 直接打开对应的 `.py` 文件：顶部中文注释包含本题要求、目标输出和验收条件，下方就是代码区。
 预测输出、类型判断、解释和运行结果统一填写在同一文件的“作答记录”注释中，每题都有具体待填写项；代码写在下方代码区。
-这次先做all模式的遍历、状态与时间差，再加筛选、统计和空结果处理；做完一段就可以请求检查。完整要求及验收均在 `exercises/day04/task_board.py`，不需要另找答题文件。
+在 `summarize_pending()` 中按类别合计待办条数和预计分钟数，再核对缺少分类、空列表和全部已完成的情况。
 
-`exercises/day01/task_info.py` 中的第 1–5 项已有运行证据，第 6–7 项对应能力在多任务看板中复查。看板的 A–H 用例已通过，下一步是补写作答记录。
+`exercises/day01/task_info.py` 中的第 1–5 项已有运行证据，第 6–7 项对应能力在多任务看板中复查。看板的 A–H 用例已通过，小结见同文件的作答记录。
 
 ## 项目内容
 
 | 位置 | 用途 |
 | --- | --- |
 | `exercises/day01/` | D1 讲义、8 道练习及同文件作答、项目任务 |
-| `exercises/day04/task_board.py` | 当前综合题：列表、字典、循环、状态、筛选与统计，同文件作答 |
+| `exercises/day04/task_board.py` | 多任务看板：状态、筛选与统计 |
+| `exercises/day05/task_update.py` | 按编号标记完成 |
+| `exercises/day05/task_reopen.py` | 可选复习：按编号撤销完成状态 |
+| `exercises/day06/category_summary.py` | 当前练习：按分类统计剩余任务 |
 | `docs/course.md` | D1–D56 完整课程：每课知识、任务、验收、阶段成果 |
 | `docs/study-workflow.md` | 每次学习、提交、反馈和动态调整的执行流程 |
 | `docs/roadmap.md` | 求职导向的 8 阶段、56 个参考主题与调整原则 |
 | `docs/feedback.md` | 每次反馈后的验收、进度记录与调整规则 |
 | `docs/current-plan.md` | 当前要做什么、如何验收，以及下一步条件 |
 | `docs/reviews.md` | 学习反馈与计划调整历史 |
-| `progress.json` | 能力、实际进度和学习反馈记录；当前主题4，D1整体仍未验收 |
+| `progress.json` | 能力、实际进度和学习反馈记录 |
 | `project/README.md` | 后续任务助手的阶段成果约定 |
 
 ## 后续约定
