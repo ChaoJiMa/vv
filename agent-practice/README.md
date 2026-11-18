@@ -10,7 +10,7 @@
 2. [学习流程](docs/study-workflow.md)：每次怎样学习、作答、求助、批改以及按实际表现调整下一步。
 3. [当前计划](docs/current-plan.md)：打开本项目后实际要做的下一题和验收条件。
 
-完整课程包含 56 个主题，具体练习随学习进度展开。当前练习是[按分类统计剩余任务](exercises/day06/category_summary.py)。
+完整课程包含 56 个主题，具体练习随学习进度展开。当前练习是[批量执行任务指令](exercises/day07/task_commands.py)。
 
 ## 从当前任务开始
 
@@ -21,19 +21,19 @@
 ```powershell
 Set-Location D:\vv\agent-practice
 py -3 --version
-py -3 -B exercises\day06\category_summary.py
+py -3 -B -m exercises.day07.task_commands
 ```
 
 如果电脑没有 `py` 命令，但有 `python` 命令，可以使用：
 
 ```powershell
 python --version
-python -B exercises\day06\category_summary.py
+python -B -m exercises.day07.task_commands
 ```
 
 直接打开对应的 `.py` 文件：顶部中文注释包含本题要求、目标输出和验收条件，下方就是代码区。
 预测输出、类型判断、解释和运行结果统一填写在同一文件的“作答记录”注释中，每题都有具体待填写项；代码写在下方代码区。
-在 `summarize_pending()` 中按类别合计待办条数和预计分钟数，再核对缺少分类、空列表和全部已完成的情况。
+先在 `execute_command()` 里处理单条指令，再用 `execute_batch()` 在同一份任务列表上按顺序执行，核对每条指令的结果。
 
 `exercises/day01/task_info.py` 中的第 1–5 项已有运行证据，第 6–7 项对应能力在多任务看板中复查。看板的 A–H 用例已通过，小结见同文件的作答记录。
 
@@ -45,7 +45,8 @@ python -B exercises\day06\category_summary.py
 | `exercises/day04/task_board.py` | 多任务看板：状态、筛选与统计 |
 | `exercises/day05/task_update.py` | 按编号标记完成 |
 | `exercises/day05/task_reopen.py` | 可选复习：按编号撤销完成状态 |
-| `exercises/day06/category_summary.py` | 当前练习：按分类统计剩余任务 |
+| `exercises/day06/category_summary.py` | 按分类统计剩余任务 |
+| `exercises/day07/task_commands.py` | 当前练习：批量执行任务指令 |
 | `docs/course.md` | D1–D56 完整课程：每课知识、任务、验收、阶段成果 |
 | `docs/study-workflow.md` | 每次学习、提交、反馈和动态调整的执行流程 |
 | `docs/roadmap.md` | 求职导向的 8 阶段、56 个参考主题与调整原则 |

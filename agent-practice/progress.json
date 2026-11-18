@@ -2,7 +2,7 @@
   "project": "agent-practice",
   "intended_local_path": "D:\\vv\\agent-practice",
   "total_learning_days": 56,
-  "current_day": 6,
+  "current_day": 7,
   "verified_days": [],
   "schema_version": 2,
   "learner_profile": {
@@ -19,7 +19,7 @@
     "fixed_calendar": false,
     "current_plan": "docs/current-plan.md",
     "review_history": "docs/reviews.md",
-    "next_action": "D6 的 A–C 与新分类变式已通过。下一次用自己的话解释当前写法如何统计两条同类待办，以及一次遍历的写法如何累加。",
+    "next_action": "D7 的 A–C 功能通过，编号校验及缺失动作由助手协助修复。结合下一题复查独立实现与解释，进入模块组织和 JSON 持久化。",
     "last_reviewed_at": "2026-11-18"
   },
   "skills": {
@@ -776,6 +776,150 @@
         }
       ],
       "decision": "D6 功能通过，进入待验收。保留已通过的用户实现并记录小结，独立解释留待复查。"
+    },
+    {
+      "id": "2026-11-18-25",
+      "date": "2026-11-18",
+      "learning_day": 7,
+      "source": "用户提交批量指令初稿，请求核对代码思路",
+      "submitted_questions": ["task_commands（分派和批量循环初稿）"],
+      "actual_minutes": null,
+      "help_level": "未知",
+      "checks": [
+        {
+          "method": "python -B - 导入原稿、直接调用并用替代函数记录批量调用",
+          "result": "默认批次按原顺序调用七次并传入同一任务列表，返回空列表。三个受支持分支直接返回 None，archive 返回 not_implemented，缺少 action 时抛出 KeyError。验证未写回源码。"
+        }
+      ],
+      "decision": "分派和顺序调用的结构正确，D7 进入学习中。先完成 summary 的返回值和批量收集，再补未知指令及修改任务的操作。"
+    },
+    {
+      "id": "2026-11-18-26",
+      "date": "2026-11-18",
+      "learning_day": 7,
+      "source": "用户实现首条汇总和批量结果收集，请求检查首条指令",
+      "submitted_questions": ["task_commands（首条汇总复查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 导入原稿并调用单条汇总和单条批次",
+          "result": "学习 1 条、25 分钟正确，空任务、空批次及空白分类变式符合预期，原任务未改变。成功结果缺 code 字段，汇总使用了新增的本地函数，尚未复用导入的 D6 汇总。"
+        }
+      ],
+      "decision": "首条统计和结果收集正确，待补返回契约与复用要求，D7 继续学习中。"
+    },
+    {
+      "id": "2026-11-18-27",
+      "date": "2026-11-18",
+      "learning_day": 7,
+      "source": "用户补齐 code 并复用 D6 后请求复测",
+      "submitted_questions": ["task_commands（首条汇总通过）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 直接调用单条汇总与批量函数，核对完整返回值、空列表和任务变式",
+          "result": "首条返回完整三字段，批量正确收集。空任务和空批次通过，空白分类归为未分类。改变任务状态后重新汇总，前一次结果保持原值。使用 D6 汇总，未写回用户代码。"
+        }
+      ],
+      "decision": "首条 summary 功能通过。先实现新增与重复编号，再完成其他分支和整批验收。"
+    },
+    {
+      "id": "2026-11-18-28",
+      "date": "2026-11-18",
+      "learning_day": 7,
+      "source": "用户实现 add 初稿，请求检查新增",
+      "submitted_questions": ["task_commands（新增初稿）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 直接调用原稿的 add 分支，核对返回字段和任务列表",
+          "result": "默认 309 新增成功且重复编号保留原任务，标题和分类仍带空格，成功与失败的 data 均非 None。空列表和全完成列表返回 None，缺分类或编号抛出 KeyError，空白标题、零分钟和布尔编号被接受，分类为数字时写入后抛出 AttributeError。未写回源码。"
+        }
+      ],
+      "decision": "查重条件方向正确。移除外层循环，将校验和字段清理放在修改之前，补齐 data 约定和边界复测。"
+    },
+    {
+      "id": "2026-11-18-29",
+      "date": "2026-11-18",
+      "learning_day": 7,
+      "source": "用户移除新增外层循环后询问如何接入校验",
+      "submitted_questions": ["task_commands（新增边界复查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 直接调用原稿，核对各列表状态下的新增、重复编号及缺失字段",
+          "result": "默认列表、空列表与全完成列表均可新增，重复编号保护原数据，两个结果的 data 均为 None。空白标题仍可写入，缺 id 或 category 时抛出 KeyError，输入清理未实现。"
+        }
+      ],
+      "decision": "新增流程和返回契约已有证据，先补校验及字段清理，再复测完整新增分支。"
+    },
+    {
+      "id": "2026-11-18-30",
+      "date": "2026-11-18",
+      "learning_day": 7,
+      "source": "用户接入新增校验后请求复查",
+      "submitted_questions": ["task_commands（新增功能复验）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 运行原稿的 25 组新增检查",
+          "result": "正常新增、空列表、全完成列表、重复编号、字段清理、缺省分类及无效参数全部通过。无效参数和重复编号均保持任务数据原样，正常新增使用清理后的字段。未写回用户代码。"
+        }
+      ],
+      "decision": "add 功能通过。进入 complete，实现找到、已完成及未找到分支，再复查完整批次。"
+    },
+    {
+      "id": "2026-11-18-31",
+      "date": "2026-11-18",
+      "learning_day": 7,
+      "source": "用户完成标记逻辑后请求整题复查",
+      "submitted_questions": ["task_commands（完整批次及边界）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 执行默认批次 A 和 B/C 边界，检查返回契约和任务数据",
+          "result": "A 的首尾汇总分别为 25 与 20 分钟，状态正确，第六条错误码仍为 not_implemented。B 缺 id 返回 not_found，重复完成和已完成返回 None。浮点 101.0 会修改整数编号 101 的任务。C 通过。缺 action 抛出 KeyError，中断后续指令。"
+        }
+      ],
+      "decision": "完整批次尚未验收。先校验编号，移动成功返回位置，统一未知与缺失指令错误，再复跑。"
+    },
+    {
+      "id": "2026-11-18-32",
+      "date": "2026-11-18",
+      "learning_day": 7,
+      "source": "用户补已完成成功返回后请求复查",
+      "submitted_questions": ["task_commands（重复完成复查）"],
+      "actual_minutes": null,
+      "help_level": "提示",
+      "checks": [
+        {
+          "method": "python -B - 重跑默认批次及边界，核对重复完成、缺失编号与缺失指令",
+          "result": "101 与 205 连续完成均返回成功，第二次数据一致。默认首尾汇总及 C 继续通过。缺 id 仍是 not_found，浮点 101.0 仍会修改任务，archive 仍是 not_implemented，缺 action 仍中断批次。"
+        }
+      ],
+      "decision": "重复完成已通过。其余必要改动为编号校验和未知或缺失 action 的安全返回。"
+    },
+    {
+      "id": "2026-11-18-33",
+      "date": "2026-11-18",
+      "learning_day": 7,
+      "source": "用户要求助手直接修复剩余边界并加备注",
+      "submitted_questions": ["task_commands（助手修复后的功能复验）"],
+      "actual_minutes": null,
+      "help_level": "完整答案",
+      "checks": [
+        {
+          "method": "python -B - 复测 A–C、模块启动、编号校验、重复写入及混合批次",
+          "result": "默认七条结果与前后汇总正确。无效编号返回 invalid_args 且任务不变，未知或缺失动作返回 unknown_action，后续指令正常执行。同一任务完成两次只在首次需要时写入。"
+        }
+      ],
+      "decision": "D7 功能通过，进入待验收。修复及小结由助手完成，独立解释和变式在后续任务复查。"
     }
   ],
   "days": {
@@ -822,6 +966,14 @@
       "actual_minutes": null,
       "blockers": [],
       "feedback": "2026-11-18-24：A–C 及新增和空白分类复查通过。小结由助手整理，独立解释待复查。"
+    },
+    "day07": {
+      "status": "待验收",
+      "completed_questions": [],
+      "project_verified": false,
+      "actual_minutes": null,
+      "blockers": [],
+      "feedback": "2026-11-18-33：A–C 和额外边界复测通过，剩余边界由助手修复，独立解释与变式待复查。"
     }
   }
 }

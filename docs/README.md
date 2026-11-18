@@ -40,7 +40,7 @@
 - [每次学习与动态调整流程](../agent-practice/docs/study-workflow.md)
 - [求职导向学习路线](../agent-practice/docs/roadmap.md)
 - [当前学习计划](../agent-practice/docs/current-plan.md)
-- [当前练习：按分类统计剩余任务](../agent-practice/exercises/day06/category_summary.py)
+- [当前练习：批量执行任务指令](../agent-practice/exercises/day07/task_commands.py)
 - [多任务看板练习](../agent-practice/exercises/day04/task_board.py)
 - [反馈、验收与调整规则](../agent-practice/docs/feedback.md)
 - [动态学习路线开发记录](development/agent-practice/2026-11-10-adaptive-learning.md)
