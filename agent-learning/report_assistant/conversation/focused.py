@@ -78,14 +78,14 @@ class FocusedReportRun:
                 'sources': list(dict.fromkeys(ref for section in repaired[start:start + size]
                                               for ref in section['sources'])),
             } for start in range(0, len(repaired), size)]
-        return self.strategy._render(encode({'sections': repaired}), self.facts)
+        return self.strategy._render(encode({'sections': repaired}), self.facts, question=self.question)
 
 
     def finish(self, content):
         """先校验原始结论，再纠正确定目标的漏答/假缺失；不豁免危险或无效输出。"""
         self.complete_targets()
         try:
-            answer = self.strategy._render(content, self.facts)
+            answer = self.strategy._render(content, self.facts, question=self.question)
         except PrivacyError:
             if not self.strategy._can_rebuild_phone_results(self.targets, self.facts):
                 raise

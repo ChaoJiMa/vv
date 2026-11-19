@@ -38,7 +38,12 @@ class Conversation:
             raise ValueError("未知问答策略。")
         # 默认参数保留旧Python调用契约；终端入口显式使用analysis，新策略可被独立回归。
         self.strategy = strategy
-        self.analysis = AnalysisStrategy(tools, allow_personal=allow_personal) if strategy == "analysis" else None
+        module_recorder = getattr(history, "append_module_diagnostic", None)
+        self.module_recorder = module_recorder if callable(module_recorder) else None
+        self.analysis = (AnalysisStrategy(tools, allow_personal=allow_personal,
+                                          on_summary_reference_failure=self._record_failure,
+                                          on_module_availability=self._record_module_availability if self.module_recorder else None)
+                         if strategy == "analysis" else None)
         self.analysis_context = None
         # 只保留上一轮已明确列出/选中的当前报告模块ID；不从加密问答正文猜指代。
         self.module_context = None
@@ -76,6 +81,8 @@ class Conversation:
     @staticmethod
     def _failure_route(selection=None, explicit_full=False):
         """把本轮失败定位到固定范围，不记录问题文本或所选模块名称。"""
+        if explicit_full:
+            return "full_report"
         if selection is not None and selection.matched and selection.module_ids:
             return "selected_modules"
         return "full_report" if explicit_full else "focused"
@@ -90,6 +97,15 @@ class Conversation:
             except Exception:
                 # 记录器自身异常同样中止本轮，不落回客户答案或再尝试明文日志。
                 raise HistoryError("本轮诊断记录保存失败。") from None
+
+    def _record_module_availability(self, route, availability):
+        """模块诊断与旧失败记录采用相同的加密写入失败边界。"""
+        try:
+            self.module_recorder(route, availability)
+        except HistoryError:
+            raise
+        except Exception:
+            raise HistoryError("本轮诊断记录保存失败。") from None
 
     def answer(self, question, client=None, model=None):
         """按策略生成一轮答案；只有加密保存成功才提交内存及追问上下文。
@@ -183,6 +199,9 @@ class Conversation:
                             answer = '请先明确本次要解读的模块范围，其他指标问题可以另外提问，避免遗漏。'
                     if selection.matched and selection.module_ids and answer is None:
                         next_module_context = selection.module_ids
+                        # 与分析策略采用相同范围：目录全选等于整份报告，失败也不能退为局部预览。
+                        current_ids = tuple(module['module_id'] for module in self.tools.current_modules())
+                        explicit_full = selection.module_ids == current_ids
                     if not selection.matched:
                         explicit_full = (is_report_overview(working_question)
                                          or explicitly_requests_overview(working_question))
@@ -216,6 +235,9 @@ class Conversation:
                 except PrivacyError:
                     self._record_failure("privacy_guard", self._failure_route(selection, explicit_full))
                     notice = "AI分析未完成。"
+                except HistoryError:
+                    # 私有诊断写失败时停止本轮，也不保存回答或再次写日志。
+                    raise
                 except Exception:
                     # SDK正文和模型协议异常只触发固定提示，不输出异常、不带原问题重试。
                     self._record_failure("unexpected", self._failure_route(selection, explicit_full))
@@ -227,7 +249,8 @@ class Conversation:
                         answer, context, notice = None, None, "AI分析未完成。"
         if answer is None and client is None and not local_command:
             self._record_failure("model_disabled", self._failure_route(selection, explicit_full))
-        if answer is None and selection is not None and selection.matched and selection.module_ids:
+        if (answer is None and not explicit_full and selection is not None
+                and selection.matched and selection.module_ids):
             # 仅展示本地重新核实的所选范围结果，不发布被拒绝的模型小结，也不增加模型重试。
             answer = selected_module_fallback(
                 self.tools, self.analysis.projection, selection,

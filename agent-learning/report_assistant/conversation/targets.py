@@ -5,7 +5,7 @@
 """
 
 import re
-from report_assistant.conversation.wording import metric_unit
+from report_assistant.conversation.wording import clear_unasked_reason, metric_unit
 
 from report_assistant.security.answer_validation import answer_numeric_content
 from report_assistant.security.text import normalized
@@ -379,6 +379,8 @@ class QuestionTargets:
         """只要求来源结果可见，不把区间的合理精度限制误当成整个字段缺失。"""
         if fact.get('status') != 'provided':
             return fact.get('status') in {'missing', 'null', 'empty', 'withheld'} and bool(_UNKNOWN.search(text))
+        # 完整原因补充说明的是另一个信息项，不能把它当成否认已经给出的核验结果。
+        text = clear_unasked_reason(text, '')
         if re.search(r'未提供|未显示|没(?:有)?查到|查不到|未查到|没有可确认|暂无可确认|(?:无法|不能|不能够)确认(?:具体)?(?:结果|次数|条数|机构数|状态|数值)?(?!精确)', text):
             # “显示区间，但无法确认精确值”是合法边界；“8次无法确认”仍是否认结果。
             limited = re.sub(r'(?:无法|不能)确认(?:具体的?)?(?:精确(?:值|金额|数值|收入|时间)?|准确(?:值|金额|数值|时间))', '', text)

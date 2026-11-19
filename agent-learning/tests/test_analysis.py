@@ -175,6 +175,38 @@ class ProjectionTests(support.NoExternalIO):
 
 
 class AnalysisTests(support.NoExternalIO):
+    def test_focused_suggests_human_only_when_mismatch_detail_is_requested_and_unresolved(self):
+        """只查结果不追加免责声明，追问且只有不一致结论时提示人工核实。"""
+        from support.overview import overview_tools
+        tools = overview_tools(count=1)
+        tools._catalog['fields'][0].update(name='手机号检测结果', path='report.BRS_BASIC_00009',
+                                           frontend_processing='实际条件为 value==1 || value==undefined')
+        tools._order['report_data']['report']['BRS_BASIC_00009'] = '0'
+        snapshot = LocalReportTools(tools._order, tools._catalog)
+        cause = '当前报告未说明具体不一致的原因。'
+        draft = '您的手机号检测结果为“不一致”，但报告未注明具体是哪项信息不一致，也未说明原因。'
+        result = '手机号检测结果为不一致。'
+        human = '具体情况请联系人工客服核实。'
+        for question, text, expected in (
+                ('说一下手机号检测结果', result + cause, result),
+                ('说一下手机号检测结果', draft, '您的手机号检测结果为“不一致”。'),
+                ('说一下手机号检测结果', result + '报告未注明原因。', result),
+                ('为什么手机号检测结果不一致', result + cause, result + human),
+                ('手机号检测哪一项不一致', result, result + human),
+                ('手机号检测哪一项不一致', draft, '您的手机号检测结果为“不一致”。' + human)):
+            with self.subTest(question=question):
+                conversation = Conversation(snapshot, strategy='analysis', allow_personal=True)
+                client = report_client(text=text)
+                self.assertEqual(conversation.answer(question, client, 'synthetic-model'), expected)
+
+    def test_mismatch_wording_preserves_specific_explanation_when_available(self):
+        """有具体核验说明的有效段落不加人工提示。"""
+        from report_assistant.conversation.wording import clear_unasked_reason
+        text = '手机号检测结果为不一致。核验记录显示，登记资料与留存资料不同。'
+        facts = [{'name': '手机号检测结果', 'status': 'provided', 'value': '不一致'},
+                 {'name': '核验说明', 'status': 'provided', 'value': '登记资料与留存资料不同'}]
+        self.assertEqual(clear_unasked_reason(text, '为什么手机号检测结果不一致', facts), text)
+
     def conversation(self, history=None):
         return Conversation(analysis_tools(), history, strategy="analysis")
 

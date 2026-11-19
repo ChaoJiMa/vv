@@ -47,13 +47,13 @@ class OverviewTests(support.NoExternalIO):
         answer = conversation.answer(question, client, "synthetic-model")
         return conversation, client, answer
 
-    def single_value_tools(self, value):
-        """重建单字段虚构报告，避免多个来源的零值掩盖总结阶段的状态丢失。"""
-        source = overview_tools(count=1)
+    def single_value_tools(self, value, count=1):
+        """调整首个虚构模块的结果，可保留其他模块用于验证整体总结。"""
+        source = overview_tools(count=count)
         source._order["report_data"]["report"]["item_0_0"] = value
         return LocalReportTools(source._order, source._catalog)
 
-    def test_missing_status_survives_into_summary_number_validation(self):
+    def test_all_missing_module_gives_human_review_without_model_summary(self):
         def mutate(stage, value, *_):
             if stage == "modules":
                 value["modules"][0]["text"] = "申请数据暂未提供，无法确认具体次数。"
@@ -61,9 +61,10 @@ class OverviewTests(support.NoExternalIO):
                 value["text"] = "申请数据暂未提供，不能按0次理解。"
             return value
         conversation, client, answer = self.run_overview(self.single_value_tools(None), OverviewClient(mutate))
-        self.assertIn("**整体总结**", answer)
-        self.assertIn("不能按0次理解", answer)
-        self.assertEqual(len(client.requests), 2)
+        self.assertIn("**测试模块A**\n具体情况请联系人工客服核实。", answer)
+        self.assertNotIn("暂未提供", answer)
+        self.assertNotIn("**整体总结**", answer)
+        self.assertEqual(len(client.requests), 1)
         self.assertIsNotNone(conversation.analysis_context)
 
     def test_missing_summary_cannot_add_affirmative_zero_or_unverified_amount(self):
@@ -75,7 +76,7 @@ class OverviewTests(support.NoExternalIO):
                     elif stage == "summary":
                         value["text"] = text
                     return value
-                _, _, answer = self.run_overview(self.single_value_tools(None), OverviewClient(mutate))
+                _, _, answer = self.run_overview(self.single_value_tools(None, count=2), OverviewClient(mutate))
                 self.assertIn("AI分析未完成", answer)
 
     def test_summary_numeric_failure_uses_remaining_single_retry(self):
@@ -138,7 +139,7 @@ class OverviewTests(support.NoExternalIO):
                         value['modules'][0]['text'] = '申请次数为8次，机构数为5家。'
                     elif stage == 'summary':
                         value['text'] = summary
-                        value['sources'] = payload['modules'][0]['sources'][:1]
+                        value['module_refs'] = [payload['modules'][0]['module_ref']]
                     return value
 
                 _, client, answer = self.run_overview(tools, OverviewClient(mutate))
@@ -574,6 +575,263 @@ class OverviewTests(support.NoExternalIO):
         self.assertIn("**整体总结**", answer)
         self.assertEqual(len(client.requests), 2)
 
+    def test_second_batch_structured_duration_is_inherited_only_if_displayed(self):
+        """列表中的确切时长经过实际投影与第二批小结后才能进入整体总结。"""
+        tools = overview_tools(count=9)
+        tools._catalog['fields'][-1]['name'] = '办理明细'
+        tools._order['report_data']['report']['item_8_0'] = [{'办理时长': '一个月'}]
+        tools = LocalReportTools(tools._order, tools._catalog)
+        for displayed in (True, False):
+            with self.subTest(displayed=displayed):
+                def mutate(stage, value, payload, request_index):
+                    if stage == 'modules' and request_index == 2 and displayed:
+                        value['modules'][0]['text'] = '办理时长为一个月。'
+                    elif stage == 'summary':
+                        value['text'] = '办理时长为一个月。'
+                        value['module_refs'] = [payload['modules'][-1]['module_ref']]
+                    return value
+                _, client, answer = self.run_overview(tools, OverviewClient(mutate), '分析每个模块')
+                self.assertEqual('**整体总结**' in answer, displayed)
+                self.assertEqual(len(client.requests), 3 if displayed else 4)
+
+    def test_application_gap_correction_preserves_zero_window_and_exact_metric(self):
+        """模型错误否认当前周期时用已投影的次数和机构数纠正，其他周期和分项保持独立。"""
+        tools = overview_tools(count=1, fields=4)
+        tools._order['report_data']['template']['modules'][0]['moduleName'] = '银行申请'
+        for index, (name, window, data) in enumerate((
+                ('申请次数(柱状图，按窗口)', '近7天', 0), ('申请机构数', '近7天', 0),
+                ('申请次数', '近15天', None), ('夜间申请次数', '近15天', 9))):
+            item = tools._catalog['fields'][index]
+            item.update(name=name, window=window, module_name='银行申请')
+            tools._order['report_data']['report'][f'item_0_{index}'] = data
+        snapshot = LocalReportTools(tools._order, tools._catalog)
+
+        def mutate(stage, value, *_):
+            if stage == 'modules':
+                value['modules'][0].update(text='近7天申请次数、机构数均未提供，无法确认具体次数和机构数。'
+                                               '近15天申请次数未提供。', sources=value['modules'][0]['sources'][2:])
+                # 模拟小结漏引有值统计时，仍须先用合法引用给该周期措辞背书。
+                value['modules'][0]['sources'].append('f1')
+            return value
+
+        _, client, answer = self.run_overview(snapshot, OverviewClient(mutate), '分析每个模块')
+        self.assertIn('近7天申请次数为0次，近7天申请机构数为0家', answer)
+        self.assertIn('近15天申请次数未提供', answer)
+        self.assertNotIn('9次', answer)
+        self.assertNotIn('均未提供', answer)
+        self.assertEqual(len(client.requests), 2)
+
+    def test_overview_keeps_phone_and_partial_performance_results(self):
+        """用正式事实投影纠正含糊短语，保留同句已经给出的案件情况。"""
+        tools = overview_tools(count=2)
+        for index, name in enumerate(('基本信息', '失信案件')):
+            tools._order['report_data']['template']['modules'][index]['moduleName'] = name
+            tools._catalog['fields'][index]['module_name'] = name
+        tools._catalog['fields'][0].update(name='手机号检测结果', path='report.BRS_BASIC_00009',
+                                           frontend_processing='实际条件为 value==1 || value==undefined')
+        tools._catalog['fields'][1].update(name='履行情况', path='report.DISHONEST_CASE_00001[].performance',
+            frontend_processing='原值传给页面或子组件；此表达式未添加占位或数值转换。')
+        tools._order['report_data']['report'].update(BRS_BASIC_00009=1,
+            DISHONEST_CASE_00001=[{'performance': '履行状态：已履行全部义务。'}, {}])
+        snapshot = LocalReportTools(tools._order, tools._catalog)
+        conversation = Conversation(snapshot, strategy='analysis', allow_personal=True)
+
+        def mutate(stage, value, payload, *_):
+            if stage == 'modules':
+                for row in value['modules']:
+                    row['text'] = ('报告列有失信案件；履行情况为空，暂时无法确认具体履行状态。'
+                                   if row['module_ref'] == payload['modules'][1]['module_ref']
+                                   else '手机号检测结果暂时无法确认。')
+            elif stage == 'summary':
+                value['text'] = '具体履行状态暂时无法确认，可关注已展示的结果。'
+            return value
+
+        answer = conversation.answer('分析每个模块', OverviewClient(mutate), 'synthetic-model')
+        self.assertIn('手机号检测结果为一致', answer)
+        self.assertIn('报告列有失信案件', answer)
+        self.assertIn('履行状态包括全部履行', answer)
+        self.assertIn('其余记录请联系人工客服核实', answer)
+        self.assertNotIn('暂时无法确认', answer)
+
+    def test_overview_nonbank_recovers_the_exact_referenced_windows(self):
+        """原值次数和机构数分别显示，缺一周期时不宣称所有周期相同。"""
+        for include_all in (True, False):
+            with self.subTest(include_all=include_all):
+                report, fields = {}, []
+                for code, window in zip(('D7', 'D15', 'M1', 'M3', 'M6', 'M12'),
+                                        ('近7天', '近15天', '近1月', '近3月', '近6月', '近1年')):
+                    report[f'NONE_BANK_APPLY_{code}_APPLY_ORG_COUNT'] = 0
+                    if include_all or code != 'M12':
+                        report[f'NONE_BANK_APPLY_{code}_APPLY_COUNT'] = 0
+                    for label, suffix, rule in (
+                        ('申请次数', 'COUNT', '按 近7天/近15天/近1月/近3月/近6月/近1年 顺序组成柱状图数据，取值原样不做分档'),
+                        ('申请机构数', 'ORG_COUNT', '原始数值直接展示，不做枚举或分档转换。'),
+                    ):
+                        fields.append({'module_id': 9, 'module_name': '非银行申请', 'name': label + '(柱状图，按窗口)',
+                                       'path': f'report.NONE_BANK_APPLY_{code}_APPLY_{suffix}',
+                                       'frontend_processing': rule, 'window': window})
+                order = {'report_id': 'synthetic', 'is_demo': True, 'report_data': {
+                    'report': report, 'template': {'theme': 2, 'modules': [
+                        {'moduleId': 9, 'moduleName': '非银行申请'}]}}}
+                scope = '近7天、近15天、近1月、近3月、近6月及近1年'
+
+                def mutate(stage, value, payload, *_):
+                    if stage == 'modules':
+                        orgs = [fact['field_ref'] for fact in payload['modules'][0]['facts']
+                                if fact['name'] == '申请机构数' and fact['status'] == 'provided']
+                        value['modules'][0].update(
+                            text=scope + '的非银行申请机构数均为0家；这些周期的申请次数暂时无法确认。',
+                            sources=orgs)
+                    return value
+
+                _, client, answer = self.run_overview(LocalReportTools(order, {'theme': 2, 'fields': fields}),
+                                                       OverviewClient(mutate))
+                self.assertIn(scope + '的非银行申请机构数均为0家', answer)
+                self.assertIn('这些周期的申请次数均为0次' if include_all
+                              else '近7天、近15天、近1月、近3月、近6月的申请次数为0次，'
+                                   '其余周期请联系人工客服核实', answer)
+                checked = json.loads(client.requests[-1]['messages'][-1]['content'])
+                self.assertNotIn('暂时无法确认', checked['modules'][0]['text'])
+
+    def test_overview_social_risk_retains_official_names_and_paired_statuses(self):
+        """使用报告每行状态，移除模型额外概括的疑似定性。"""
+        order = {'report_id': 'synthetic', 'is_demo': True, 'report_data': {
+            'report': {'xhyFraudModel': [{'tagName': '疑似测试甲', 'riskLevel': '命中'},
+                                        {'tagName': '疑似测试乙', 'riskLevel': '未命中'}]},
+            'template': {'theme': 2, 'modules': [{'moduleId': 8, 'moduleName': '社交风险'}]}}}
+        catalog = {'theme': 2, 'fields': [
+            {'module_id': 8, 'module_name': '社交风险', 'name': name, 'frontend_processing': '直接输出原值',
+             'path': 'report.xhyFraudModel[].' + key}
+            for name, key in (('风险程度', 'riskLevel'), ('风险标签', 'tagName'))
+        ]}
+
+        def mutate(stage, value, *_):
+            if stage == 'modules':
+                value['modules'][0]['text'] = '涉及测试甲和测试乙，均为命中，均为疑似标签。'
+            elif stage == 'summary':
+                value['text'] = ('疑似测试甲和疑似测试乙均为命中。'
+                                 '建议核对报告列出的社交风险结果，均为疑似标签。')
+            return value
+
+        _, client, answer = self.run_overview(LocalReportTools(order, catalog), OverviewClient(mutate))
+        self.assertIn('报告标记为“命中”的标签有疑似测试甲。', answer)
+        self.assertIn('报告标记为“未命中”的标签有疑似测试乙。', answer)
+        self.assertNotIn('均为疑似标签', answer)
+        self.assertNotIn('均为命中', answer)
+        self.assertIn('建议核对报告列出的社交风险结果。', answer)
+        summary = json.loads(client.requests[-1]['messages'][-1]['content'])
+        self.assertNotIn('均为命中', summary['modules'][0]['text'])
+
+        focused = Conversation(LocalReportTools(order, catalog), strategy='analysis').answer(
+            '社交风险有哪些标签？',
+            analysis.report_client(refs=('f1', 'f2'), text='疑似测试甲和疑似测试乙均为命中，均为疑似标签。'),
+            'synthetic-model')
+        self.assertIn('报告标记为“未命中”的标签有疑似测试乙。', focused)
+        self.assertNotIn('均为疑似标签', focused)
+
+        order['report_data']['report']['xhyFraudModel'][1].pop('riskLevel')
+        _, _, partial = self.run_overview(LocalReportTools(order, catalog), OverviewClient(mutate))
+        self.assertIn('报告标记为“命中”的标签有疑似测试甲。', partial)
+        self.assertIn('其他标签的状态请联系人工客服核实。', partial)
+        self.assertNotIn('测试乙均为命中', partial)
+
+    def test_audit_overview_checks_application_counts_against_the_claimed_window(self):
+        tools = overview_tools(count=1, fields=2)
+        order, catalog = deepcopy(tools._order), deepcopy(tools._catalog)
+        order['report_data']['template']['modules'][0]['moduleName'] = '非银行申请'
+        order['report_data']['report'].update(item_0_0=2, item_0_1=5)
+        for index, window in enumerate(('近7天', '近15天')):
+            catalog['fields'][index].update(module_name='非银行申请', name='申请次数', window=window)
+
+        def mutate(stage, value, *_):
+            if stage == 'modules':
+                value['modules'][0]['text'] = '近7天申请次数为5次，近15天申请次数为2次。'
+            elif stage == 'summary':
+                value['text'] = '近7天申请次数为5次，近15天申请次数为2次。'
+            return value
+
+        _, _, answer = self.run_overview(LocalReportTools(order, catalog), OverviewClient(mutate))
+        self.assertIn('近7天申请次数为2次，近15天申请次数为5次。', answer)
+        self.assertNotIn('近7天申请次数为5次', answer)
+
+    def test_audit_overview_does_not_repeat_an_unconfirmed_or_swapped_case_date(self):
+        tools = overview_tools(count=1, fields=2)
+        order, catalog = deepcopy(tools._order), deepcopy(tools._catalog)
+        order['report_data']['template']['modules'][0]['moduleName'] = '限高案件'
+        order['report_data']['report']['LIMITED_CONSUMPTION_00001'] = [
+            {'fileTime': '2024-02-18', 'issueTime': '2024-03-04'}]
+        for index, (name, field) in enumerate((('立案时间', 'fileTime'), ('发布时间', 'issueTime'))):
+            catalog['fields'][index].update(module_name='限高案件', name=name,
+                                            path='report.LIMITED_CONSUMPTION_00001[].' + field)
+
+        def mutate(stage, value, *_):
+            if stage == 'modules':
+                value['modules'][0]['text'] = '立案时间为2024-03-04，发布时间为2024-02-18。'
+            elif stage == 'summary':
+                value['text'] = '立案时间暂未提供。报告列有限高记录。'
+            return value
+
+        _, _, answer = self.run_overview(LocalReportTools(order, catalog), OverviewClient(mutate))
+        self.assertIn('立案时间为2024-02-18，发布时间为2024-03-04。', answer)
+        self.assertIn('报告列有限高记录。', answer)
+        self.assertNotIn('立案时间暂未提供', answer)
+
+    def test_overview_corrects_filled_performance_handoff_only_when_state_is_confirmed(self):
+        """保留同段案件事实，并验证带否定的自由说明仍需人工核实。"""
+        for source, separator, expected, should_refer in (
+            ('履行情况：已履行。', '，', '履行状态包括已履行', False),
+            ('履行状态：已履行完毕。', '。', '履行状态包括全部履行', False),
+            ('尚未全部履行', '，', '履行状态请联系人工客服核实', True),
+        ):
+            with self.subTest(source=source):
+                tools = overview_tools(count=1, fields=2)
+                tools._order['report_data']['template']['modules'][0]['moduleName'] = '失信案件'
+                tools._catalog['fields'][0].update(module_name='失信案件', name='履行情况',
+                    path='report.DISHONEST_CASE_00001[].performance', frontend_processing='直接输出原值')
+                tools._catalog['fields'][1].update(module_name='失信案件', name='发布时间',
+                    path='report.case_publication', frontend_processing='直接输出原值')
+                tools._order['report_data']['report'].update(DISHONEST_CASE_00001=[{'performance': source}],
+                                                             case_publication='2024-03-15')
+                snapshot = LocalReportTools(tools._order, tools._catalog)
+                case_result = '报告列有失信案件，发布时间为2024年3月15日'
+                review = '履行情况虽已填写，但内容无法明确说明实际履行状态' + separator + '建议联系人工客服核实'
+
+                def mutate(stage, value, *_):
+                    if stage == 'modules':
+                        value['modules'][0]['text'] = case_result + '；' + review + '。'
+                    elif stage == 'summary':
+                        value['text'] = review + '。'
+                    return value
+
+                _, _, answer = self.run_overview(snapshot, OverviewClient(mutate))
+                self.assertIn(case_result, answer)
+                self.assertIn(expected, answer)
+                self.assertNotIn(review, answer)
+                self.assertEqual('联系人工客服' in answer, should_refer)
+
+    def test_overview_removes_unasked_mismatch_explanations_from_module_and_summary(self):
+        """已知不一致时直接展示结论，独立的套话不占整体总结。"""
+        tools = overview_tools(count=1)
+        tools._catalog['fields'][0].update(name='手机号检测结果', path='report.BRS_BASIC_00009',
+                                           frontend_processing='实际条件为 value==1 || value==undefined')
+        tools._order['report_data']['report']['BRS_BASIC_00009'] = '0'
+        snapshot = LocalReportTools(tools._order, tools._catalog)
+        aside = '目前提供的信息未说明具体不一致的原因。'
+        for summary_text in (aside, '手机号检测结果为不一致，' + aside):
+            with self.subTest(summary_text=summary_text):
+                def mutate(stage, value, *_):
+                    if stage == 'modules':
+                        value['modules'][0]['text'] = aside
+                    elif stage == 'summary':
+                        value['text'] = summary_text
+                    return value
+
+                conversation = Conversation(snapshot, strategy='analysis', allow_personal=True)
+                answer = conversation.answer('分析每个模块', OverviewClient(mutate), 'synthetic-model')
+                self.assertIn('手机号检测结果为不一致。', answer)
+                self.assertNotIn('原因', answer)
+                self.assertEqual('**整体总结**' in answer, summary_text != aside)
+
     def test_template_order_is_preserved_despite_catalog_and_response_order(self):
         _, client, answer = self.run_overview(overview_tools(reverse=True))
         titles = ["**测试模块C**", "**测试模块B**", "**测试模块A**", "**整体总结**"]
@@ -651,8 +909,8 @@ class OverviewTests(support.NoExternalIO):
         answer = conversation.answer("分析下我的报告", client, "synthetic-model")
         self.assertIn("整体总结", answer)
         payload = json.loads(client.requests[-1]["messages"][-1]["content"])
-        self.assertTrue(all(set(m) == {"module_ref", "name", "text", "sources"} for m in payload["modules"]))
-        for marker in ("旧报告问题", "旧答案", "previous_question", '"value"', '"facts"'):
+        self.assertTrue(all(set(m) == {"module_ref", "name", "text"} for m in payload["modules"]))
+        for marker in ("旧报告问题", "旧答案", "previous_question", '"value"', '"facts"', '"field_ref"', '"sources"'):
             self.assertNotIn(marker, json.dumps(client.requests, ensure_ascii=False) if marker.startswith("旧") or marker == "previous_question" else json.dumps(payload))
 
     def test_semantic_overview_route_and_invalid_scope(self):
@@ -712,17 +970,51 @@ class OverviewTests(support.NoExternalIO):
         self.assertIn("AI分析未完成", answer)
         self.assertNotIn("总值为0", answer)
 
-    def test_summary_cannot_cite_a_field_not_used_in_module_text(self):
-        def mutate(stage, value, payload, index):
-            if stage == "modules":
-                for row in value["modules"]:
-                    row["sources"] = row["sources"][:1]
-            elif stage == "summary":
-                value["sources"] = ["f2"]
+    def test_bad_summary_references_only_keep_checked_module_summaries(self):
+        """缺失、空、旧字段引用和无效引用都不能显示草稿，也不丢已核验小结。"""
+        for refs in (None, [], 'm1', [None], ['m1', 'm9999'], ['f2']):
+            with self.subTest(refs=refs):
+                def mutate(stage, value, *args):
+                    if stage == 'summary':
+                        value['text'] = '不应展示的草稿999999次。'
+                        if refs is None:
+                            del value['module_refs']
+                            value['sources'] = ['f2']
+                        else:
+                            value['module_refs'] = refs
+                    return value
+                conversation, client, answer = self.run_overview(client=OverviewClient(mutate))
+                self.assertEqual(len(client.requests), 2)
+                self.assertIn('整体总结暂未生成', answer)
+                self.assertIn('**测试模块A**', answer)
+                self.assertIn('**测试模块C**', answer)
+                self.assertIsNotNone(conversation.analysis_context)
+                self.assertNotIn('**整体总结**', answer)
+                self.assertNotIn('不应展示的草稿', answer)
+
+    def test_repeated_summary_reference_is_deduplicated_without_retry(self):
+        def mutate(stage, value, *_):
+            if stage == 'summary':
+                value['module_refs'] *= 2
             return value
-        _, client, answer = self.run_overview(tools=overview_tools(count=1, fields=2), client=OverviewClient(mutate))
+        _, client, answer = self.run_overview(client=OverviewClient(mutate))
         self.assertEqual(len(client.requests), 2)
-        self.assertIn("AI分析未完成", answer)
+        self.assertIn('**整体总结**', answer)
+
+    def test_selected_summary_reference_cannot_expand_module_scope(self):
+        """选择部分模块时，无效的汇总引用只影响所选模块的汇总。"""
+        def mutate(stage, value, *_):
+            if stage == 'summary':
+                value['module_refs'] = ['m3']
+                value['text'] = '不应展示的总结。'
+            return value
+        _, client, answer = self.run_overview(client=OverviewClient(mutate), question='分析前两个模块')
+        self.assertEqual(len(client.requests), 2)
+        self.assertIn('**测试模块A**', answer)
+        self.assertIn('**测试模块B**', answer)
+        self.assertNotIn('**测试模块C**', answer)
+        self.assertIn('汇总暂未生成', answer)
+        self.assertNotIn('不应展示', answer)
 
     def test_module_and_summary_requests_reject_tool_calls(self):
         for attacked_request in (1, 2):

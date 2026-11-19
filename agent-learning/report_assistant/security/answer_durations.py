@@ -34,6 +34,8 @@ _PHONE_DURATION_NAMES = frozenset({
     '手机在网时长', '手机在网时间', '手机号在网时长', '手机号在网时间',
     '手机号码在网时长', '手机号码在网时间', '在网时长', '在网时间', '入网时长', '入网时间',
 })
+# 结构化明细只识别直接、明确的时长标签。备注、日期和通用数字字段不能提供时长。
+_STRUCTURED_DURATION_LABEL = re.compile(r'[\u4e00-\u9fff]{0,20}(?:时长|期限|用时|耗时)')
 # 受限phone声明帧只允许业务名词与功能词；电脑/贷款/其他实质词不能作为可忽略噪声。
 _PHONE_FRAME_WORD = re.compile(
     r'手机号码|手机号|运营商|在网|入网|网络|使用|开通|时长|时间|范围|区间|结果|下限|上限|多久|'
@@ -215,10 +217,65 @@ def _declared_duration_key(text, match, *, phone=False):
     return key
 
 
+def _structured_duration_matches(fact):
+    """从同一已提供字段的直接值或行对象提取完整时长，丢弃缺失或冲突的同名项。"""
+    value = fact.get('value')
+    if fact.get('status') != 'provided' or not isinstance(value, (list, dict)):
+        return []
+    outer = normalized(str(fact.get('name', '')))
+    outer_is_duration = bool(_STRUCTURED_DURATION_LABEL.fullmatch(outer))
+    rows = value if isinstance(value, list) else [value]
+    candidates = {}
+    for index, row in enumerate(rows):
+        fields = row.items() if isinstance(row, dict) else [(outer, row)] if outer_is_duration else ()
+        for name, raw in fields:
+            if not isinstance(name, str):
+                continue
+            name = normalized(name)
+            if name == 'duration' and outer_is_duration:
+                name = outer
+            if not _STRUCTURED_DURATION_LABEL.fullmatch(name):
+                continue
+            match = _DURATION.fullmatch(normalized(raw).strip()) if isinstance(raw, str) else None
+            key = _duration_key(match) if match and not match['verb'] else None
+            values, row_indexes = candidates.setdefault(name, ({}, set()))
+            values[key] = match
+            row_indexes.add(index)
+    return [(name, next(iter(values.values()))) for name, (values, row_indexes) in candidates.items()
+            if len(values) == 1 and None not in values and len(row_indexes) == len(rows)]
+
+
+def _raw_duration_entries(fact):
+    """返回（月数与边界、指标名称、是否要求严格具名）的来源角色。"""
+    if fact.get('status') in {'missing', 'null', 'empty', 'withheld'}:
+        return []
+    value, name = fact.get('value'), str(fact.get('name', ''))
+    if not isinstance(value, str):
+        return [(_duration_key(match), label, True) for label, match in _structured_duration_matches(fact)]
+    value = _normalize_duration_bound(normalized(value))
+    phone = name in _PHONE_DURATION_NAMES
+    entries = [(key, name, False) for match in _DURATION.finditer(value)
+               if (key := _declared_duration_key(value, match, phone=phone))]
+    if phone:
+        for match in _PHONE_INTERVAL.finditer(value):
+            if key := _phone_interval_value(match):
+                entries.extend((role, name, False) for role in _interval_roles(key))
+    return entries
+
+
+def _matches_named_duration(prefix, name, strict=False):
+    """结构化明细要求分句中完整命中标签，不能用同名后缀或省略主体借用。"""
+    if not strict:
+        context = _PHONE_DURATION_CONTEXT if name in _PHONE_DURATION_NAMES else re.escape(name)
+        return _duration_context_matches(prefix, context)
+    clause = re.split(r'[，,。；;!?！？\n]', prefix)[-1].strip()
+    return bool(re.fullmatch(re.escape(name) + _DURATION_PREDICATE, clause))
+
+
 def duration_source_roles(facts):
     """导出原字段的时长角色，供已展示小结收紧来源；不提供额外的展示数字。
 
-    返回ref到{name, keys}，单量key为[月数, 边界]，有限区间为[下端, 上端, interval]，
+    返回ref到{name, keys, structured}，列表里的具名时长保留独立绑定。单量key为[月数, 边界]，有限区间为[下端, 上端, interval]，
     并保留端点的lower/upper元角色。运营商等非时长字段保留空keys，
     调用方可按同一已核验小结的sources组装角色组，不能合并未引用的其他小结。
     """
@@ -227,17 +284,12 @@ def duration_source_roles(facts):
     for ref, fact in rows:
         if not ref:
             continue
-        name, value = str(fact.get('name', '')), fact.get('value')
-        keys = set()
-        if isinstance(value, str) and fact.get('status') not in {'missing', 'null', 'empty', 'withheld'}:
-            value = _normalize_duration_bound(normalized(value))
-            keys = {key for match in _DURATION.finditer(value)
-                    if (key := _declared_duration_key(value, match, phone=name in _PHONE_DURATION_NAMES))}
-            if name in _PHONE_DURATION_NAMES:
-                for match in _PHONE_INTERVAL.finditer(value):
-                    if key := _phone_interval_value(match):
-                        keys.update(_interval_roles(key))
-        result[ref] = {'name': name, 'keys': [list(key) for key in sorted(keys, key=str)]}
+        name = str(fact.get('name', ''))
+        entries = _raw_duration_entries(fact)
+        keys = {key for key, _, strict in entries if not strict}
+        result[ref] = {'name': name, 'keys': [list(key) for key in sorted(keys, key=str)],
+                       'structured': [{'name': label, 'keys': [list(key)], 'strict': True}
+                                      for key, label, strict in entries if strict]}
     return result
 
 
@@ -245,6 +297,10 @@ def _displayed_duration_roles(value, roles):
     """将小结中实际展示的时长绑定原指标，再与原key相交；同数值不能跨指标借用。"""
     if isinstance(roles, dict):
         roles = [roles]
+    if not isinstance(roles, (list, tuple)):
+        return []
+    roles = [candidate for role in roles if isinstance(role, dict)
+             for candidate in (role, *role.get('structured', ()))]
     candidates = []
     for role in roles if isinstance(roles, (list, tuple)) else ():
         if not isinstance(role, dict) or not isinstance(role.get('name'), str):
@@ -256,43 +312,44 @@ def _displayed_duration_roles(value, roles):
                 and (len(key) == 2 and key[1] in {'exact', 'lower', 'upper', 'strict_upper'}
                      or len(key) == 3 and isinstance(key[1], (int, float))
                      and key[0] < key[1] <= 1200 and key[2] == 'interval')}
-        candidate = role['name'], keys
+        candidate = role['name'], keys, role.get('strict') is True
         if keys and role['name'] and candidate not in candidates:
             candidates.append(candidate)
     entries = []
     for match in _PHONE_INTERVAL.finditer(value):
-        for name, keys in candidates:
-            if name not in _PHONE_DURATION_NAMES:
+        for name, keys, strict in candidates:
+            if strict or name not in _PHONE_DURATION_NAMES:
                 continue
             try:
                 key = _phone_interval_key(value, match, keys, allow_implicit=len(candidates) == 1)
             except PrivacyError:
                 continue
             if key:
-                entries.extend((role, name) for role in _interval_roles(key))
+                entries.extend((role, name, False) for role in _interval_roles(key))
     for match in _DURATION.finditer(value):
-        for name, keys in candidates:
-            phone = name in _PHONE_DURATION_NAMES
+        for name, keys, strict in candidates:
+            if strict and match['verb']:
+                continue
+            phone = not strict and name in _PHONE_DURATION_NAMES
             key = _declared_duration_key(value, match, phone=phone)
             try:
                 frame = (_phone_frame_key(value, match, keys, allow_implicit=len(candidates) == 1)
                          if phone else None)
-                context = _PHONE_DURATION_CONTEXT if phone else re.escape(name)
                 prefix = value[:match.start()]
                 if phone and key != _duration_key(match):
                     prefix = re.sub(r'(?:下限|上限)(?:为|是|[:：])?\s*[“\"「]?$', '', prefix)
-                proven = frame is not None or _duration_context_matches(prefix, context)
+                proven = frame is not None or _matches_named_duration(prefix, name, strict)
             except PrivacyError:
                 # 当前量可以属于同小结的另一指标；候选失败不能给其他角色添加授权。
                 continue
             if proven and (frame or key) in keys:
-                entries.append((frame or key, name))
-    for name, keys in candidates:
-        displayed = {key for key, role_name in entries if role_name == name}
+                entries.append((frame or key, name, strict))
+    for name, keys, strict in candidates:
+        displayed = {key for key, role_name, role_strict in entries if role_name == name and role_strict == strict}
         for key in keys:
             # 两端均已展示且原角色本来就是同一完整区间，才可复述完整区间；不能仅借同值。
             if len(key) == 3 and {(key[0], 'lower'), (key[1], 'upper')} <= displayed:
-                entries.append((key, name))
+                entries.append((key, name, strict))
     return entries
 
 
@@ -338,28 +395,23 @@ def _without_verified_duration(text, facts, *, duration_roles=None):
     sources, metric_roles = {}, set()
     for fact in facts:
         value = fact.get('value')
-        name = str(fact.get('name', ''))
-        if isinstance(value, str):
-            value = _normalize_duration_bound(normalized(value))
-            if duration_roles is not None:
-                entries = _displayed_duration_roles(value, duration_roles.get(fact.get('field_ref'), ()))
-            else:
-                entries = [(key, name) for match in _DURATION.finditer(value)
-                           if (key := _declared_duration_key(value, match, phone=name in _PHONE_DURATION_NAMES))]
-                if name in _PHONE_DURATION_NAMES:
-                    for match in _PHONE_INTERVAL.finditer(value):
-                        if key := _phone_interval_value(match):
-                            entries.extend((role, name) for role in _interval_roles(key))
-            for key, role_name in entries:
-                context = _PHONE_DURATION_CONTEXT if role_name in _PHONE_DURATION_NAMES else re.escape(role_name)
-                source = sources.setdefault(key, {'contexts': set(), 'phone_metric': False})
-                if context:
-                    source['contexts'].add(context)
-                    metric_roles.add(role_name)
-                if role_name in _PHONE_DURATION_NAMES:
-                    source['phone_metric'] = True
+        if duration_roles is None:
+            entries = _raw_duration_entries(fact)
+        elif isinstance(value, str):
+            entries = _displayed_duration_roles(_normalize_duration_bound(normalized(value)),
+                                                 duration_roles.get(fact.get('field_ref'), ()))
+        else:
+            entries = []
+        for key, role_name, strict in entries:
+            source = sources.setdefault(key, {'metrics': set(), 'phone_metric': False})
+            if role_name:
+                source['metrics'].add((role_name, strict))
+                metric_roles.add((role_name, strict))
+            if not strict and role_name in _PHONE_DURATION_NAMES:
+                source['phone_metric'] = True
     phone_keys = {key for key, source in sources.items() if source['phone_metric']}
-    implicit_phone = len(metric_roles) == 1 and next(iter(metric_roles), None) in _PHONE_DURATION_NAMES
+    implicit_phone = len(metric_roles) == 1 and any(not strict and name in _PHONE_DURATION_NAMES
+                                                    for name, strict in metric_roles)
 
     def replace_interval(match):
         key = _phone_interval_key(text, match, phone_keys, allow_implicit=implicit_phone)
@@ -378,13 +430,24 @@ def _without_verified_duration(text, facts, *, duration_roles=None):
         # 未登记的中文数量不靠截取末位数字“猜”时长；例如二十五年不能被当成五年。
         if not match['number'].isdecimal() and match['number'] not in _DURATION_NUMBERS:
             raise PrivacyError('回答包含无法核验的中文时长。')
+        prefix = text[:match.start()]
+        structured = {source_key for source_key, source in sources.items()
+                      if any(strict and _matches_named_duration(prefix, name, strict)
+                             for name, strict in source['metrics'])}
+        if structured:
+            # 同名引用若提供不同边界或数值，不能用单一时长概括。保留具名要求后再允许换算。
+            if structured != {key} or match['verb']:
+                raise PrivacyError('回答改变了同指标时长来源的数值或范围边界。')
+            previous = match.end(), key, False
+            return '[已核验时长]'
         frame_key = _phone_frame_key(text, match, phone_keys, allow_implicit=implicit_phone)
         if frame_key is not None:
             previous = match.end(), frame_key, True
             return '[已核验phone时长]'
         # 完整检查同指标来源，不因其他字段恰有3而放过“在网至少三年”。
         scoped = {source_key for source_key, source in sources.items()
-                  if any(_duration_context_matches(text[:match.start()], context) for context in source['contexts'])}
+                  if any(not strict and _matches_named_duration(prefix, name)
+                         for name, strict in source['metrics'])}
         equivalent = previous is not None and re.fullmatch(
             r'[”"」]*[，,、]?\s*' + _DURATION_DISCOURSE + r'\s*',
             text[previous[0]:match.start()])

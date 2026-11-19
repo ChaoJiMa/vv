@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import sqlite3
 
+from report_assistant.security.module_diagnostics import valid_module_availability
+
 
 # 诊断内容只允许封闭类别；不接受问题、答案、报告号或异常字符串作为字段。
 DIAGNOSTIC_REASONS = frozenset({
@@ -160,14 +162,40 @@ class HistoryStore:
                 "stage": validation.stage, "batch": validation.batch, "position": validation.position,
                 "subreason": subreason,
             }
+            if validation.diagnostic_evidence is not None:
+                from report_assistant.security.validation_diagnostics import valid_evidence
+                if not valid_evidence(validation.diagnostic_evidence, VALIDATION_CODES,
+                                      OverviewValidationError.DURATION_SUBREASONS.values()):
+                    raise HistoryError("诊断证据格式无效。")
+                detail['evidence'] = validation.diagnostic_evidence
         return {
-            "version": 2, "time": datetime.now(timezone.utc).isoformat(),
+            "version": 3 if detail is not None and 'evidence' in detail else 2,
+            "time": datetime.now(timezone.utc).isoformat(),
             "reason": reason, "route": route, "validation": detail, "status_code": status_code,
         }
 
     def append_diagnostic(self, reason, route, validation=None, *, status_code=None):
         """在独立事务中先加密并持久化失败原因；失败时停止本轮，绝不写明文备用。"""
         record = self._validated_diagnostic(reason, route, validation, status_code)
+        self._append_diagnostic_record(record)
+
+    def append_module_diagnostic(self, route, availability):
+        """在展示回答前记录模块数据缺口；与失败诊断使用相同的独立加密表。"""
+        if route not in ("full_report", "selected_modules") or not valid_module_availability(availability):
+            raise HistoryError("模块取值诊断内容无效。")
+        modules = availability["modules"]
+        if any("restriction_dates" in module for module in modules):
+            version = 6
+        else:
+            version = 5 if any("performance" in module for module in modules) else 4
+        self._append_diagnostic_record({
+            "version": version, "time": datetime.now(timezone.utc).isoformat(),
+            "reason": "module_availability", "route": route, "validation": None,
+            "status_code": None, "availability": availability,
+        })
+
+    def _append_diagnostic_record(self, record):
+        """把已完成白名单校验的记录加密后写入诊断表。"""
         try:
             encoded = json.dumps(record, ensure_ascii=False).encode("utf-8")
             encrypted = self._protector.encrypt(encoded)
@@ -188,29 +216,41 @@ class HistoryStore:
                 "SELECT payload FROM diagnostics ORDER BY id DESC LIMIT ?", (limit,))
             for (payload,) in rows:
                 item = json.loads(self._protector.decrypt(payload).decode("utf-8"))
-                if (not isinstance(item, dict) or set(item) != {
-                        "version", "time", "reason", "route", "validation", "status_code"}
-                        or type(item["version"]) is not int or item["version"] not in (1, 2)
+                availability_event = isinstance(item, dict) and item.get("version") in (4, 5, 6)
+                keys = {"version", "time", "reason", "route", "validation", "status_code"}
+                if availability_event:
+                    keys.add("availability")
+                if (not isinstance(item, dict) or set(item) != keys
+                        or type(item["version"]) is not int or item["version"] not in (1, 2, 3, 4, 5, 6)
                         or not isinstance(item["time"], str)
                         or len(item["time"]) > 40 or not isinstance(item["reason"], str)
-                        or item["reason"] not in DIAGNOSTIC_REASONS
                         or not isinstance(item["route"], str) or item["route"] not in DIAGNOSTIC_ROUTES):
-                    raise HistoryError("诊断内容格式错误，已停止读取。")
-                status_code = item["status_code"]
-                if status_code is not None and (item["reason"] != "service" or type(status_code) is not int
-                                                or not 100 <= status_code <= 599):
                     raise HistoryError("诊断内容格式错误，已停止读取。")
                 timestamp = datetime.fromisoformat(item["time"])
                 if timestamp.isoformat() != item["time"] or timestamp.utcoffset() != timezone.utc.utcoffset(None):
                     raise HistoryError("诊断内容格式错误，已停止读取。")
                 validation = item["validation"]
+                status_code = item["status_code"]
+                if availability_event:
+                    if (item["reason"] != "module_availability" or item["route"] not in ("full_report", "selected_modules")
+                            or validation is not None or status_code is not None
+                            or not valid_module_availability(item["availability"], version=item["version"])):
+                        raise HistoryError("模块取值诊断内容无效，已停止读取。")
+                    records.append(item)
+                    continue
+                if (item["reason"] not in DIAGNOSTIC_REASONS
+                        or status_code is not None and (item["reason"] != "service" or type(status_code) is not int
+                                                        or not 100 <= status_code <= 599)):
+                    raise HistoryError("诊断内容格式错误，已停止读取。")
                 if validation is not None:
                     from report_assistant.conversation.overview import OverviewValidationError
                     allowed = set(OverviewValidationError.REASONS.values())
                     allowed.add(("validation", "结构或正文未通过校验"))
                     keys = {"code", "detail", "stage", "batch", "position"}
-                    if item["version"] == 2:
+                    if item["version"] >= 2:
                         keys.add("subreason")
+                    if item['version'] == 3:
+                        keys.add('evidence')
                     if (not isinstance(validation, dict)
                             or set(validation) != keys
                             or item["reason"] != "answer" or not isinstance(validation["code"], str)
@@ -222,7 +262,7 @@ class HistoryStore:
                             or type(validation["batch"]) is not int or not 0 <= validation["batch"] <= 1000
                             or type(validation["position"]) is not int or not 0 <= validation["position"] <= 12):
                         raise HistoryError("诊断内容格式错误，已停止读取。")
-                    if item["version"] == 2:
+                    if item["version"] >= 2:
                         # 新版本必须为时长类提供固定子码；旧版无此字段，原样兼容读取。
                         subreason = validation["subreason"]
                         needs_subreason = (validation["code"], validation["detail"]) == (
@@ -231,6 +271,13 @@ class HistoryStore:
                                 or subreason not in OverviewValidationError.DURATION_SUBREASONS.values()
                                 if needs_subreason else subreason is not None):
                             raise HistoryError("诊断内容格式错误，已停止读取。")
+                    if item['version'] == 3:
+                        from report_assistant.security.validation_diagnostics import valid_evidence
+                        if not valid_evidence(validation['evidence'], VALIDATION_CODES,
+                                              OverviewValidationError.DURATION_SUBREASONS.values()):
+                            raise HistoryError("诊断证据格式无效，已停止读取。")
+                elif item['version'] == 3:
+                    raise HistoryError("诊断证据缺失，已停止读取。")
                 records.append(item)
         except (OSError, sqlite3.Error, TypeError, ValueError, UnicodeError):
             raise HistoryError("本地诊断读取失败。") from None

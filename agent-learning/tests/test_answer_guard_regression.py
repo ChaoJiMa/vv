@@ -486,6 +486,29 @@ class AnswerGuardRegressionTests(unittest.TestCase):
             with self.subTest(text=text):
                 check_answer_numbers(text, facts)
 
+    def test_structured_duration_uses_only_explicit_consistent_cited_labels(self):
+        """明细中的同名时长可复述，备注、相邻字段和混合记录不能当成统一时长。"""
+        def fact(value, name='办理时长', status='provided'):
+            return {'field_ref': 'f1', 'name': name, 'status': status, 'value': value}
+
+        for source in (fact(['一个月']), fact([{'duration': '一个月'}]),
+                       fact({'办理时长': '一个月'}, '办理明细'),
+                       fact([{'办理时长': '一个月'}, {'办理时长': '1个月'}], '办理明细')):
+            with self.subTest(source=source):
+                check_answer_numbers('办理时长为一个月。', [source])
+        for source in (fact([{'备注': '一个月'}]), fact([{'办理时长': '近一个月'}]),
+                       fact([{'办理时长': '一个月'}, {'办理时长': '两个月'}]),
+                       fact([{'办理时长': '一个月'}, {'备注': '未登记'}]),
+                       fact({'duration': '一个月'}, '办理明细'), fact(['一个月'], status='withheld')):
+            with self.subTest(source=source), self.assertRaises(PrivacyError):
+                check_answer_numbers('办理时长为一个月。', [source])
+        source = fact([{'办理时长': '至少一个月'}], '办理明细')
+        check_answer_numbers('办理时长为一个月以上。', [source])
+        for answer in ('办理时长为一个月。', '其他办理时长为至少一个月。',
+                       '贷款期限为至少一个月。', '办理时长至少两个月。'):
+            with self.subTest(answer=answer), self.assertRaises(PrivacyError):
+                check_answer_numbers(answer, [source])
+
     def test_cited_calendar_year_range_is_not_a_duration_interval(self):
         """逐字引用同一字段的四位年份期间，不应被当成“2年到3年”的持续时长。"""
         fact = {'name': '案件期间', 'status': 'provided', 'value': '2021年到2022年'}

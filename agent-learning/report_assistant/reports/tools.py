@@ -229,7 +229,7 @@ class LocalReportTools:
         """仅在当前报告内计算已登记评分的展示规则，模板原文始终留在本地。"""
         return describe_score(field, value, self._order["report_data"]["template"], safe_label)
 
-    def display_value(self, field, value, present, redact):
+    def display_value(self, field, value, present, redact, *, on_unsupported_rule=None):
         """在已绑定报告内补齐固定显示依赖，先过滤个人信息，只返回页面可见结果。
 
         只有当前模板已登记字段可发起转换；依赖路径由本地已核实组件声明，
@@ -250,7 +250,7 @@ class LocalReportTools:
                 return UNCONFIRMED
             dependencies[path] = safe
         return display_field(field, value, present, dependencies=dependencies,
-                             modules=self.current_modules(), theme=self.theme)
+                             modules=self.current_modules(), theme=self.theme, on_unsupported_rule=on_unsupported_rule)
 
     def current_modules(self):
         """按当前报告模板的数组顺序返回模块；名称优先使用本地字段资料。
@@ -359,6 +359,25 @@ class LocalReportTools:
         if not all(isinstance(path, str) and path in allowed for path in field_paths):
             raise ValueError("只能读取当前报告模板已登记的字段路径。")
         return [{"path": path, **read_report_path(self._order["report_data"], path)} for path in field_paths]
+
+    def module_block_state(self, module_id, fields):
+        """仅检查登记为独立数字键的模块容器状态，返回固定类别。"""
+        root = f'report[{module_id}]'
+        # 只有本模块登记路径全都指向同一个容器时才能判断；平铺或组合字段不猜根节点。
+        if not fields or not all(field['path'].startswith((root + '.', root + '['))
+                                 and '|' not in field['path'] for field in fields):
+            return 'not_applicable'
+        raw = read_report_path(self._order['report_data'], root)
+        if not raw['present']:
+            return 'missing'
+        value = raw['value']
+        if value is None:
+            return 'null'
+        if value == '':
+            return 'empty'
+        if not isinstance(value, (dict, list)):
+            return 'unexpected_type'
+        return 'present' if value else 'empty_collection'
 
     def render(self, fields, operation="both"):
         """在本地生成字段值与规则说明；多个候选时只列出选项，等待 /pick。

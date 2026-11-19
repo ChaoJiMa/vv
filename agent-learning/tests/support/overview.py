@@ -48,7 +48,7 @@ class OverviewClient:
         else:
             stage = "summary"
             value = {"text": "综合各模块，主要可关注申请记录及周期变化，未提供的信息仍需进一步核对。",
-                     "sources": payload["modules"][0]["sources"]}
+                     "module_refs": [payload["modules"][0]["module_ref"]]}
         if self.mutate:
             value = self.mutate(stage, value, payload, len(self.requests))
         return analysis.response(json.dumps(value, ensure_ascii=False))

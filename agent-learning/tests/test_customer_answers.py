@@ -166,7 +166,8 @@ class CustomerAnswerTests(support.NoExternalIO):
                     else:
                         row["text"] = "可结合报告中的申请记录了解近期情况。"
             elif stage == "summary":
-                value.update(text="报告分数是70分，处于一般区间。", sources=["f1"])
+                score_summary = next(row for row in payload['modules'] if '70分' in row['text'])
+                value.update(text="报告分数是70分，处于一般区间。", module_refs=[score_summary['module_ref']])
             return value
         tools = score_tools(69.5)
         answer = Conversation(tools, strategy="analysis").answer("分析下我的报告", overview.OverviewClient(mutate), "synthetic-model")

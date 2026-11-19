@@ -18,7 +18,7 @@ def field(path, rule, enum='', mid=9, name='展示结果'):
             'frontend_processing': rule, 'enum_mapping': enum}
 
 
-def projection_with(report, fields):
+def projection_with(report, fields, *, allow_personal=False):
     """将虚构字段绑定到启用模块，走正式过滤与投影链路。"""
     order, catalog = support.fixtures(61)
     order['report_data']['report'].update(deepcopy(report))
@@ -29,7 +29,7 @@ def projection_with(report, fields):
             existing.add(item['module_id'])
     catalog['fields'].extend(deepcopy(fields))
     tools = LocalReportTools(order, catalog)
-    return FactProjection(tools, QuestionGuard(tools))
+    return FactProjection(tools, QuestionGuard(tools, allow_personal=allow_personal))
 
 
 def read_path(projection, path):
@@ -84,6 +84,63 @@ class DisplayRuleTests(support.NoExternalIO):
                 self.assertEqual(display_field(item, None), '')
                 self.assertEqual(display_field(item, 99), '')
 
+    def test_mobile_checks_use_registered_rules_and_keep_missing_separate(self):
+        """原数字与页面判定存在不同口径，真正的空值不产生一致结论。"""
+        item = field('report.BRS_BASIC_00009', '实际条件为 value==1 || value==undefined', name='手机号检测结果')
+        for value, expected in ((1, '一致'), ('1', '一致'), (0, '一致'), (False, '一致'),
+                                ('0', '不一致'), (' ', '不一致'), ({'code': 1}, UNCONFIRMED),
+                                ('', ''), (None, None)):
+            with self.subTest(value=value):
+                self.assertEqual(display_field(item, value), expected)
+        projection = projection_with({'BRS_BASIC_00009': 1}, [item], allow_personal=True)
+        fact = read_path(projection, item['path'])
+        self.assertEqual((fact['status'], fact['value']), ('provided', '一致'))
+        for report, expected in (({}, 'missing'), ({'BRS_BASIC_00009': None}, 'null'),
+                                 ({'BRS_BASIC_00009': ''}, 'empty')):
+            fact = read_path(projection_with(report, [item], allow_personal=True), item['path'])
+            self.assertEqual(fact['status'], expected)
+            self.assertNotIn('value', fact)
+        kx = field('report.module_kx_basic_c.mobileCheckResult', '仅严格布尔false判身份证不一致')
+        self.assertEqual(display_field(kx, False), '不一致')
+        self.assertEqual(display_field(kx, 0), '一致')
+        shop = field('report.wangDianThreeElementModel.data.result', '与200宽松相等时展示姓名一致')
+        self.assertEqual(display_field(shop, '200'), '一致')
+        self.assertEqual(display_field(shop, 201), '不一致')
+
+    def test_performance_projection_normalizes_closed_states_without_matching_substrings(self):
+        item = field('report.DISHONEST_CASE_00001[].performance', '直接输出原值', name='履行情况')
+        examples = {
+            '已履行。': '已履行',
+            '履行情况：已履行全部义务。': '全部履行',
+            '履行状态: 部分义务已履行.': '部分履行',
+            '尚未履行': '未履行',
+            '正在履行': '履行中',
+            '尚未全部履行': '尚未全部履行',
+            '已履行？': '已履行?',
+            '已履行。待核实': '已履行。待核实',
+            '执行完毕': '执行完毕',
+            '********': '********',
+        }
+        rows = [{'performance': value} for value in examples]
+        projection = projection_with({'DISHONEST_CASE_00001': rows}, [item])
+        ref = next(ref for ref, metadata in projection.fields.items() if metadata['local']['path'] == item['path'])
+        fact, = projection.read([ref])
+        self.assertEqual([row['value'] for row in fact['value']], list(examples.values()))
+        self.assertEqual(fact['detail_coverage'], 'complete')
+
+    def test_performance_projection_separates_empty_arrays_empty_items_and_partial_status(self):
+        """列表有位置不代表履行状态已填写，保留部分有值时的逐条证据。"""
+        item = field('report.DISHONEST_CASE_00001[].performance',
+                     '原值传给页面或子组件；此表达式未添加占位或数值转换。', name='履行情况')
+        for rows, state, coverage in (([], 'empty', 'no_records'),
+                                      ([{}, {'performance': None}, {'performance': '——'}], 'empty', 'unreported'),
+                                      ([{}, {'performance': '全部履行'}], 'provided', 'partial'),
+                                      ([{'performance': '全部履行'}], 'provided', 'complete')):
+            with self.subTest(coverage=coverage):
+                fact = read_path(projection_with({'DISHONEST_CASE_00001': rows}, [item]), item['path'])
+                self.assertEqual((fact['status'], fact['detail_coverage']), (state, coverage))
+                self.assertEqual('value' in fact, state == 'provided')
+
     def test_combined_application_uses_both_fields_and_adapter_numeric_addition(self):
         path = 'report.NONE_BANK_APPLY_M1_APPLY_P2P_COUNT'
         item = field(path, 'QT 与 P2P 两个字段直接用 JavaScript + 相加')
@@ -97,6 +154,48 @@ class DisplayRuleTests(support.NoExternalIO):
         self.assertEqual(read_path(projection, path)['value'], 5)
         with self.assertRaises(ValueError):
             projection.tools.display_value(field('report.secret', '直接输出原值'), 'x', True, lambda v, *_: v)
+
+    def test_nonbank_chart_counts_keep_zero_and_original_absence_states(self):
+        """六个总次数字段按展示口径提供，区分零、空白、null 和未返回。"""
+        rule = '按 近7天/近15天/近1月/近3月/近6月/近1年 顺序组成柱状图数据，取值原样不做分档'
+        slots = (
+            ('D7', '近7天', 0, 'provided', 0), ('D15', '近15天', '0', 'provided', 0),
+            ('M1', '近1月', '3.0', 'provided', 3), ('M3', '近3月', MISSING, 'missing', None),
+            ('M6', '近6月', None, 'null', None), ('M12', '近1年', '', 'empty', None),
+        )
+        fields, report = [], {}
+        for code, window, value, _, _ in slots:
+            key = f'NONE_BANK_APPLY_{code}_APPLY_COUNT'
+            item = field('report.' + key, rule, name='申请次数(柱状图，按窗口)')
+            item.update(module_name='非银行申请', window=window)
+            fields.append(item)
+            if value is not MISSING:
+                report[key] = value
+        projection = projection_with(report, fields)
+        for item, (_, window, _, expected_status, expected_value) in zip(fields, slots):
+            with self.subTest(window=window):
+                fact = read_path(projection, item['path'])
+                self.assertEqual((fact['name'], fact['window'], fact['status']),
+                                 ('申请次数', window, expected_status))
+                if expected_status == 'provided':
+                    self.assertEqual(fact['value'], expected_value)
+                else:
+                    self.assertNotIn('value', fact)
+
+    def test_nonbank_chart_rule_only_handles_registered_scalar_count_fields(self):
+        """相同底层值的档位、机构数及分项有各自的显示规则。"""
+        rule = '按 近7天/近15天/近1月/近3月/近6月/近1年 顺序组成柱状图数据，取值原样不做分档'
+        path = 'report.NONE_BANK_APPLY_D7_APPLY_COUNT'
+        item = field(path, rule, mid=146)
+        self.assertEqual(display_field(item, 0), 0)
+        for invalid in (False, -1, 1.5, float('inf'), '未提供', {'present': True, 'value': 1}):
+            with self.subTest(value=invalid):
+                self.assertIs(display_field(item, invalid), UNCONFIRMED)
+        self.assertIs(display_field(field(path, rule, mid=58), 0), UNCONFIRMED)
+        gear = field(path, '档位模块：经 getGear(窗口码, 原值)', mid=58)
+        self.assertEqual(display_field(gear, 0), '1档')
+        for key in ('D7_APPLY_ORG_COUNT', 'D7_APPLY_QT_COUNT', 'D30_APPLY_COUNT'):
+            self.assertIs(display_field(field('report.NONE_BANK_APPLY_' + key, rule), 0), UNCONFIRMED)
 
     def test_combined_gear_exposes_only_gear_not_combined_exact_value(self):
         item = field('report.NONE_BANK_APPLY_D7_APPLY_QT_COUNT', 'QT 与 P2P 两个字段；档位展示经 getGear(D7, 原值)', mid=58)

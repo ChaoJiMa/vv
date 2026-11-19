@@ -58,7 +58,7 @@ class ModuleContextTests(NoExternalIO):
         self.assertIn('可确定的模块范围', conversation.answer('分析这些模块', client, 'synthetic-model'))
         self.assertEqual(client.requests, [])
 
-    def test_numeric_failure_after_catalog_previews_only_bounded_verified_scope(self):
+    def test_numeric_failure_after_full_catalog_keeps_atomic_full_scope(self):
         def mutate(stage, value, payload, count):
             if stage == 'modules':
                 value['modules'][3]['text'] = '申请次数为999次。'
@@ -69,13 +69,28 @@ class ModuleContextTests(NoExternalIO):
         client = OverviewClient(mutate)
         answer = conversation.answer('给我分析下这些模块', client, 'synthetic-model')
         self.assertIn('分析暂未完成', answer)
-        self.assertIn('其余2个所选模块本次未展示', answer)
+        self.assertIn('整体分析暂未完成', answer)
+        self.assertNotIn('本次未展示', answer)
+        self.assertNotIn('详细解读请稍后再试', answer)
         self.assertNotIn('999', answer)
         self.assertNotIn('请说明具体指标和周期', answer)
         self.assertNotIn('**测试模块I**', answer)
         self.assertEqual(len(client.requests), 2)
         self.assertIsNone(conversation.analysis_context)
         self.assertEqual(conversation.module_context, tuple(range(20, 30)))
+
+    def test_full_selection_offline_has_no_partial_preview(self):
+        """全目录位置选择与目录指代在离线失败时也保持整份范围。"""
+        for question in ('分析前十个模块', '给我分析下这些模块，怎么退款'):
+            with self.subTest(question=question):
+                conversation = self.conversation(count=10)
+                conversation.answer('目前有哪些模块', ScriptClient([]), 'synthetic-model')
+                answer = conversation.answer(question)
+                self.assertIn('整体分析暂未完成', answer)
+                self.assertNotIn('本次未展示', answer)
+                self.assertNotIn('**测试模块', answer)
+                if '退款' in question:
+                    self.assertIn('退款', answer)
 
     def test_explicit_full_failure_uses_full_scope_clarification_without_partial_draft(self):
         def mutate(stage, value, payload, count):

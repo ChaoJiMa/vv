@@ -7,6 +7,7 @@
 import math
 import re
 from decimal import Decimal, ROUND_HALF_UP
+from report_assistant.security.redaction import REDACTED
 
 
 UNCONFIRMED = object()
@@ -66,6 +67,41 @@ def _enum(field):
     return {int(m[1]): m[2] for m in pairs}
 
 
+def _mobile_check_formatter(path, rule):
+    """匹配固定目录中的手机号检测规则，保留缺失语义及各版本一致性口径。"""
+    if path == 'report.BRS_BASIC_00009' and rule.startswith('实际条件为 value==1'):
+        matches = lambda value: js_number(value) == 1 or type(value) in (int, float, bool) and value == 0
+    elif path in {'report.module_kx_basic.mobileCheckResult', 'report.module_kx_basic_default.mobileCheckResult',
+                  'report.module_kx_basic_c.mobileCheckResult', 'report.module_kx_basic_pro.mobileCheckResult'} and rule.startswith('仅严格布尔'):
+        matches = lambda value: value is not False
+    elif path == 'report.wangDianThreeElementModel.data.result' and rule.startswith(('与200宽松相等', 'adapter：threeElementOk = (result == 200)')):
+        matches = lambda value: js_number(value) == 200
+    else:
+        return None
+
+    def display(value):
+        # 页面有用空值默认显示一致的分支。客服需要有真实检测值才复述结果。
+        if value is MISSING or value is None or value == '':
+            return value
+        if isinstance(value, str) and REDACTED in value:
+            return UNCONFIRMED
+        if type(value) not in (str, int, float, bool) or type(value) is float and not math.isfinite(value):
+            return UNCONFIRMED
+        return '一致' if matches(value) else '不一致'
+    return display
+
+
+def _raw_application_count(value):
+    """只保留可展示的非负整数次数及原有缺失状态。"""
+    if value is None or value == '':
+        return value
+    if isinstance(value, str):
+        return value if re.fullmatch(r'[0-9]+(?:\.0+)?', value.strip()) else UNCONFIRMED
+    if type(value) is int or type(value) is float and value.is_integer():
+        return value if value >= 0 else UNCONFIRMED
+    return UNCONFIRMED
+
+
 def _formatter(field):
     """将白名单规则编译为叶子显示函数；未支持的组合规则整项关闭。"""
     rule = str(field.get("frontend_processing", ""))
@@ -74,6 +110,9 @@ def _formatter(field):
     # 多候选、拼接与条件显示要核对全部依赖，单个叶子不能代表最终页面内容。
     if "|" in path or rule.startswith(("QT 与", "仅 abnormalBehavior", "仅 scenarios", "仅scenarios")):
         return None
+    mobile_check = _mobile_check_formatter(path, rule)
+    if mobile_check is not None:
+        return mobile_check
     if path == 'report.BRS_BASIC_00002' and '男' in enum and '女' in enum:
         return lambda v: '男' if v is not MISSING and v is not None and js_number(v) == 1 else '女' if v is not MISSING and v is not None and js_number(v) == 0 else ''
     if rule.startswith(('页面 A() 宽松相等映射后展示', '页面 C() 宽松相等映射后展示', '页面 D() 宽松相等映射后展示')):
@@ -288,7 +327,7 @@ def _case_numbers(field, value):
     return result
 
 
-def display_field(field, value, present=True, *, dependencies=None, modules=(), theme=None):
+def display_field(field, value, present=True, *, dependencies=None, modules=(), theme=None, on_unsupported_rule=None):
     """返回页面可见值，未知规则返回哨兵；数组逐项转换且不携带候选路径。
 
     数组读取器的present/value包装保留位置，避免某条缺失与下一条错位。
@@ -347,8 +386,15 @@ def display_field(field, value, present=True, *, dependencies=None, modules=(), 
             item is not None and js_number(item) == module['module_id'] for item in value)]
     if rule.startswith('caseNo ?? c_ah ?? ah'):
         return _case_numbers(field, value)
+    if (mid in (9, 146) and not field.get('enum_mapping')
+            and re.fullmatch(r'report\.NONE_BANK_APPLY_(?:D7|D15|M1|M3|M6|M12)_APPLY_COUNT', path)
+            and rule.startswith('按 近7天/近15天/近1月/近3月/近6月/近1年 顺序组成柱状图数据，取值原样不做分档')):
+        # 六个总次数是独立标量，不能套用数组包装或模块58复用同路径的档位展示。
+        return _raw_application_count(value) if present and value is not MISSING else None
     formatter = _formatter(field)
     if formatter is None:
+        if on_unsupported_rule is not None:
+            on_unsupported_rule()
         return UNCONFIRMED
 
     def convert(child):

@@ -104,7 +104,7 @@ class NaturalAnswerTests(support.NoExternalIO):
                  'f2': {'value': 24, 'name': '贷款期限', 'status': 'provided'},
                  'f3': {'value': 8, 'name': '申请次数', 'status': 'provided'}}
         rows = ReportOverview._key_facts(modules, sections, facts)
-        self.assertEqual(['f1'], [r['field_ref'] for r in rows])
+        self.assertEqual(['m1'], [r['module_ref'] for r in rows])
         self.assertEqual('次', rows[0]['unit'])
         self.assertNotIn('value', rows[0])
 

@@ -86,7 +86,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                 self.assertEqual(payloads[-1]["scope"]["module_count"], count)
                 self.assertEqual(len(client.requests), len(sizes) + 1)
 
-    def test_fixed_snapshot_six_scope_leaks_become_local_missing_notes(self):
+    def test_fixed_snapshot_six_scope_leaks_become_local_human_review(self):
         for case, rejected_text in SNAPSHOT_SCOPE_TEXTS.items():
             with self.subTest(case=case):
                 def replay(stage, value, payload, _):
@@ -100,10 +100,8 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                 self.assertIn("**整体总结**", answer)
                 self.assertNotIn(rejected_text, answer)
                 checked = self.payloads(client)[-1]["modules"]
-                education = next(m["text"] for m in checked if m["name"] == "学历信息")
-                self.assertIn("暂未提供", education)
-                self.assertNotIn("整体", education)
-                self.assertEqual(len(checked), 9)
+                self.assertNotIn("学历信息", [m["name"] for m in checked])
+                self.assertIn("**学历信息**\n具体情况请联系人工客服核实。", answer)
                 self.assertEqual(self.payloads(client)[-2]["scope"]["module_count"], 9)
 
     def test_missing_last_module_never_hides_earlier_confirmed_results(self):
@@ -116,11 +114,14 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                             row["text"] = "整体来看，本模块可概括已提供的信息。"
                     return value
                 _, client, answer = self.run_overview(tools, mutate)
-                self.assertIn("**整体总结**", answer)
+                self.assertIn("具体情况请联系人工客服核实。", answer)
                 checked = self.payloads(client)[-1]
                 self.assertEqual(checked["scope"]["confirmed_module_count"], count - 1)
-                self.assertIn("暂未提供", checked["modules"][-1]["text"])
-                self.assertEqual(len(checked["modules"]), count)
+                if count == 1:
+                    self.assertNotIn("**整体总结**", answer)
+                else:
+                    self.assertIn("**整体总结**", answer)
+                    self.assertEqual(len(checked["modules"]), count - 1)
 
     def test_multiple_missing_modules_across_batches_keep_their_own_notes(self):
         changes = {i: (None if i % 2 else "", "直接输出原值") for i in (1, 7, 8, 15, 16)}
@@ -128,15 +129,16 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
         self.assertIn("**整体总结**", answer)
         checked = self.payloads(client)[-1]
         self.assertEqual(checked["scope"]["confirmed_module_count"], 12)
-        self.assertEqual(sum("具体信息暂未提供" in m["text"] for m in checked["modules"]), 5)
-        self.assertEqual(len(checked["modules"]), 17)
+        self.assertEqual(answer.count("具体情况请联系人工客服核实。"), 5)
+        self.assertEqual(len(checked["modules"]), 12)
+        self.assertEqual(answer.count("**测试模块"), 17)
 
     def test_withheld_is_not_reported_as_missing(self):
         _, client, answer = self.run_overview(status_tools(9, {8: ("待确认展示值", "未知转换")}))
         self.assertIn("**整体总结**", answer)
-        checked = self.payloads(client)[-1]["modules"][-1]["text"]
-        self.assertIn("暂无法确认", checked)
-        self.assertNotIn("暂未提供", checked)
+        self.assertIn("**测试模块I**\n具体情况请联系人工客服核实。", answer)
+        self.assertNotIn("暂未提供", answer)
+        self.assertNotIn("测试模块I", [m["name"] for m in self.payloads(client)[-1]["modules"]])
         self.assertEqual(self.payloads(client)[-1]["scope"]["confirmed_module_count"], 8)
 
     def test_mixed_missing_and_withheld_note_preserves_both_states(self):
@@ -145,10 +147,10 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
         order["report_data"]["report"]["item_0_0"] = None
         catalog["fields"][1]["frontend_processing"] = "未知转换"
         _, client, answer = self.run_overview(LocalReportTools(order, catalog))
-        self.assertIn("**整体总结**", answer)
-        text = self.payloads(client)[-1]["modules"][0]["text"]
-        self.assertIn("部分信息暂未提供", text)
-        self.assertIn("其余展示结果暂无法确认", text)
+        self.assertIn("**测试模块A**\n具体情况请联系人工客服核实。", answer)
+        self.assertNotIn("**整体总结**", answer)
+        facts = self.payloads(client)[0]["modules"][0]["facts"]
+        self.assertEqual([fact["status"] for fact in facts], ["null", "withheld"])
 
     def test_provided_zero_and_partial_unknown_keep_confirmed_module_text(self):
         source = overview_tools(count=1, fields=2)
@@ -303,14 +305,13 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
         _, _, answer = self.run_overview(overview_tools(count=1), mutate)
         self.assertIn("AI分析未完成", answer)
 
-    def test_actual_global_information_shortage_is_allowed_only_in_summary(self):
-        def mutate(stage, value, *_):
-            if stage == "summary":
-                value["text"] = "目前提供的报告内容不足以作进一步总结。"
-            return value
+    def test_all_missing_modules_keep_their_positions_without_a_model_summary(self):
         changes = {i: (None, "直接输出原值") for i in range(9)}
-        _, client, answer = self.run_overview(status_tools(9, changes), mutate)
-        self.assertIn("**整体总结**", answer)
+        _, client, answer = self.run_overview(status_tools(9, changes))
+        self.assertNotIn("**整体总结**", answer)
+        self.assertEqual(answer.count("具体情况请联系人工客服核实。"), 9)
+        self.assertNotIn("暂未提供", answer)
+        self.assertEqual([p["scope"]["stage"] for p in self.payloads(client)], ["modules", "modules"])
         self.assertEqual(self.payloads(client)[-1]["scope"]["confirmed_module_count"], 0)
 
     def test_local_missing_replacement_still_rejects_cross_module_sources(self):
@@ -383,7 +384,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                 def mutate(stage, value, payload, _):
                     if stage == "summary":
                         section = next(m for m in payload["modules"] if m["name"] == source_name)
-                        value["sources"] = section["sources"]
+                        value["module_refs"] = [section["module_ref"]]
                         value["text"] = "该手机号的业务使用情况已有说明。"
                     return value
                 _, _, answer = self.run_overview(phone_bank_tools(), mutate)
@@ -400,7 +401,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                         row["text"] = "该手机号的业务使用情况已有说明。"
             elif stage == "summary":
                 section = next(m for m in payload["modules"] if m["name"] == "手机在网")
-                value["sources"] = section["sources"]
+                value["module_refs"] = [section["module_ref"]]
                 value["text"] = "该手机号在网时长为24个月以上。"
             return value
         _, _, answer = self.run_overview(phone_bank_tools(), mutate)
@@ -430,7 +431,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                                 row["text"] = module_text
                     elif stage == "summary":
                         section = next(m for m in payload["modules"] if m["name"] == "手机在网")
-                        value["sources"] = section["sources"]
+                        value["module_refs"] = [section["module_ref"]]
                         value["text"] = summary_text
                     return value
                 _, _, answer = self.run_overview(phone_bank_tools(), mutate)
@@ -447,7 +448,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                         row["text"] = "手机在网时长为24个月以上，贷款期限为36个月。"
             elif stage == "summary":
                 section = next(m for m in payload["modules"] if m["name"] == "手机在网")
-                value["sources"] = section["sources"]
+                value["module_refs"] = [section["module_ref"]]
                 value["text"] = summary
             return value
         _, _, answer = self.run_overview(phone_loan_tools(), mutate)
@@ -465,7 +466,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                                 row["text"] = "手机在网时长为24个月以上，贷款期限为36个月。"
                     elif stage == "summary":
                         section = next(m for m in payload["modules"] if m["name"] == "手机在网")
-                        value["sources"] = section["sources"]
+                        value["module_refs"] = [section["module_ref"]]
                         value["text"] = summary
                     return value
                 _, _, answer = self.run_overview(phone_loan_tools(), mutate)
@@ -484,7 +485,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                                 row["text"] = "运营商显示为虚构运营商，贷款期限至少24个月。"
                     elif stage == "summary":
                         section = next(m for m in payload["modules"] if m["name"] == "手机在网")
-                        value["sources"] = section["sources"]
+                        value["module_refs"] = [section["module_ref"]]
                         value["text"] = summary
                     return value
                 _, _, answer = self.run_overview(phone_loan_tools("24个月以上"), mutate)
@@ -492,11 +493,9 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                 if not accepted:
                     self.assertIn("AI分析未完成", answer)
 
-    def test_summary_isp_reference_can_represent_the_checked_phone_source_group(self):
-        """总结只收到不透明sources数组，不应要求模型猜其中哪个引用是min字段。"""
+    def test_summary_module_reference_represents_the_checked_phone_source_group(self):
+        """总结选定已核验小结，程序在本地绑定小结实际引用的全部字段。"""
         tools = phone_bank_tools()
-        strategy = AnalysisStrategy(tools)
-        isp = next(ref for ref, field in strategy.projection.fields.items() if field["local"]["path"].endswith(".isp"))
         def mutate(stage, value, payload, _):
             if stage == "modules":
                 refs = {m["module_ref"] for m in payload["modules"] if m["name"] == "手机在网"}
@@ -504,20 +503,17 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                     if row["module_ref"] in refs:
                         row["text"] = "手机在网时长为24个月以上，运营商显示为虚构运营商。"
             elif stage == "summary":
-                value["sources"] = [isp]
+                value["module_refs"] = [m["module_ref"] for m in payload["modules"] if m["name"] == "手机在网"]
                 value["text"] = "手机在网时长至少24个月。"
             return value
         _, _, answer = self.run_overview(tools, mutate)
         self.assertIn("**整体总结**", answer)
         self.assertIn("手机在网时长至少24个月", answer)
 
-    def test_summary_sibling_reference_uses_only_its_own_checked_source_group(self):
-        """同小结引用可代表该小结；其他模块的银行引用不能继承phone语境或时长。"""
+    def test_summary_selected_module_uses_only_its_own_checked_source_group(self):
+        """选中银行小结不能继承手机小结的语境或时长。"""
         tools = phone_loan_tools()
-        strategy = AnalysisStrategy(tools)
-        refs = {name: next(ref for ref, field in strategy.projection.fields.items()
-                          if field["local"]["path"].endswith("." + name)) for name in ("loan_term", "bank_M1_count")}
-        for source_name, accepted in (("loan_term", True), ("bank_M1_count", False)):
+        for source_name, accepted in (("手机在网", True), ("银行申请", False)):
             with self.subTest(source_name=source_name):
                 def mutate(stage, value, payload, _):
                     if stage == "modules":
@@ -526,7 +522,7 @@ class OverviewScopeRegressionTests(support.NoExternalIO):
                             if row["module_ref"] in phone_refs:
                                 row["text"] = "手机在网时长为24个月以上，运营商显示为虚构运营商。"
                     elif stage == "summary":
-                        value["sources"] = [refs[source_name]]
+                        value["module_refs"] = [m["module_ref"] for m in payload["modules"] if m["name"] == source_name]
                         value["text"] = "该手机号在网时长至少24个月。"
                     return value
                 _, _, answer = self.run_overview(tools, mutate)

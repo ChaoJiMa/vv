@@ -151,7 +151,7 @@ class ReportScopeTests(support.NoExternalIO):
                          "sources": [fact["field_ref"] for fact in item["facts"]]} for item in modules]
                 return analysis.response(json.dumps({"modules": rows}, ensure_ascii=False))
             return analysis.response(json.dumps({"text": "已结合各模块提供的信息归纳，具体情况需结合对应记录理解。",
-                                                  "sources": modules[0]["sources"]}, ensure_ascii=False))
+                                                  "module_refs": [item['module_ref'] for item in modules]}, ensure_ascii=False))
 
         client = NS(chat=NS(completions=NS(create=create)))
         answer = Conversation(LocalReportTools(*scope_fixture()), strategy="analysis").answer("分析我的报告", client, "synthetic-model")

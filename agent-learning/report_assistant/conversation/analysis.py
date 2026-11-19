@@ -21,8 +21,11 @@ from report_assistant.conversation.analysis_protocol import (
     BUDGET_INSTRUCTION, MIXED_INSTRUCTION, TARGET_INSTRUCTION,
     TARGET_FACTS_INSTRUCTION, PROTOCOL_STRINGS, encode, strict_json, AnalysisContext,
 )
-from report_assistant.conversation.wording import natural_missing_text
-from report_assistant.conversation.questions import is_report_overview
+from report_assistant.conversation.wording import (
+    SOCIAL_RISK_HUMAN_REVIEW, SOCIAL_RISK_TAG_PATH, SOCIAL_RISK_LEVEL_PATH, clear_unasked_reason,
+    correct_social_risk_summary, natural_missing_text, remove_social_risk_qualification,
+)
+from report_assistant.conversation.questions import is_report_overview, normalize
 from report_assistant.conversation.data_policy import personal_protocol
 from report_assistant.conversation.local_intents import explicitly_requests_overview, split_catalog_request, catalog_answer
 from report_assistant.conversation.module_selection import select_modules
@@ -34,10 +37,13 @@ from report_assistant.conversation.overview import MAX_MODULES, OVERVIEW_PROTOCO
 class AnalysisStrategy:
     """每轮独立执行，返回答案与待提交上下文；持久化由Conversation负责。"""
 
-    def __init__(self, tools, *, allow_personal=False):
+    def __init__(self, tools, *, allow_personal=False, on_summary_reference_failure=None, on_module_availability=None):
+        """注入可选的本地汇总失败与模块取值诊断回调。"""
         self.tools = tools
         self.guard = QuestionGuard(tools, allow_personal=allow_personal)
         self.projection = FactProjection(tools, self.guard)
+        self.on_summary_reference_failure = on_summary_reference_failure
+        self.on_module_availability = on_module_availability
 
     def _request(self, client, model, messages, tools=None, json_mode=False, overview=False):
         """唯一的新策略网络出口，检查实际消息且只重建被允许的SDK参数。"""
@@ -199,7 +205,8 @@ class AnalysisStrategy:
         if module_ids is None and len(self.tools.current_modules()) > MAX_MODULES:
             raise AnalysisFailure("budget", route="full_report")
         overview = ReportOverview(self.tools, self.projection, self._check_text, strict_json,
-                                  check_sourced_text=self._check_sourced_text, module_ids=module_ids)
+                                  check_sourced_text=self._check_sourced_text, module_ids=module_ids,
+                                  collect_availability=self.on_module_availability is not None)
 
         def request(messages):
             """复合问题每批与整体总结均限定只答报告，业务说明统一由本地追加。"""
@@ -220,6 +227,11 @@ class AnalysisStrategy:
                                   route="selected_modules" if module_ids is not None else "full_report") from None
         except PrivacyError:
             raise AnalysisFailure("answer", route="selected_modules" if module_ids is not None else "full_report") from None
+        route = 'selected_modules' if module_ids is not None else 'full_report'
+        if overview.summary_reference_failure is not None and self.on_summary_reference_failure is not None:
+            self.on_summary_reference_failure('answer', route, overview.summary_reference_failure)
+        if overview.availability:
+            self.on_module_availability(route, {'theme': self.tools.theme, 'modules': overview.availability})
         return answer, AnalysisContext(question, refs)
 
     def _report(self, question, client, model, previous, mixed=False, targets=None):
@@ -312,7 +324,7 @@ class AnalysisStrategy:
                 text_checker(text)
         return sections
 
-    def _render(self, content, facts):
+    def _render(self, content, facts, *, question=''):
         """内部校验来源及数字，只展示客服正文；单个评分段落使用核实后的完整说明。"""
         sections = self._validated_sections(content, facts)
         parts = []
@@ -329,6 +341,26 @@ class AnalysisStrategy:
                 # 单评分由本地短答保证显示分数和实际等级，不补充内部计算过程。
                 text = facts[sources[0]]["presentation"]["answer"]
                 self._check_text(text)
-            if text.strip() not in parts:
-                parts.append(text.strip())
+            # 原草稿先通过安全、引用和数字校验，避免删句掩盖无效内容。
+            cited = [facts[ref] for ref in sources]
+            # 多段可能另有原因说明，单个检测段不能据局部缺口替整轮建议人工核实。
+            cleaned = clear_unasked_reason(text, question, cited, suggest_human=len(sections) == 1).strip()
+            paths = {ref: self.projection.fields[ref]['local']['path'] for ref in sources
+                     if ref in self.projection.fields}
+            social_paths = {SOCIAL_RISK_TAG_PATH, SOCIAL_RISK_LEVEL_PATH}
+            if social_paths.intersection(paths.values()):
+                if (set(paths.values()) == social_paths
+                        and re.fullmatch(r'(?:报告(?:的)?)?社交风险(?:有哪些标签|都有哪些标签|标签有哪些|标签及状态是什么)',
+                                         normalize(question))):
+                    cleaned, _ = correct_social_risk_summary(
+                        cleaned, {ref: facts[ref] for ref in paths}, paths, self.guard.label)
+                else:
+                    cleaned = remove_social_risk_qualification(cleaned) or SOCIAL_RISK_HUMAN_REVIEW
+            if cleaned and cleaned not in parts:
+                if cleaned != text.strip():
+                    self._check_sourced_text(cleaned, cited)
+                    check_answer_numbers(cleaned, cited)
+                parts.append(cleaned)
+        if not parts:
+            raise PrivacyError('回答没有可展示的结论。')
         return ("【演示数据】\n" if self.tools.is_demo else "") + "\n\n".join(parts)
